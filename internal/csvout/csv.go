@@ -1,6 +1,7 @@
 package csvout
 
 import (
+	"compress/gzip"
 	"crypto/sha256"
 	"encoding/csv"
 	"encoding/hex"
@@ -43,6 +44,25 @@ type FileAudit struct {
 	Rows   int
 	Bytes  int64
 	SHA256 string
+}
+
+type CSVStats struct {
+	Path              string
+	Format            string
+	Compressed        bool
+	Columns           []string
+	Rows              int
+	FirstTimestamp    time.Time
+	LastTimestamp     time.Time
+	HasTimestamp      bool
+	DuplicateRows     int
+	DuplicateStamps   int
+	OutOfOrderRows    int
+	GapCount          int
+	MissingIntervals  int
+	ExpectedInterval  string
+	LargestGap        string
+	InferredTimeframe string
 }
 
 func BarColumnsForProfile(profile Profile) []string {
@@ -111,20 +131,20 @@ func BarColumnsNeedBidAsk(columns []string) bool {
 }
 
 func WriteBars(outputPath string, instrument dukascopy.Instrument, columns []string, primaryBars []dukascopy.Bar, bidBars []dukascopy.Bar, askBars []dukascopy.Bar) error {
+	if isParquetPath(outputPath) {
+		return writeBarsParquet(outputPath, instrument, columns, primaryBars, bidBars, askBars)
+	}
 	if err := ensureParentDir(outputPath); err != nil {
 		return err
 	}
 
-	file, err := os.Create(outputPath)
+	_, csvWriter, closeWriter, err := createCSVWriter(outputPath)
 	if err != nil {
 		return err
 	}
-	defer file.Close()
+	defer closeWriter()
 
-	writer := csv.NewWriter(file)
-	defer writer.Flush()
-
-	if err := writer.Write(columns); err != nil {
+	if err := csvWriter.Write(columns); err != nil {
 		return err
 	}
 
@@ -143,12 +163,12 @@ func WriteBars(outputPath string, instrument dukascopy.Instrument, columns []str
 				}
 				record = append(record, value)
 			}
-			if err := writer.Write(record); err != nil {
+			if err := csvWriter.Write(record); err != nil {
 				return err
 			}
 		}
 
-		return writer.Error()
+		return csvWriter.Error()
 	}
 
 	for _, bar := range primaryBars {
@@ -160,29 +180,77 @@ func WriteBars(outputPath string, instrument dukascopy.Instrument, columns []str
 			}
 			record = append(record, value)
 		}
-		if err := writer.Write(record); err != nil {
+		if err := csvWriter.Write(record); err != nil {
 			return err
 		}
 	}
 
-	return writer.Error()
+	return csvWriter.Error()
+}
+
+func WriteBarsToWriter(w io.Writer, instrument dukascopy.Instrument, columns []string, primaryBars []dukascopy.Bar, bidBars []dukascopy.Bar, askBars []dukascopy.Bar) error {
+	csvWriter := csv.NewWriter(w)
+	defer csvWriter.Flush()
+
+	if err := csvWriter.Write(columns); err != nil {
+		return err
+	}
+
+	if BarColumnsNeedBidAsk(columns) {
+		rows, err := combineBarRows(bidBars, askBars)
+		if err != nil {
+			return err
+		}
+
+		for _, row := range rows {
+			record := make([]string, 0, len(columns))
+			for _, column := range columns {
+				value, valueErr := formatBarColumn(column, instrument.PriceScale, row.Bid, row.Ask)
+				if valueErr != nil {
+					return valueErr
+				}
+				record = append(record, value)
+			}
+			if err := csvWriter.Write(record); err != nil {
+				return err
+			}
+		}
+
+		return csvWriter.Error()
+	}
+
+	for _, bar := range primaryBars {
+		record := make([]string, 0, len(columns))
+		for _, column := range columns {
+			value, err := formatPrimaryBarColumn(column, instrument.PriceScale, bar)
+			if err != nil {
+				return err
+			}
+			record = append(record, value)
+		}
+		if err := csvWriter.Write(record); err != nil {
+			return err
+		}
+	}
+
+	return csvWriter.Error()
 }
 
 func WriteTicks(outputPath string, instrument dukascopy.Instrument, columns []string, ticks []dukascopy.Tick) error {
+	if isParquetPath(outputPath) {
+		return writeTicksParquet(outputPath, instrument, columns, ticks)
+	}
 	if err := ensureParentDir(outputPath); err != nil {
 		return err
 	}
 
-	file, err := os.Create(outputPath)
+	_, csvWriter, closeWriter, err := createCSVWriter(outputPath)
 	if err != nil {
 		return err
 	}
-	defer file.Close()
+	defer closeWriter()
 
-	writer := csv.NewWriter(file)
-	defer writer.Flush()
-
-	if err := writer.Write(columns); err != nil {
+	if err := csvWriter.Write(columns); err != nil {
 		return err
 	}
 
@@ -195,12 +263,37 @@ func WriteTicks(outputPath string, instrument dukascopy.Instrument, columns []st
 			}
 			record = append(record, value)
 		}
-		if err := writer.Write(record); err != nil {
+		if err := csvWriter.Write(record); err != nil {
 			return err
 		}
 	}
 
-	return writer.Error()
+	return csvWriter.Error()
+}
+
+func WriteTicksToWriter(w io.Writer, instrument dukascopy.Instrument, columns []string, ticks []dukascopy.Tick) error {
+	csvWriter := csv.NewWriter(w)
+	defer csvWriter.Flush()
+
+	if err := csvWriter.Write(columns); err != nil {
+		return err
+	}
+
+	for _, tick := range ticks {
+		record := make([]string, 0, len(columns))
+		for _, column := range columns {
+			value, valueErr := formatTickColumn(column, instrument.PriceScale, tick)
+			if valueErr != nil {
+				return valueErr
+			}
+			record = append(record, value)
+		}
+		if err := csvWriter.Write(record); err != nil {
+			return err
+		}
+	}
+
+	return csvWriter.Error()
 }
 
 func WriteBarsAtomic(outputPath string, instrument dukascopy.Instrument, columns []string, primaryBars []dukascopy.Bar, bidBars []dukascopy.Bar, askBars []dukascopy.Bar) error {
@@ -230,6 +323,9 @@ func WriteTicksAtomic(outputPath string, instrument dukascopy.Instrument, column
 }
 
 func AssembleCSVFromParts(outputPath string, partPaths []string, from time.Time, to time.Time) error {
+	if isParquetPath(outputPath) {
+		return assembleParquetFromCSVParts(outputPath, partPaths, from, to)
+	}
 	if len(partPaths) == 0 {
 		return fmt.Errorf("no partition files were provided for assembly")
 	}
@@ -248,8 +344,7 @@ func AssembleCSVFromParts(outputPath string, partPaths []string, from time.Time,
 	if err != nil {
 		return err
 	}
-
-	writer := csv.NewWriter(target)
+	csvWriter := csv.NewWriter(target)
 	headerWritten := false
 	var header []string
 	timestampIndex := -1
@@ -282,7 +377,7 @@ func AssembleCSVFromParts(outputPath string, partPaths []string, from time.Time,
 				target.Close()
 				return fmt.Errorf("partition file %s does not contain a timestamp column", partPath)
 			}
-			if err := writer.Write(header); err != nil {
+			if err := csvWriter.Write(header); err != nil {
 				file.Close()
 				target.Close()
 				return err
@@ -334,7 +429,7 @@ func AssembleCSVFromParts(outputPath string, partPaths []string, from time.Time,
 				continue
 			}
 
-			if err := writer.Write(record); err != nil {
+			if err := csvWriter.Write(record); err != nil {
 				file.Close()
 				target.Close()
 				return err
@@ -346,8 +441,8 @@ func AssembleCSVFromParts(outputPath string, partPaths []string, from time.Time,
 		file.Close()
 	}
 
-	writer.Flush()
-	if err := writer.Error(); err != nil {
+	csvWriter.Flush()
+	if err := csvWriter.Error(); err != nil {
 		target.Close()
 		return err
 	}
@@ -359,14 +454,19 @@ func AssembleCSVFromParts(outputPath string, partPaths []string, from time.Time,
 }
 
 func ExtractCSVRange(sourcePath string, outputPath string, from time.Time, to time.Time) error {
-	source, err := os.Open(sourcePath)
+	if isParquetPath(sourcePath) {
+		return extractRangeFromParquet(sourcePath, outputPath, from, to)
+	}
+	if isParquetPath(outputPath) {
+		return extractRangeCSVToParquet(sourcePath, outputPath, from, to)
+	}
+	_, csvReader, closeReader, err := openCSVReader(sourcePath)
 	if err != nil {
 		return err
 	}
-	defer source.Close()
+	defer closeReader()
 
-	reader := csv.NewReader(source)
-	header, err := reader.Read()
+	header, err := csvReader.Read()
 	if err != nil {
 		return err
 	}
@@ -382,37 +482,36 @@ func ExtractCSVRange(sourcePath string, outputPath string, from time.Time, to ti
 	}
 	defer os.Remove(tempPath)
 
-	target, err := os.Create(tempPath)
+	_, csvWriter, closeWriter, err := createCSVWriter(tempPath)
 	if err != nil {
 		return err
 	}
 
-	writer := csv.NewWriter(target)
-	if err := writer.Write(header); err != nil {
-		target.Close()
+	if err := csvWriter.Write(header); err != nil {
+		closeWriter()
 		return err
 	}
 
 	for {
-		record, readErr := reader.Read()
+		record, readErr := csvReader.Read()
 		if errors.Is(readErr, io.EOF) {
 			break
 		}
 		if readErr != nil {
-			target.Close()
+			closeWriter()
 			return readErr
 		}
 		if len(record) == 0 {
 			continue
 		}
 		if timestampIndex >= len(record) {
-			target.Close()
+			closeWriter()
 			return fmt.Errorf("source CSV %s contains a malformed row", sourcePath)
 		}
 
 		timestamp, err := time.Parse(timestampLayout, record[timestampIndex])
 		if err != nil {
-			target.Close()
+			closeWriter()
 			return fmt.Errorf("parse source CSV timestamp %q: %w", record[timestampIndex], err)
 		}
 		timestamp = timestamp.UTC()
@@ -420,18 +519,18 @@ func ExtractCSVRange(sourcePath string, outputPath string, from time.Time, to ti
 			continue
 		}
 
-		if err := writer.Write(record); err != nil {
-			target.Close()
+		if err := csvWriter.Write(record); err != nil {
+			closeWriter()
 			return err
 		}
 	}
 
-	writer.Flush()
-	if err := writer.Error(); err != nil {
-		target.Close()
+	csvWriter.Flush()
+	if err := csvWriter.Error(); err != nil {
+		closeWriter()
 		return err
 	}
-	if err := target.Close(); err != nil {
+	if err := closeWriter(); err != nil {
 		return err
 	}
 
@@ -439,6 +538,9 @@ func ExtractCSVRange(sourcePath string, outputPath string, from time.Time, to ti
 }
 
 func AuditCSV(path string) (FileAudit, error) {
+	if isParquetPath(path) {
+		return auditParquet(path)
+	}
 	file, err := os.Open(path)
 	if err != nil {
 		return FileAudit{}, err
@@ -451,7 +553,18 @@ func AuditCSV(path string) (FileAudit, error) {
 	}
 
 	hasher := sha256.New()
-	reader := csv.NewReader(io.TeeReader(file, hasher))
+	rawReader := io.TeeReader(file, hasher)
+	readCloser := io.NopCloser(rawReader)
+	if isGzipPath(path) {
+		gzipReader, err := gzip.NewReader(rawReader)
+		if err != nil {
+			return FileAudit{}, err
+		}
+		readCloser = gzipReader
+	}
+	defer readCloser.Close()
+
+	reader := csv.NewReader(readCloser)
 	if _, err := reader.Read(); err != nil {
 		if errors.Is(err, io.EOF) {
 			return FileAudit{Bytes: info.Size(), SHA256: hex.EncodeToString(hasher.Sum(nil))}, nil
@@ -479,6 +592,109 @@ func AuditCSV(path string) (FileAudit, error) {
 		Bytes:  info.Size(),
 		SHA256: hex.EncodeToString(hasher.Sum(nil)),
 	}, nil
+}
+
+func InspectCSV(path string) (CSVStats, error) {
+	if isParquetPath(path) {
+		return inspectParquet(path)
+	}
+	_, reader, closeReader, err := openCSVReader(path)
+	if err != nil {
+		return CSVStats{}, err
+	}
+	defer closeReader()
+
+	header, err := reader.Read()
+	if err != nil {
+		return CSVStats{}, err
+	}
+
+	stats := CSVStats{
+		Path:       path,
+		Format:     "csv",
+		Compressed: isGzipPath(path),
+		Columns:    cloneColumns(header),
+	}
+	timestampIndex := indexOfColumn(header, "timestamp")
+	stats.HasTimestamp = timestampIndex >= 0
+
+	seenRows := make(map[string]int)
+	seenTimestamps := make(map[string]int)
+	var intervals []time.Duration
+	var previousTimestamp time.Time
+
+	for {
+		record, readErr := reader.Read()
+		if errors.Is(readErr, io.EOF) {
+			break
+		}
+		if readErr != nil {
+			return CSVStats{}, readErr
+		}
+		if len(record) == 0 {
+			continue
+		}
+
+		stats.Rows++
+		rowKey := strings.Join(record, "\x1f")
+		if seenRows[rowKey] > 0 {
+			stats.DuplicateRows++
+		}
+		seenRows[rowKey]++
+
+		if !stats.HasTimestamp || timestampIndex >= len(record) {
+			continue
+		}
+
+		timestamp, err := time.Parse(timestampLayout, record[timestampIndex])
+		if err != nil {
+			return CSVStats{}, fmt.Errorf("parse CSV timestamp %q: %w", record[timestampIndex], err)
+		}
+		timestamp = timestamp.UTC()
+		if stats.FirstTimestamp.IsZero() || timestamp.Before(stats.FirstTimestamp) {
+			stats.FirstTimestamp = timestamp
+		}
+		if stats.LastTimestamp.IsZero() || timestamp.After(stats.LastTimestamp) {
+			stats.LastTimestamp = timestamp
+		}
+
+		stampKey := timestamp.Format(timestampLayout)
+		if seenTimestamps[stampKey] > 0 {
+			stats.DuplicateStamps++
+		}
+		seenTimestamps[stampKey]++
+
+		if !previousTimestamp.IsZero() {
+			delta := timestamp.Sub(previousTimestamp)
+			if delta > 0 {
+				intervals = append(intervals, delta)
+			} else if delta < 0 {
+				stats.OutOfOrderRows++
+			}
+		}
+		previousTimestamp = timestamp
+	}
+
+	expectedInterval := inferExpectedInterval(intervals)
+	stats.InferredTimeframe = inferTimeframe(intervals)
+	if expectedInterval > 0 {
+		stats.ExpectedInterval = expectedInterval.String()
+		var largestGap time.Duration
+		for _, interval := range intervals {
+			if interval <= expectedInterval {
+				continue
+			}
+			stats.GapCount++
+			stats.MissingIntervals += estimateMissingIntervals(interval, expectedInterval)
+			if interval > largestGap {
+				largestGap = interval
+			}
+		}
+		if largestGap > 0 {
+			stats.LargestGap = largestGap.String()
+		}
+	}
+	return stats, nil
 }
 
 func ColumnsContainTimestamp(columns []string) bool {
@@ -809,7 +1025,16 @@ func createAtomicTempPath(outputPath string) (string, error) {
 		return "", err
 	}
 
-	file, err := os.CreateTemp(filepath.Dir(outputPath), filepath.Base(outputPath)+".tmp-*")
+	pattern := filepath.Base(outputPath) + ".tmp-*"
+	if isParquetPath(outputPath) {
+		base := filepath.Base(strings.TrimSuffix(outputPath, ".parquet"))
+		pattern = base + ".tmp-*.parquet"
+	} else if isGzipPath(outputPath) {
+		base := filepath.Base(strings.TrimSuffix(outputPath, ".gz"))
+		pattern = base + ".tmp-*.gz"
+	}
+
+	file, err := os.CreateTemp(filepath.Dir(outputPath), pattern)
 	if err != nil {
 		return "", err
 	}
@@ -832,6 +1057,138 @@ func replaceFile(sourcePath string, targetPath string) error {
 		return err
 	}
 	return os.Rename(sourcePath, targetPath)
+}
+
+func createCSVWriter(outputPath string) (*os.File, *csv.Writer, func() error, error) {
+	file, err := os.Create(outputPath)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
+	if isGzipPath(outputPath) {
+		gzipWriter := gzip.NewWriter(file)
+		writer := csv.NewWriter(gzipWriter)
+		closeWriter := func() error {
+			writer.Flush()
+			if err := writer.Error(); err != nil {
+				gzipWriter.Close()
+				file.Close()
+				return err
+			}
+			if err := gzipWriter.Close(); err != nil {
+				file.Close()
+				return err
+			}
+			return file.Close()
+		}
+		return file, writer, closeWriter, nil
+	}
+
+	writer := csv.NewWriter(file)
+	closeWriter := func() error {
+		writer.Flush()
+		if err := writer.Error(); err != nil {
+			file.Close()
+			return err
+		}
+		return file.Close()
+	}
+	return file, writer, closeWriter, nil
+}
+
+func openCSVReader(path string) (*os.File, *csv.Reader, func() error, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
+	if isGzipPath(path) {
+		gzipReader, err := gzip.NewReader(file)
+		if err != nil {
+			file.Close()
+			return nil, nil, nil, err
+		}
+		closeReader := func() error {
+			if err := gzipReader.Close(); err != nil {
+				file.Close()
+				return err
+			}
+			return file.Close()
+		}
+		return file, csv.NewReader(gzipReader), closeReader, nil
+	}
+
+	closeReader := func() error {
+		return file.Close()
+	}
+	return file, csv.NewReader(file), closeReader, nil
+}
+
+func isGzipPath(path string) bool {
+	return strings.HasSuffix(strings.ToLower(strings.TrimSpace(path)), ".gz")
+}
+
+func inferTimeframe(intervals []time.Duration) string {
+	best := inferExpectedInterval(intervals)
+	if best <= 0 {
+		return "unknown"
+	}
+
+	switch best {
+	case time.Millisecond:
+		return "1ms"
+	case time.Second:
+		return "1s"
+	case time.Minute:
+		return "m1"
+	case 3 * time.Minute:
+		return "m3"
+	case 5 * time.Minute:
+		return "m5"
+	case 15 * time.Minute:
+		return "m15"
+	case 30 * time.Minute:
+		return "m30"
+	case time.Hour:
+		return "h1"
+	case 4 * time.Hour:
+		return "h4"
+	case 24 * time.Hour:
+		return "d1"
+	case 7 * 24 * time.Hour:
+		return "w1"
+	default:
+		return best.String()
+	}
+}
+
+func inferExpectedInterval(intervals []time.Duration) time.Duration {
+	if len(intervals) == 0 {
+		return 0
+	}
+
+	counts := make(map[time.Duration]int)
+	best := time.Duration(0)
+	bestCount := 0
+	for _, interval := range intervals {
+		counts[interval]++
+		if counts[interval] > bestCount {
+			best = interval
+			bestCount = counts[interval]
+		}
+	}
+	return best
+}
+
+func estimateMissingIntervals(interval time.Duration, expected time.Duration) int {
+	if expected <= 0 || interval <= expected {
+		return 0
+	}
+	missing := int(interval/expected) - 1
+	if missing < 1 {
+		return 1
+	}
+	return missing
 }
 
 func formatPrice(value float64, scale int) string {

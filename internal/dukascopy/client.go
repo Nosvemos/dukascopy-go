@@ -10,6 +10,7 @@ import (
 	"path"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -106,7 +107,10 @@ type Client struct {
 	httpClient *http.Client
 	maxRetries int
 	backoff    time.Duration
+	rateLimit  time.Duration
 	progress   ProgressFunc
+	rateMu     sync.Mutex
+	nextSlot   time.Time
 }
 
 func NewClient(rawBaseURL string, timeout time.Duration) *Client {
@@ -138,6 +142,14 @@ func (c *Client) WithBackoff(backoff time.Duration) *Client {
 		backoff = 500 * time.Millisecond
 	}
 	c.backoff = backoff
+	return c
+}
+
+func (c *Client) WithRateLimit(rateLimit time.Duration) *Client {
+	if rateLimit < 0 {
+		rateLimit = 0
+	}
+	c.rateLimit = rateLimit
 	return c
 }
 
@@ -366,6 +378,9 @@ func (c *Client) getJSON(ctx context.Context, segments []string, target any) err
 		if err != nil {
 			return err
 		}
+		if err := c.waitForRateLimit(ctx); err != nil {
+			return err
+		}
 
 		res, err := c.httpClient.Do(req)
 		if err == nil {
@@ -420,6 +435,34 @@ func (c *Client) getJSON(ctx context.Context, segments []string, target any) err
 
 func shouldRetryStatus(statusCode int) bool {
 	return statusCode == http.StatusTooManyRequests || statusCode >= 500
+}
+
+func (c *Client) waitForRateLimit(ctx context.Context) error {
+	if c.rateLimit <= 0 {
+		return nil
+	}
+
+	c.rateMu.Lock()
+	slot := time.Now()
+	if c.nextSlot.After(slot) {
+		slot = c.nextSlot
+	}
+	c.nextSlot = slot.Add(c.rateLimit)
+	c.rateMu.Unlock()
+
+	wait := time.Until(slot)
+	if wait <= 0 {
+		return nil
+	}
+
+	timer := time.NewTimer(wait)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
 }
 
 func (c *Client) emitProgress(event ProgressEvent) {

@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Nosvemos/dukascopy-data-downloader/internal/checkpoint"
@@ -30,6 +31,18 @@ type downloadPartition struct {
 	Start time.Time
 	End   time.Time
 	File  string
+}
+
+type partitionWorkItem struct {
+	Index     int
+	Partition downloadPartition
+}
+
+type partitionWorkResult struct {
+	Item        partitionWorkItem
+	RowsWritten int
+	Audit       csvout.FileAudit
+	Err         error
 }
 
 func normalizePartition(value string, granularity dukascopy.Granularity) (string, error) {
@@ -144,6 +157,7 @@ func runPartitionedDownload(
 	barColumns []string,
 	tickColumns []string,
 	partitionMode string,
+	parallelism int,
 ) error {
 	columns := barColumns
 	if resultKind == dukascopy.ResultKindTick {
@@ -197,7 +211,8 @@ func runPartitionedDownload(
 		return err
 	}
 
-	totalRows := 0
+	pending := make([]partitionWorkItem, 0, len(partitions))
+	manifestDirty := false
 	for index, part := range partitions {
 		partState := checkpoint.FindPart(&manifest, part.ID)
 		if partState == nil {
@@ -209,7 +224,6 @@ func runPartitionedDownload(
 			if _, err := os.Stat(partPath); err == nil {
 				audit, auditErr := csvout.AuditCSV(partPath)
 				if auditErr == nil && partAuditMatches(*partState, audit) {
-					totalRows += audit.Rows
 					if stderr != nil {
 						fmt.Fprintf(stderr, "%scheckpoint%s [%d/%d] reuse %s\n", colorize(colorYellow), colorize(colorReset), index+1, len(partitions), part.ID)
 					}
@@ -218,9 +232,7 @@ func runPartitionedDownload(
 						partState.Bytes = audit.Bytes
 						partState.SHA256 = audit.SHA256
 						partState.UpdatedAt = time.Now().UTC()
-						if err := checkpoint.Save(manifestPath, manifest); err != nil {
-							return err
-						}
+						manifestDirty = true
 					}
 					continue
 				}
@@ -231,57 +243,64 @@ func runPartitionedDownload(
 			}
 		}
 
+		pending = append(pending, partitionWorkItem{
+			Index:     index,
+			Partition: part,
+		})
+	}
+
+	if manifestDirty {
+		if err := checkpoint.Save(manifestPath, manifest); err != nil {
+			return err
+		}
+	}
+
+	if len(pending) > 0 {
+		manifest.Completed = false
+		manifest.FinalOutput = nil
+		if err := checkpoint.Save(manifestPath, manifest); err != nil {
+			return err
+		}
+	}
+
+	if parallelism < 1 {
+		parallelism = 1
+	}
+	if parallelism > len(pending) && len(pending) > 0 {
+		parallelism = len(pending)
+	}
+
+	for _, item := range pending {
+		partState := checkpoint.FindPart(&manifest, item.Partition.ID)
+		if partState == nil {
+			return fmt.Errorf("partition %s is missing from checkpoint manifest", item.Partition.ID)
+		}
 		if stderr != nil {
-			fmt.Fprintf(stderr, "%spartition%s [%d/%d] %s -> %s\n", colorize(colorCyan), colorize(colorReset), index+1, len(partitions), part.Start.Format(time.RFC3339), part.End.Format(time.RFC3339))
+			fmt.Fprintf(
+				stderr,
+				"%spartition%s [%d/%d] %s -> %s\n",
+				colorize(colorCyan),
+				colorize(colorReset),
+				item.Index+1,
+				len(partitions),
+				item.Partition.Start.Format(time.RFC3339),
+				item.Partition.End.Format(time.RFC3339),
+			)
 		}
 
 		partState.Status = "running"
 		partState.Error = ""
+		partState.Rows = 0
+		partState.Bytes = 0
+		partState.SHA256 = ""
 		partState.UpdatedAt = time.Now().UTC()
 		if err := checkpoint.Save(manifestPath, manifest); err != nil {
 			return err
 		}
+	}
 
-		partRequest := request
-		partRequest.From = part.Start
-		partRequest.To = part.End
-
-		rowsWritten, err := downloadPartitionToFile(ctx, client, partPath, partRequest, resultKind, barColumns, tickColumns)
-		if err != nil {
-			partState.Status = "failed"
-			partState.Error = err.Error()
-			partState.UpdatedAt = time.Now().UTC()
-			_ = checkpoint.Save(manifestPath, manifest)
-			return err
-		}
-
-		audit, err := csvout.AuditCSV(partPath)
-		if err != nil {
-			partState.Status = "failed"
-			partState.Error = err.Error()
-			partState.UpdatedAt = time.Now().UTC()
-			_ = checkpoint.Save(manifestPath, manifest)
-			return err
-		}
-		if audit.Rows != rowsWritten {
-			err = fmt.Errorf("partition %s row audit mismatch: wrote %d rows but file contains %d", part.ID, rowsWritten, audit.Rows)
-			partState.Status = "failed"
-			partState.Error = err.Error()
-			partState.UpdatedAt = time.Now().UTC()
-			_ = checkpoint.Save(manifestPath, manifest)
-			return err
-		}
-
-		partState.Status = "completed"
-		partState.Rows = audit.Rows
-		partState.Bytes = audit.Bytes
-		partState.SHA256 = audit.SHA256
-		partState.Error = ""
-		partState.UpdatedAt = time.Now().UTC()
-		totalRows += audit.Rows
-		if err := checkpoint.Save(manifestPath, manifest); err != nil {
-			return err
-		}
+	if err := executePartitionDownloads(ctx, client, manifestPath, &manifest, pending, partsDir, request, resultKind, barColumns, tickColumns, parallelism); err != nil {
+		return err
 	}
 
 	partPaths := make([]string, 0, len(manifest.Parts))
@@ -339,6 +358,155 @@ func runPartitionedDownload(
 	}
 	fmt.Fprintf(stdout, "%swrote%s %d %s to %s\n", colorize(colorGreen), colorize(colorReset), outputAudit.Rows, label, outputPath)
 	return nil
+}
+
+func executePartitionDownloads(
+	ctx context.Context,
+	client *dukascopy.Client,
+	manifestPath string,
+	manifest *checkpoint.Manifest,
+	pending []partitionWorkItem,
+	partsDir string,
+	request dukascopy.DownloadRequest,
+	resultKind dukascopy.ResultKind,
+	barColumns []string,
+	tickColumns []string,
+	parallelism int,
+) error {
+	if len(pending) == 0 {
+		return nil
+	}
+
+	if parallelism <= 1 || len(pending) == 1 {
+		for _, item := range pending {
+			result := runPartitionJob(ctx, client, partsDir, item, request, resultKind, barColumns, tickColumns)
+			if err := applyPartitionResult(manifestPath, manifest, result); err != nil {
+				return err
+			}
+			if result.Err != nil {
+				return result.Err
+			}
+		}
+		return nil
+	}
+
+	childCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	jobs := make(chan partitionWorkItem)
+	results := make(chan partitionWorkResult, len(pending))
+
+	var wg sync.WaitGroup
+	for workerIndex := 0; workerIndex < parallelism; workerIndex++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for item := range jobs {
+				results <- runPartitionJob(childCtx, client, partsDir, item, request, resultKind, barColumns, tickColumns)
+			}
+		}()
+	}
+
+	go func() {
+		for _, item := range pending {
+			jobs <- item
+		}
+		close(jobs)
+		wg.Wait()
+		close(results)
+	}()
+
+	var firstErr error
+	for result := range results {
+		if err := applyPartitionResult(manifestPath, manifest, result); err != nil && firstErr == nil {
+			firstErr = err
+			cancel()
+			continue
+		}
+		if result.Err != nil && firstErr == nil {
+			firstErr = result.Err
+			cancel()
+		}
+	}
+
+	return firstErr
+}
+
+func runPartitionJob(
+	ctx context.Context,
+	client *dukascopy.Client,
+	partsDir string,
+	item partitionWorkItem,
+	request dukascopy.DownloadRequest,
+	resultKind dukascopy.ResultKind,
+	barColumns []string,
+	tickColumns []string,
+) partitionWorkResult {
+	partPath := filepath.Join(partsDir, item.Partition.File)
+	partRequest := request
+	partRequest.From = item.Partition.Start
+	partRequest.To = item.Partition.End
+
+	rowsWritten, err := downloadPartitionToFile(ctx, client, partPath, partRequest, resultKind, barColumns, tickColumns)
+	if err != nil {
+		return partitionWorkResult{
+			Item: item,
+			Err:  err,
+		}
+	}
+
+	audit, err := csvout.AuditCSV(partPath)
+	if err != nil {
+		return partitionWorkResult{
+			Item: item,
+			Err:  err,
+		}
+	}
+	if audit.Rows != rowsWritten {
+		return partitionWorkResult{
+			Item: item,
+			Err: fmt.Errorf(
+				"partition %s row audit mismatch: wrote %d rows but file contains %d",
+				item.Partition.ID,
+				rowsWritten,
+				audit.Rows,
+			),
+		}
+	}
+
+	return partitionWorkResult{
+		Item:        item,
+		RowsWritten: rowsWritten,
+		Audit:       audit,
+	}
+}
+
+func applyPartitionResult(manifestPath string, manifest *checkpoint.Manifest, result partitionWorkResult) error {
+	partState := checkpoint.FindPart(manifest, result.Item.Partition.ID)
+	if partState == nil {
+		return fmt.Errorf("partition %s is missing from checkpoint manifest", result.Item.Partition.ID)
+	}
+
+	if result.Err != nil {
+		partState.Status = "failed"
+		partState.Rows = 0
+		partState.Bytes = 0
+		partState.SHA256 = ""
+		partState.Error = result.Err.Error()
+		partState.UpdatedAt = time.Now().UTC()
+		if err := checkpoint.Save(manifestPath, *manifest); err != nil {
+			return err
+		}
+		return nil
+	}
+
+	partState.Status = "completed"
+	partState.Rows = result.Audit.Rows
+	partState.Bytes = result.Audit.Bytes
+	partState.SHA256 = result.Audit.SHA256
+	partState.Error = ""
+	partState.UpdatedAt = time.Now().UTC()
+	return checkpoint.Save(manifestPath, *manifest)
 }
 
 func downloadPartitionToFile(

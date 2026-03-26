@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -29,6 +30,13 @@ const (
 )
 
 func Run(args []string, stdout io.Writer, stderr io.Writer) int {
+	loadedArgs, err := loadActiveConfig(args)
+	if err != nil {
+		fmt.Fprintf(stderr, "%serror:%s %v\n", colorize(colorRed), colorize(colorReset), err)
+		return 1
+	}
+	args = loadedArgs
+
 	if len(args) == 0 {
 		printUsage(stderr)
 		return 2
@@ -43,6 +51,12 @@ func Run(args []string, stdout io.Writer, stderr io.Writer) int {
 		return 0
 	case "instruments":
 		if err := runInstruments(args[1:], stdout); err != nil {
+			fmt.Fprintf(stderr, "%serror:%s %v\n", colorize(colorRed), colorize(colorReset), err)
+			return 1
+		}
+		return 0
+	case "stats":
+		if err := runStats(args[1:], stdout); err != nil {
 			fmt.Fprintf(stderr, "%serror:%s %v\n", colorize(colorRed), colorize(colorReset), err)
 			return 1
 		}
@@ -72,26 +86,34 @@ func Run(args []string, stdout io.Writer, stderr io.Writer) int {
 func printUsage(w io.Writer) {
 	fmt.Fprintf(w, "%sdukascopy-data%s\n\n", colorize(colorBold), colorize(colorReset))
 	fmt.Fprintf(w, "Version: %s\n\n", buildinfo.VersionString())
+	fmt.Fprintf(w, "Global flags: --config <path.json>\n\n")
 	fmt.Fprintf(w, "%sCommands%s\n", colorize(colorCyan), colorize(colorReset))
 	fmt.Fprint(w, `  instruments  Search Dukascopy instruments
+  stats        Print dataset statistics
   manifest     Inspect or verify checkpoint manifests
-  download     Download historical data and save it as CSV
+  download     Download historical data and save it as CSV or Parquet
   list-timeframes  Print supported timeframe values
   version      Print build version information
 
 examples:
+  dukascopy-data --config ./dukascopy.json instruments --query xauusd
   dukascopy-data instruments --query xauusd
+  dukascopy-data instruments --query xauusd --json
   dukascopy-data --list-timeframes
   dukascopy-data --version
+  dukascopy-data stats --input ./data/xauusd.csv
   dukascopy-data manifest inspect --output ./data/xauusd.csv
   dukascopy-data manifest prune --output ./data/xauusd.csv
   dukascopy-data manifest repair --output ./data/xauusd.csv
   dukascopy-data manifest verify --manifest ./data/xauusd.csv.manifest.json
   dukascopy-data download --symbol xauusd --timeframe m1 --from 2024-01-02T00:00:00Z --to 2024-01-02T01:00:00Z --output ./data/xauusd.csv --simple
   dukascopy-data download --symbol xauusd --timeframe h1 --from 2024-01-01T00:00:00Z --to 2024-01-02T00:00:00Z --output ./data/xauusd-full.csv --full
+  dukascopy-data download --symbol xauusd --timeframe m1 --from 2024-01-02T00:00:00Z --to 2024-01-02T06:00:00Z --output ./data/xauusd.parquet --full
   dukascopy-data download --symbol xauusd --timeframe m1 --from 2024-01-02T00:00:00Z --to 2024-01-02T01:00:00Z --output ./data/xauusd-custom.csv --custom-columns timestamp,bid_open,ask_open,volume
+  dukascopy-data download --symbol xauusd --timeframe m1 --from 2024-01-02T00:00:00Z --to 2024-01-02T00:03:00Z --output - --simple
   dukascopy-data download --symbol xauusd --timeframe m1 --from 2024-01-02T00:00:00Z --to 2024-01-02T06:00:00Z --output ./data/xauusd.csv --simple --resume --progress --retries 5
-  dukascopy-data download --symbol xauusd --timeframe m1 --from 2024-01-01T00:00:00Z --to 2024-02-01T00:00:00Z --output ./data/xauusd.csv --simple --partition auto --progress
+  dukascopy-data download --symbol xauusd --timeframe m1 --from 2024-01-02T00:00:00Z --to 2024-01-02T06:00:00Z --output ./data/xauusd.csv --simple --rate-limit 150ms
+  dukascopy-data download --symbol xauusd --timeframe m1 --from 2024-01-01T00:00:00Z --to 2024-02-01T00:00:00Z --output ./data/xauusd.csv --simple --partition auto --parallelism 4 --progress
 `)
 }
 
@@ -101,10 +123,12 @@ func runInstruments(args []string, stdout io.Writer) error {
 
 	query := fs.String("query", "", "instrument search text such as xauusd or eur/usd")
 	limit := fs.Int("limit", 20, "maximum number of rows to print")
+	jsonOutput := fs.Bool("json", false, "print matching instruments as JSON")
 	baseURL := fs.String("base-url", readBaseURL(), "Dukascopy API base URL")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+	applyInstrumentConfigDefaults(fs, limit, baseURL)
 	if strings.TrimSpace(*query) == "" {
 		return errors.New("--query is required")
 	}
@@ -124,6 +148,15 @@ func runInstruments(args []string, stdout io.Writer) error {
 	matches := dukascopy.FilterInstruments(instruments, *query, *limit)
 	if len(matches) == 0 {
 		return fmt.Errorf("no instruments found for %q", *query)
+	}
+
+	if *jsonOutput {
+		data, err := json.MarshalIndent(matches, "", "  ")
+		if err != nil {
+			return err
+		}
+		fmt.Fprintln(stdout, string(data))
+		return nil
 	}
 
 	printInstrumentTable(stdout, matches)
@@ -146,12 +179,33 @@ func runDownload(args []string, stdout io.Writer, stderr io.Writer) error {
 	outputPath := fs.String("output", "", "target CSV path")
 	retries := fs.Int("retries", 3, "retry count for transient HTTP errors")
 	retryBackoff := fs.Duration("retry-backoff", 500*time.Millisecond, "base retry backoff duration such as 500ms or 2s")
+	rateLimit := fs.Duration("rate-limit", 0, "minimum delay between HTTP requests such as 100ms or 1s")
 	progress := fs.Bool("progress", false, "print progress updates to stderr")
 	resume := fs.Bool("resume", false, "append missing rows to an existing CSV when possible")
 	partition := fs.String("partition", "none", "partition mode: none, auto, hour, day, week, month, year")
+	parallelism := fs.Int("parallelism", 1, "partition worker count")
 	checkpointManifest := fs.String("checkpoint-manifest", "", "optional checkpoint manifest path for partitioned downloads")
 	baseURL := fs.String("base-url", readBaseURL(), "Dukascopy API base URL")
 	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if err := applyDownloadConfigDefaults(
+		fs,
+		timeframe,
+		side,
+		simpleOutput,
+		fullOutput,
+		customColumns,
+		retries,
+		retryBackoff,
+		rateLimit,
+		progress,
+		resume,
+		partition,
+		parallelism,
+		checkpointManifest,
+		baseURL,
+	); err != nil {
 		return err
 	}
 
@@ -186,6 +240,12 @@ func runDownload(args []string, stdout io.Writer, stderr io.Writer) error {
 	}
 	if *retryBackoff <= 0 {
 		return errors.New("--retry-backoff must be greater than 0")
+	}
+	if *rateLimit < 0 {
+		return errors.New("--rate-limit must be 0 or greater")
+	}
+	if *parallelism <= 0 {
+		return errors.New("--parallelism must be greater than 0")
 	}
 	if *simpleOutput && *fullOutput {
 		return errors.New("--simple and --full cannot be used together")
@@ -245,10 +305,28 @@ func runDownload(args []string, stdout io.Writer, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
+	outputToStdout := strings.TrimSpace(*outputPath) == "-"
+	if outputToStdout {
+		if *resume {
+			return errors.New("--resume cannot be combined with --output -")
+		}
+		if normalizedPartition != partitionNone {
+			return errors.New("--partition cannot be combined with --output -")
+		}
+	}
+	if *parallelism > 1 && normalizedPartition == partitionNone {
+		return errors.New("--parallelism greater than 1 requires --partition")
+	}
+	if csvout.ColumnsContainTimestamp(barColumns) || csvout.ColumnsContainTimestamp(tickColumns) {
+		if strings.HasSuffix(strings.ToLower(strings.TrimSpace(*outputPath)), ".parquet") && *resume {
+			return errors.New("--resume is not supported for parquet output; use --partition for durable long-range parquet downloads")
+		}
+	}
 
 	client := dukascopy.NewClient(*baseURL, defaultTimeout).
 		WithRetries(*retries).
-		WithBackoff(*retryBackoff)
+		WithBackoff(*retryBackoff).
+		WithRateLimit(*rateLimit)
 	if *progress {
 		client = client.WithProgress(newProgressPrinter(stderr).Print)
 	}
@@ -260,7 +338,7 @@ func runDownload(args []string, stdout io.Writer, stderr io.Writer) error {
 		if manifestPath == "" {
 			manifestPath = checkpoint.DefaultManifestPath(*outputPath)
 		}
-		return runPartitionedDownload(ctx, client, stdout, stderr, *outputPath, manifestPath, request, resultKind, barColumns, tickColumns, normalizedPartition)
+		return runPartitionedDownload(ctx, client, stdout, stderr, *outputPath, manifestPath, request, resultKind, barColumns, tickColumns, normalizedPartition, *parallelism)
 	}
 
 	resumeState, dedupeRecord, err := prepareResume(*resume, *outputPath, resultKind, barColumns, tickColumns, &request)
@@ -278,6 +356,9 @@ func runDownload(args []string, stdout io.Writer, stderr io.Writer) error {
 	}
 
 	if result.Kind == dukascopy.ResultKindTick {
+		if outputToStdout {
+			return csvout.WriteTicksToWriter(stdout, result.Instrument, tickColumns, result.Ticks)
+		}
 		appended, err := writeTickOutput(*outputPath, resumeState, dedupeRecord, result.Instrument, tickColumns, result.Ticks)
 		if err != nil {
 			return err
@@ -291,6 +372,9 @@ func runDownload(args []string, stdout io.Writer, stderr io.Writer) error {
 		if err != nil {
 			return err
 		}
+		if outputToStdout {
+			return csvout.WriteBarsToWriter(stdout, instrument, barColumns, nil, bidBars, askBars)
+		}
 		appended, err := writeBarOutput(*outputPath, resumeState, dedupeRecord, instrument, barColumns, nil, bidBars, askBars)
 		if err != nil {
 			return err
@@ -299,6 +383,9 @@ func runDownload(args []string, stdout io.Writer, stderr io.Writer) error {
 		return nil
 	}
 
+	if outputToStdout {
+		return csvout.WriteBarsToWriter(stdout, result.Instrument, barColumns, result.Bars, nil, nil)
+	}
 	appended, err := writeBarOutput(*outputPath, resumeState, dedupeRecord, result.Instrument, barColumns, result.Bars, nil, nil)
 	if err != nil {
 		return err
@@ -524,7 +611,12 @@ func writeBarOutput(outputPath string, resumeState *csvout.ResumeState, dedupeRe
 
 func createResumeTempPath(outputPath string) (string, error) {
 	dir := filepath.Dir(outputPath)
-	file, err := os.CreateTemp(dir, filepath.Base(outputPath)+".resume-*.csv")
+	pattern := filepath.Base(outputPath) + ".resume-*.csv"
+	if strings.HasSuffix(strings.ToLower(strings.TrimSpace(outputPath)), ".gz") {
+		base := filepath.Base(strings.TrimSuffix(outputPath, ".gz"))
+		pattern = base + ".resume-*.csv.gz"
+	}
+	file, err := os.CreateTemp(dir, pattern)
 	if err != nil {
 		return "", err
 	}

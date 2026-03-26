@@ -48,3 +48,25 @@ func TestDownloadRejectsCustomColumnsWithProfileFlags(t *testing.T) {
 		t.Fatalf("unexpected validation output: %s", output)
 	}
 }
+
+func TestDownloadRejectsResumeForParquetOutput(t *testing.T) {
+	server := newMockServer()
+	defer server.Close()
+
+	output := runCLIExpectError(
+		t,
+		server.URL,
+		"download",
+		"--symbol", "xauusd",
+		"--timeframe", "m1",
+		"--from", "2024-01-02T00:00:00Z",
+		"--to", "2024-01-02T00:03:00Z",
+		"--output", "ignored.parquet",
+		"--simple",
+		"--resume",
+	)
+
+	if !strings.Contains(output, "--resume is not supported for parquet output") {
+		t.Fatalf("unexpected parquet resume validation output: %s", output)
+	}
+}

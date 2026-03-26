@@ -100,6 +100,7 @@ func runManifestVerify(args []string, stdout io.Writer) error {
 	manifestPath := fs.String("manifest", "", "checkpoint manifest path")
 	outputPath := fs.String("output", "", "output CSV path used to derive <output>.manifest.json")
 	jsonOutput := fs.Bool("json", false, "print the verification report as JSON")
+	checkDataQuality := fs.Bool("check-data-quality", false, "inspect the final CSV for duplicates, out-of-order rows, and gaps")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -114,13 +115,36 @@ func runManifestVerify(args []string, stdout io.Writer) error {
 		return err
 	}
 
+	var outputStats *csvout.CSVStats
+	var dataQualityIssues []string
+	var dataQualityWarnings []string
+	if *checkDataQuality && report.FinalOutput != nil && report.FinalOutput.Valid {
+		stats, err := csvout.InspectCSV(report.FinalOutput.Path)
+		if err != nil {
+			return err
+		}
+		outputStats = &stats
+		dataQualityIssues, dataQualityWarnings = evaluateDataQuality(stats)
+	}
+
 	if *jsonOutput {
-		data, err := json.MarshalIndent(report, "", "  ")
+		payload := struct {
+			Report              checkpoint.VerificationReport `json:"report"`
+			OutputStats         *csvout.CSVStats              `json:"output_stats,omitempty"`
+			DataQualityIssues   []string                      `json:"data_quality_issues,omitempty"`
+			DataQualityWarnings []string                      `json:"data_quality_warnings,omitempty"`
+		}{
+			Report:              report,
+			OutputStats:         outputStats,
+			DataQualityIssues:   dataQualityIssues,
+			DataQualityWarnings: dataQualityWarnings,
+		}
+		data, err := json.MarshalIndent(payload, "", "  ")
 		if err != nil {
 			return err
 		}
 		fmt.Fprintln(stdout, string(data))
-		if !report.Valid {
+		if !report.Valid || len(dataQualityIssues) > 0 {
 			return errors.New("manifest verification failed")
 		}
 		return nil
@@ -149,8 +173,26 @@ func runManifestVerify(args []string, stdout io.Writer) error {
 		}
 		fmt.Fprintln(stdout)
 	}
+	if outputStats != nil {
+		fmt.Fprintf(
+			stdout,
+			"quality inferred=%s duplicate_rows=%d duplicate_stamps=%d out_of_order=%d gaps=%d missing_intervals=%d\n",
+			outputStats.InferredTimeframe,
+			outputStats.DuplicateRows,
+			outputStats.DuplicateStamps,
+			outputStats.OutOfOrderRows,
+			outputStats.GapCount,
+			outputStats.MissingIntervals,
+		)
+		for _, warning := range dataQualityWarnings {
+			fmt.Fprintf(stdout, "warning %-22s %s\n", "data-quality", warning)
+		}
+		for _, issue := range dataQualityIssues {
+			fmt.Fprintf(stdout, "quality %-22s %s\n", "invalid", issue)
+		}
+	}
 
-	if !report.Valid {
+	if !report.Valid || len(dataQualityIssues) > 0 {
 		return errors.New("manifest verification failed")
 	}
 
@@ -388,6 +430,7 @@ examples:
   dukascopy-data manifest prune --output ./data/xauusd.csv
   dukascopy-data manifest repair --output ./data/xauusd.csv
   dukascopy-data manifest verify --manifest ./data/xauusd.csv.manifest.json
+  dukascopy-data manifest verify --output ./data/xauusd.csv --check-data-quality
 `)
 }
 
@@ -456,4 +499,27 @@ func shouldPruneTopLevelFile(name string, manifestBase string, outputBase string
 	default:
 		return false
 	}
+}
+
+func evaluateDataQuality(stats csvout.CSVStats) ([]string, []string) {
+	issues := make([]string, 0)
+	warnings := make([]string, 0)
+
+	if stats.DuplicateRows > 0 {
+		issues = append(issues, fmt.Sprintf("duplicate rows detected: %d", stats.DuplicateRows))
+	}
+	if stats.DuplicateStamps > 0 {
+		issues = append(issues, fmt.Sprintf("duplicate timestamps detected: %d", stats.DuplicateStamps))
+	}
+	if stats.OutOfOrderRows > 0 {
+		issues = append(issues, fmt.Sprintf("out-of-order rows detected: %d", stats.OutOfOrderRows))
+	}
+	if stats.GapCount > 0 {
+		warning := fmt.Sprintf("gaps detected: %d gap(s), %d missing interval(s)", stats.GapCount, stats.MissingIntervals)
+		if strings.TrimSpace(stats.LargestGap) != "" {
+			warning += ", largest gap " + stats.LargestGap
+		}
+		warnings = append(warnings, warning)
+	}
+	return issues, warnings
 }
