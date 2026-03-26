@@ -55,7 +55,8 @@ func printUsage(w io.Writer) {
 
 examples:
   dukascopy-data instruments --query xauusd
-  dukascopy-data download --symbol xauusd --granularity minute --from 2024-01-02T00:00:00Z --to 2024-01-02T01:00:00Z --output ./data/xauusd.csv
+  dukascopy-data download --symbol xauusd --granularity minute --from 2024-01-02T00:00:00Z --to 2024-01-02T01:00:00Z --output ./data/xauusd.csv --simple
+  dukascopy-data download --symbol xauusd --granularity hour --from 2024-01-01T00:00:00Z --to 2024-01-02T00:00:00Z --output ./data/xauusd-full.csv --full
 `)
 }
 
@@ -104,6 +105,8 @@ func runDownload(args []string, stdout io.Writer) error {
 	symbol := fs.String("symbol", "", "instrument symbol such as xauusd or eur/usd")
 	granularity := fs.String("granularity", "minute", "tick, minute, hour, or day")
 	side := fs.String("side", "bid", "bid or ask")
+	simpleOutput := fs.Bool("simple", false, "write the reduced CSV column set")
+	fullOutput := fs.Bool("full", false, "write the full CSV column set with bid/ask columns")
 	fromValue := fs.String("from", "", "inclusive RFC3339 start timestamp")
 	toValue := fs.String("to", "", "exclusive RFC3339 end timestamp")
 	outputPath := fs.String("output", "", "target CSV path")
@@ -138,6 +141,14 @@ func runDownload(args []string, stdout io.Writer) error {
 	if !from.Before(to) {
 		return errors.New("--from must be earlier than --to")
 	}
+	if *simpleOutput && *fullOutput {
+		return errors.New("--simple and --full cannot be used together")
+	}
+
+	profile := csvout.ProfileSimple
+	if *fullOutput {
+		profile = csvout.ProfileFull
+	}
 
 	request := dukascopy.DownloadRequest{
 		Symbol:      *symbol,
@@ -157,14 +168,49 @@ func runDownload(args []string, stdout io.Writer) error {
 	}
 
 	if result.Kind == dukascopy.ResultKindTick {
-		if err := csvout.WriteTicks(*outputPath, result.Instrument, result.Ticks); err != nil {
+		if err := csvout.WriteTicks(*outputPath, result.Instrument, profile, result.Ticks); err != nil {
 			return err
 		}
 		fmt.Fprintf(stdout, "wrote %d ticks to %s\n", len(result.Ticks), *outputPath)
 		return nil
 	}
 
-	if err := csvout.WriteBars(*outputPath, result.Instrument, result.Bars); err != nil {
+	if profile == csvout.ProfileFull {
+		instrument, bidBars, err := client.DownloadBarsForSide(ctx, request, dukascopy.PriceSideBid)
+		if err == nil {
+			_, askBars, askErr := client.DownloadBarsForSide(ctx, request, dukascopy.PriceSideAsk)
+			if askErr == nil {
+				if err := csvout.WriteBars(*outputPath, instrument, profile, nil, bidBars, askBars); err != nil {
+					return err
+				}
+				fmt.Fprintf(stdout, "wrote %d bars to %s\n", len(bidBars), *outputPath)
+				return nil
+			}
+		}
+
+		tickRequest := request
+		tickRequest.Granularity = dukascopy.GranularityTick
+		tickResult, err := client.Download(ctx, tickRequest)
+		if err != nil {
+			return err
+		}
+
+		bidBars, err = dukascopy.AggregateTicksToBars(tickResult.Ticks, request.Granularity, dukascopy.PriceSideBid, request.From, request.To)
+		if err != nil {
+			return err
+		}
+		askBars, err := dukascopy.AggregateTicksToBars(tickResult.Ticks, request.Granularity, dukascopy.PriceSideAsk, request.From, request.To)
+		if err != nil {
+			return err
+		}
+		if err := csvout.WriteBars(*outputPath, tickResult.Instrument, profile, nil, bidBars, askBars); err != nil {
+			return err
+		}
+		fmt.Fprintf(stdout, "wrote %d bars to %s\n", len(bidBars), *outputPath)
+		return nil
+	}
+
+	if err := csvout.WriteBars(*outputPath, result.Instrument, profile, result.Bars, nil, nil); err != nil {
 		return err
 	}
 

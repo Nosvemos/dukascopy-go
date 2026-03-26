@@ -78,6 +78,8 @@ type DownloadResult struct {
 	Instrument Instrument
 	Bars       []Bar
 	Ticks      []Tick
+	BidBars    []Bar
+	AskBars    []Bar
 }
 
 type Client struct {
@@ -155,6 +157,37 @@ func (c *Client) Download(ctx context.Context, request DownloadRequest) (Downloa
 		return DownloadResult{Kind: ResultKindBar, Instrument: instrument, Bars: bars}, nil
 	default:
 		return DownloadResult{}, fmt.Errorf("unsupported granularity %q", request.Granularity)
+	}
+}
+
+func (c *Client) DownloadBarsForSide(ctx context.Context, request DownloadRequest, side PriceSide) (Instrument, []Bar, error) {
+	instruments, err := c.ListInstruments(ctx)
+	if err != nil {
+		return Instrument{}, nil, err
+	}
+
+	instrument, err := ResolveInstrument(instruments, request.Symbol)
+	if err != nil {
+		return Instrument{}, nil, err
+	}
+
+	normalizedSide, err := normalizeSide(side)
+	if err != nil {
+		return Instrument{}, nil, err
+	}
+
+	switch normalizeGranularity(request.Granularity) {
+	case GranularityMinute:
+		bars, err := c.downloadMinuteBars(ctx, instrument, normalizedSide, request.From, request.To)
+		return instrument, bars, err
+	case GranularityHour:
+		bars, err := c.downloadHourlyBars(ctx, instrument, normalizedSide, request.From, request.To)
+		return instrument, bars, err
+	case GranularityDay:
+		bars, err := c.downloadDailyBars(ctx, instrument, normalizedSide, request.From, request.To)
+		return instrument, bars, err
+	default:
+		return Instrument{}, nil, fmt.Errorf("unsupported bar granularity %q", request.Granularity)
 	}
 }
 

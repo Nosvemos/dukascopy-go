@@ -1,29 +1,30 @@
 # dukascopy-data-downloader
 
-Go ile yazilmis, Dukascopy `jetta` API uzerinden enstruman arayip tarihsel veri indirebilen bir CLI.
+A Go CLI for searching Dukascopy instruments and exporting historical market data from the Dukascopy `jetta` API.
 
-## Ozellikler
+## Features
 
-- `xauusd`, `eur/usd`, `BTC-USD` gibi farkli sembol yazimlarini cozer
-- `instruments` komutuyla enstruman arar
-- `download` komutuyla `tick`, `minute`, `hour`, `day` verisini CSV olarak indirir
-- Go icinde mock API uzerinden calisan e2e testler barindirir
+- Resolves flexible symbols such as `xauusd`, `eur/usd`, and `BTC-USD`
+- Searches instruments with the `instruments` command
+- Downloads `tick`, `minute`, `hour`, and `day` data as CSV
+- Supports reduced and expanded CSV column sets with `--simple` and `--full`
+- Includes end-to-end tests that run the compiled CLI against a mock HTTP server
 
-## Kurulum
+## Build
 
 ```bash
 go build -o dukascopy-data ./cmd/dukascopy
 ```
 
-## Kullanim
+## Commands
 
-Enstruman arama:
+Search instruments:
 
 ```bash
 go run ./cmd/dukascopy instruments --query xauusd
 ```
 
-Dakikalik veri indirme:
+Download minute bars with the reduced schema:
 
 ```bash
 go run ./cmd/dukascopy download \
@@ -31,10 +32,23 @@ go run ./cmd/dukascopy download \
   --granularity minute \
   --from 2024-01-02T00:00:00Z \
   --to 2024-01-02T06:00:00Z \
-  --output ./data/xauusd-minute.csv
+  --output ./data/xauusd-minute.csv \
+  --simple
 ```
 
-Tick veri indirme:
+Download minute bars with the expanded schema:
+
+```bash
+go run ./cmd/dukascopy download \
+  --symbol xauusd \
+  --granularity minute \
+  --from 2024-01-02T00:00:00Z \
+  --to 2024-01-02T06:00:00Z \
+  --output ./data/xauusd-minute-full.csv \
+  --full
+```
+
+Download ticks:
 
 ```bash
 go run ./cmd/dukascopy download \
@@ -42,28 +56,57 @@ go run ./cmd/dukascopy download \
   --granularity tick \
   --from 2024-01-02T00:00:00Z \
   --to 2024-01-02T01:00:00Z \
-  --output ./data/eurusd-ticks.csv
+  --output ./data/eurusd-ticks.csv \
+  --full
 ```
 
-## Konfigurasyon
+## CSV Schemas
 
-Varsayilan API tabani:
+Simple bar schema:
+
+```text
+timestamp,open,high,low,close,volume
+```
+
+Full bar schema:
+
+```text
+timestamp,open,high,low,close,volume,bid_open,bid_high,bid_low,bid_close,ask_open,ask_high,ask_low,ask_close
+```
+
+In `--full` bar output, the generic `open/high/low/close` columns are midpoint values derived from bid and ask candles. Spread can be computed later from the explicit bid and ask columns.
+
+Simple tick schema:
+
+```text
+timestamp,bid,ask
+```
+
+Full tick schema:
+
+```text
+timestamp,bid,ask,bid_volume,ask_volume
+```
+
+## Configuration
+
+Default API base URL:
 
 ```text
 https://jetta.dukascopy.com
 ```
 
-Istersen `DUKASCOPY_API_BASE_URL` ortam degiskeniyle override edebilirsin. Bu ozellikle testlerde kullaniliyor.
+You can override it with the `DUKASCOPY_API_BASE_URL` environment variable. This is mainly useful for tests or local mocks.
 
-## Test
+## Tests
 
-Tum testler:
+Run all tests:
 
 ```bash
 go test ./...
 ```
 
-E2E testleri:
+Run end-to-end tests only:
 
 ```bash
 go test ./e2e -v
