@@ -1,0 +1,50 @@
+version: 2
+
+project_name: dukascopy-data
+
+before:
+  hooks:
+    - go test ./...
+
+builds:
+  - id: dukascopy-data
+    main: ./cmd/dukascopy
+    binary: dukascopy-data
+    env:
+      - CGO_ENABLED=0
+    ldflags:
+      - -s -w
+      - -X github.com/Nosvemos/dukascopy-data-downloader/internal/buildinfo.Version={{ .Version }}
+      - -X github.com/Nosvemos/dukascopy-data-downloader/internal/buildinfo.Commit={{ .ShortCommit }}
+      - -X github.com/Nosvemos/dukascopy-data-downloader/internal/buildinfo.Date={{ .Date }}
+    goos:
+      - linux
+      - windows
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+
+archives:
+  - id: default
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    name_template: >-
+      {{ .ProjectName }}_
+      {{- .Version }}_
+      {{- .Os }}_
+      {{- .Arch }}
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  sort: asc
+  use: git
+
+release:
+  github:
+    owner: Nosvemos
+    name: dukascopy-data-downloader

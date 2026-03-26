@@ -55,16 +55,43 @@ go run ./cmd/dukascopy download \
 Install a local binary:
 
 ```bash
-go install ./cmd/dukascopy
+go install github.com/Nosvemos/dukascopy-data-downloader/cmd/dukascopy@latest
 ```
 
-After the project is published under its final module path, users will also be able to run it without cloning the repository:
+Run directly from the published module without cloning the repository:
 
 ```bash
-go run <module-path>/cmd/dukascopy@latest --help
+go run github.com/Nosvemos/dukascopy-data-downloader/cmd/dukascopy@latest --help
 ```
 
-Replace `<module-path>` with the final published Go module path.
+Build from a local checkout:
+
+```bash
+go build -o dukascopy-data ./cmd/dukascopy
+```
+
+## Releases
+
+Tagged releases are built automatically through GitHub Actions and published as GitHub Release artifacts for Linux, macOS, and Windows.
+
+Typical release flow:
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+Each release embeds:
+
+- semantic version
+- short commit hash
+- build date
+
+You can inspect the installed binary with:
+
+```bash
+dukascopy-data --version
+```
 
 ## Usage Patterns
 
@@ -72,6 +99,12 @@ Search instruments:
 
 ```bash
 go run ./cmd/dukascopy instruments --query xauusd
+```
+
+Print version metadata:
+
+```bash
+go run ./cmd/dukascopy --version
 ```
 
 Download minute bars with the reduced schema:
@@ -232,6 +265,7 @@ mn1   aggregated from d1 by calendar month
 - `--full` writes midpoint, spread, and explicit bid/ask columns.
 - `--custom-columns` lets you request only the columns you need.
 - `--list-timeframes` prints the currently supported timeframe values and their meaning.
+- `--version` prints embedded version, commit, and build date metadata.
 - `--side` controls the primary side for simple bar exports.
 - Commands use ANSI colors for headings, success messages, and table headers by default; set `NO_COLOR=1` to disable coloring.
 

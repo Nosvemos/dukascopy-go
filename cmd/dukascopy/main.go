@@ -3,7 +3,7 @@ package main
 import (
 	"os"
 
-	"dukascopy-data-downloader/internal/cli"
+	"github.com/Nosvemos/dukascopy-data-downloader/internal/cli"
 )
 
 func main() {

@@ -10,8 +10,9 @@ import (
 	"strings"
 	"time"
 
-	"dukascopy-data-downloader/internal/csvout"
-	"dukascopy-data-downloader/internal/dukascopy"
+	"github.com/Nosvemos/dukascopy-data-downloader/internal/buildinfo"
+	"github.com/Nosvemos/dukascopy-data-downloader/internal/csvout"
+	"github.com/Nosvemos/dukascopy-data-downloader/internal/dukascopy"
 )
 
 const (
@@ -32,6 +33,9 @@ func Run(args []string, stdout io.Writer, stderr io.Writer) int {
 	}
 
 	switch args[0] {
+	case "version", "--version", "-v":
+		printVersion(stdout)
+		return 0
 	case "list-timeframes", "--list-timeframes":
 		printTimeframes(stdout)
 		return 0
@@ -59,14 +63,17 @@ func Run(args []string, stdout io.Writer, stderr io.Writer) int {
 
 func printUsage(w io.Writer) {
 	fmt.Fprintf(w, "%sdukascopy-data%s\n\n", colorize(colorBold), colorize(colorReset))
+	fmt.Fprintf(w, "Version: %s\n\n", buildinfo.VersionString())
 	fmt.Fprintf(w, "%sCommands%s\n", colorize(colorCyan), colorize(colorReset))
 	fmt.Fprint(w, `  instruments  Search Dukascopy instruments
   download     Download historical data and save it as CSV
   list-timeframes  Print supported timeframe values
+  version      Print build version information
 
 examples:
   dukascopy-data instruments --query xauusd
   dukascopy-data --list-timeframes
+  dukascopy-data --version
   dukascopy-data download --symbol xauusd --timeframe m1 --from 2024-01-02T00:00:00Z --to 2024-01-02T01:00:00Z --output ./data/xauusd.csv --simple
   dukascopy-data download --symbol xauusd --timeframe h1 --from 2024-01-01T00:00:00Z --to 2024-01-02T00:00:00Z --output ./data/xauusd-full.csv --full
   dukascopy-data download --symbol xauusd --timeframe m1 --from 2024-01-02T00:00:00Z --to 2024-01-02T01:00:00Z --output ./data/xauusd-custom.csv --custom-columns timestamp,bid_open,ask_open,volume
@@ -272,6 +279,16 @@ func colorize(code string) string {
 		return ""
 	}
 	return code
+}
+
+func printVersion(w io.Writer) {
+	fmt.Fprintf(w, "%sdukascopy-data%s %s\n", colorize(colorBold), colorize(colorReset), buildinfo.VersionString())
+	if buildinfo.Commit != "none" {
+		fmt.Fprintf(w, "commit: %s\n", buildinfo.Commit)
+	}
+	if buildinfo.Date != "unknown" {
+		fmt.Fprintf(w, "date:   %s\n", buildinfo.Date)
+	}
 }
 
 func printTimeframes(w io.Writer) {
