@@ -1,381 +1,95 @@
 # dukascopy-go
 
-A Go CLI for searching Dukascopy instruments and exporting historical market data from the Dukascopy `jetta` API.
+<p align="center">
+  <b>Download historical Dukascopy market data with a reliable Go CLI.</b><br>
+  Search instruments, export CSV or Parquet, resume interrupted jobs, and verify large datasets with checkpoint manifests.
+</p>
 
-## Features
+<p align="center">
+  <a href="https://github.com/Nosvemos/dukascopy-go/actions/workflows/ci.yml"><img src="https://github.com/Nosvemos/dukascopy-go/actions/workflows/ci.yml/badge.svg" alt="CI status"></a>
+  <a href="https://github.com/Nosvemos/dukascopy-go/actions/workflows/release.yml"><img src="https://github.com/Nosvemos/dukascopy-go/actions/workflows/release.yml/badge.svg" alt="Release status"></a>
+  <a href="https://pkg.go.dev/github.com/Nosvemos/dukascopy-go"><img src="https://pkg.go.dev/badge/github.com/Nosvemos/dukascopy-go.svg" alt="Go Reference"></a>
+  <a href="https://github.com/Nosvemos/dukascopy-go/releases"><img src="https://img.shields.io/github/v/release/Nosvemos/dukascopy-go" alt="Latest release"></a>
+</p>
 
-- Resolves flexible symbols such as `xauusd`, `eur/usd`, and `BTC-USD`
-- Supports any instrument returned by Dukascopy's `/v1/instruments` catalog, not just `XAUUSD`
-- Searches instruments with the `instruments` command
-- Downloads `tick`, `m1`, `m3`, `m5`, `m15`, `m30`, `h1`, `h4`, `d1`, `w1`, and `mn1` data as CSV
-- Downloads `tick`, `m1`, `m3`, `m5`, `m15`, `m30`, `h1`, `h4`, `d1`, `w1`, and `mn1` data as CSV or Parquet
-- Supports reduced, expanded, and custom CSV column sets with `--simple`, `--full`, and `--custom-columns`
-- Supports plain `.csv` and compressed `.csv.gz` output paths
-- Supports `.parquet` output with the same selected columns
-- Can stream CSV directly to `stdout` with `--output -`
-- Exports raw volume values intended to be more suitable for backtesting
-- Retries transient HTTP failures with configurable retry count and backoff
-- Can throttle request pace with `--rate-limit`
-- Shows optional progress output for chunk downloads and retries
-- Can resume into an existing CSV without duplicating the last saved row
-- Supports partitioned downloads with checkpoint manifests for large ranges
-- Can download partitioned ranges with multiple workers via `--parallelism`
-- Reassembles the final CSV from completed partition files after interrupted runs
-- Audits completed partition files with row counts and SHA-256 hashes before reusing them
-- Audits the assembled final CSV and stores a manifest summary for quick verification
-- Includes `manifest inspect` and `manifest verify` commands for offline dataset checks
-- Includes `manifest repair` for download-free recovery from valid existing files
-- Includes `manifest prune` to clean orphan partition and temp files safely
-- Includes a `stats` command for quick dataset inspection, gap detection, and ordering checks
-- Supports JSON config files through `--config` or `DUKASCOPY_CONFIG`
-- Includes end-to-end tests that run the compiled CLI against a mock HTTP server
+<p align="center">
+  <a href="#installation">Installation</a> |
+  <a href="#quick-start">Quick Start</a> |
+  <a href="#commands">Commands</a> |
+  <a href="#checkpointed-downloads">Checkpointed Downloads</a> |
+  <a href="#configuration">Configuration</a>
+</p>
 
-## Build
+---
 
-```bash
-go build -o dukascopy-go ./cmd/dukascopy-go
-```
+## Why `dukascopy-go`?
 
-## Quick Start
+`dukascopy-go` is built for people who want more than a basic downloader. It helps you search the Dukascopy catalog, export clean datasets, continue interrupted downloads safely, and audit finished files without redownloading everything.
 
-Run directly from the checked-out repository:
+It supports flexible symbol input like `xauusd`, `eur/usd`, and `BTC-USD`, and works with any instrument returned by Dukascopy's `jetta` instrument catalog.
 
-```bash
-go run ./cmd/dukascopy-go --help
-```
+## Highlights
 
-Run with a shared config file:
-
-```bash
-go run ./cmd/dukascopy-go --config ./dukascopy.json --help
-```
-
-List supported timeframes:
-
-```bash
-go run ./cmd/dukascopy-go --list-timeframes
-```
-
-Search an instrument:
-
-```bash
-go run ./cmd/dukascopy-go instruments --query xauusd
-```
-
-Download 1-minute bars:
-
-```bash
-go run ./cmd/dukascopy-go download \
-  --symbol xauusd \
-  --timeframe m1 \
-  --from 2024-01-02T00:00:00Z \
-  --to 2024-01-02T06:00:00Z \
-  --output ./data/xauusd-1m.csv \
-  --full
-```
-
-Download 1-minute bars as Parquet:
-
-```bash
-go run ./cmd/dukascopy-go download \
-  --symbol xauusd \
-  --timeframe m1 \
-  --from 2024-01-02T00:00:00Z \
-  --to 2024-01-02T06:00:00Z \
-  --output ./data/xauusd-1m.parquet \
-  --full
-```
+- Search Dukascopy instruments from the CLI with `instruments`
+- Download `tick`, `m1`, `m3`, `m5`, `m15`, `m30`, `h1`, `h4`, `d1`, `w1`, and `mn1`
+- Export to `.csv`, `.csv.gz`, or `.parquet`
+- Use compact, full, or custom column layouts with `--simple`, `--full`, and `--custom-columns`
+- Stream CSV directly to `stdout` with `--output -`
+- Resume interrupted CSV downloads without duplicating the final saved row
+- Split long ranges into durable partitions with `--partition`
+- Run partition workers in parallel with `--parallelism`
+- Reassemble final outputs from completed partition files after interruptions
+- Verify row counts and SHA-256 hashes before reusing partition files
+- Audit finished datasets with `stats`, `manifest inspect`, `manifest verify`, `manifest repair`, and `manifest prune`
+- Configure defaults with `--config` or `DUKASCOPY_CONFIG`
+- Built-in retry, backoff, rate limiting, and progress reporting
 
 ## Installation
 
-Install a local binary:
+| Method | Command |
+| --- | --- |
+| Install binary with Go | `go install github.com/Nosvemos/dukascopy-go/cmd/dukascopy-go@latest` |
+| Run without cloning | `go run github.com/Nosvemos/dukascopy-go/cmd/dukascopy-go@latest --help` |
+| Build from local source | `go build -o dukascopy-go ./cmd/dukascopy-go` |
+
+`Go 1.26+` is the current target in this repository.
+
+## Quick Start
+
+Search for an instrument:
 
 ```bash
-go install github.com/Nosvemos/dukascopy-go/cmd/dukascopy-go@latest
+dukascopy-go instruments --query xauusd
 ```
 
-Run directly from the published module without cloning the repository:
+Download 1-minute bars to CSV:
 
 ```bash
-go run github.com/Nosvemos/dukascopy-go/cmd/dukascopy-go@latest --help
-```
-
-Build from a local checkout:
-
-```bash
-go build -o dukascopy-go ./cmd/dukascopy-go
-```
-
-## Releases
-
-Tagged releases are built automatically through GitHub Actions and published as GitHub Release artifacts for Linux, macOS, and Windows.
-
-Typical release flow:
-
-```bash
-git tag v0.1.0
-git push origin v0.1.0
-```
-
-Each release embeds:
-
-- semantic version
-- short commit hash
-- build date
-
-You can inspect the installed binary with:
-
-```bash
-dukascopy-go --version
-```
-
-## Usage Patterns
-
-Search instruments:
-
-```bash
-go run ./cmd/dukascopy-go instruments --query xauusd
-```
-
-Search instruments as JSON:
-
-```bash
-go run ./cmd/dukascopy-go instruments --query xauusd --json
-```
-
-Print dataset stats:
-
-```bash
-go run ./cmd/dukascopy-go stats --input ./data/xauusd.csv
-```
-
-Print dataset stats as JSON:
-
-```bash
-go run ./cmd/dukascopy-go stats --input ./data/xauusd.csv --json
-```
-
-Inspect a Parquet dataset:
-
-```bash
-go run ./cmd/dukascopy-go stats --input ./data/xauusd.parquet
-```
-
-Inspect a checkpoint manifest:
-
-```bash
-go run ./cmd/dukascopy-go manifest inspect --output ./data/xauusd.csv
-```
-
-Verify a dataset against its manifest without downloading anything:
-
-```bash
-go run ./cmd/dukascopy-go manifest verify --manifest ./data/xauusd.csv.manifest.json
-```
-
-Verify manifest integrity plus duplicate and ordering quality checks:
-
-```bash
-go run ./cmd/dukascopy-go manifest verify --output ./data/xauusd.csv --check-data-quality
-```
-
-Repair a damaged final CSV or missing partition from existing valid files:
-
-```bash
-go run ./cmd/dukascopy-go manifest repair --output ./data/xauusd.csv
-```
-
-Clean orphan partition files and leftover temp artifacts:
-
-```bash
-go run ./cmd/dukascopy-go manifest prune --output ./data/xauusd.csv
-```
-
-Print version metadata:
-
-```bash
-go run ./cmd/dukascopy-go --version
-```
-
-Download minute bars with the reduced schema:
-
-```bash
-go run ./cmd/dukascopy-go download \
+dukascopy-go download \
   --symbol xauusd \
   --timeframe m1 \
   --from 2024-01-02T00:00:00Z \
   --to 2024-01-02T06:00:00Z \
-  --output ./data/xauusd-minute.csv \
-  --simple
-```
-
-Download compressed CSV directly:
-
-```bash
-go run ./cmd/dukascopy-go download \
-  --symbol xauusd \
-  --timeframe m1 \
-  --from 2024-01-02T00:00:00Z \
-  --to 2024-01-02T06:00:00Z \
-  --output ./data/xauusd-minute.csv.gz \
-  --simple
-```
-
-Download Parquet directly:
-
-```bash
-go run ./cmd/dukascopy-go download \
-  --symbol xauusd \
-  --timeframe m1 \
-  --from 2024-01-02T00:00:00Z \
-  --to 2024-01-02T06:00:00Z \
-  --output ./data/xauusd-minute.parquet \
-  --simple
-```
-
-Stream CSV to stdout:
-
-```bash
-go run ./cmd/dukascopy-go download \
-  --symbol xauusd \
-  --timeframe m1 \
-  --from 2024-01-02T00:00:00Z \
-  --to 2024-01-02T00:03:00Z \
-  --output - \
-  --simple
-```
-
-Download minute bars with the expanded schema:
-
-```bash
-go run ./cmd/dukascopy-go download \
-  --symbol xauusd \
-  --timeframe m1 \
-  --from 2024-01-02T00:00:00Z \
-  --to 2024-01-02T06:00:00Z \
-  --output ./data/xauusd-minute-full.csv \
+  --output ./data/xauusd-m1.csv \
   --full
 ```
 
-Download ticks:
+Download the same range to Parquet:
 
 ```bash
-go run ./cmd/dukascopy-go download \
-  --symbol eurusd \
-  --timeframe tick \
+dukascopy-go download \
+  --symbol xauusd \
+  --timeframe m1 \
   --from 2024-01-02T00:00:00Z \
-  --to 2024-01-02T01:00:00Z \
-  --output ./data/eurusd-ticks.csv \
+  --to 2024-01-02T06:00:00Z \
+  --output ./data/xauusd-m1.parquet \
   --full
 ```
 
-Download with custom columns:
+Download a larger range with durable partitions and parallel workers:
 
 ```bash
-go run ./cmd/dukascopy-go download \
-  --symbol xauusd \
-  --timeframe m1 \
-  --from 2024-01-02T00:00:00Z \
-  --to 2024-01-02T06:00:00Z \
-  --output ./data/xauusd-custom.csv \
-  --custom-columns timestamp,bid_open,ask_open,volume
-```
-
-Download an aggregated timeframe:
-
-```bash
-go run ./cmd/dukascopy-go download \
-  --symbol xauusd \
-  --timeframe m5 \
-  --from 2024-01-02T00:00:00Z \
-  --to 2024-01-02T02:00:00Z \
-  --output ./data/xauusd-m5.csv \
-  --simple
-```
-
-Download monthly aggregated bars:
-
-```bash
-go run ./cmd/dukascopy-go download \
-  --symbol xauusd \
-  --timeframe mn1 \
-  --from 2024-01-01T00:00:00Z \
-  --to 2024-04-01T00:00:00Z \
-  --output ./data/xauusd-mn1.csv \
-  --simple
-```
-
-Download another Dukascopy instrument:
-
-```bash
-go run ./cmd/dukascopy-go download \
-  --symbol eurusd \
-  --timeframe h1 \
-  --from 2024-01-01T00:00:00Z \
-  --to 2024-01-03T00:00:00Z \
-  --output ./data/eurusd-h1.csv \
-  --full
-```
-
-Resume an interrupted download:
-
-```bash
-go run ./cmd/dukascopy-go download \
-  --symbol xauusd \
-  --timeframe m1 \
-  --from 2024-01-02T00:00:00Z \
-  --to 2024-01-02T06:00:00Z \
-  --output ./data/xauusd-minute.csv \
-  --simple \
-  --resume
-```
-
-Download with progress and custom retry settings:
-
-```bash
-go run ./cmd/dukascopy-go download \
-  --symbol xauusd \
-  --timeframe m1 \
-  --from 2024-01-02T00:00:00Z \
-  --to 2024-01-02T06:00:00Z \
-  --output ./data/xauusd-minute.csv \
-  --simple \
-  --progress \
-  --retries 5 \
-  --retry-backoff 750ms
-```
-
-Download with request pacing:
-
-```bash
-go run ./cmd/dukascopy-go download \
-  --symbol xauusd \
-  --timeframe m1 \
-  --from 2024-01-02T00:00:00Z \
-  --to 2024-01-02T06:00:00Z \
-  --output ./data/xauusd-minute.csv \
-  --simple \
-  --rate-limit 150ms
-```
-
-Download a large range with partition checkpoints:
-
-```bash
-go run ./cmd/dukascopy-go download \
-  --symbol xauusd \
-  --timeframe m1 \
-  --from 2024-01-01T00:00:00Z \
-  --to 2024-02-01T00:00:00Z \
-  --output ./data/xauusd-january.csv \
-  --simple \
-  --partition auto \
-  --progress
-```
-
-Download a large range with parallel partition workers:
-
-```bash
-go run ./cmd/dukascopy-go download \
+dukascopy-go download \
   --symbol xauusd \
   --timeframe m1 \
   --from 2024-01-01T00:00:00Z \
@@ -387,21 +101,134 @@ go run ./cmd/dukascopy-go download \
   --progress
 ```
 
-Use a custom checkpoint manifest path:
+Inspect the finished dataset:
 
 ```bash
-go run ./cmd/dukascopy-go download \
-  --symbol eurusd \
-  --timeframe h1 \
-  --from 2024-01-01T00:00:00Z \
-  --to 2024-03-01T00:00:00Z \
-  --output ./data/eurusd-h1.csv \
-  --full \
-  --partition month \
-  --checkpoint-manifest ./data/eurusd-h1.checkpoint.json
+dukascopy-go stats --input ./data/xauusd-january.csv
 ```
 
-## CSV Schemas
+If you are working from a clone instead of an installed binary, use:
+
+```bash
+go run ./cmd/dukascopy-go --help
+```
+
+## Commands
+
+| Command | Purpose |
+| --- | --- |
+| `instruments` | Search Dukascopy instruments and print matches as text or JSON |
+| `download` | Download historical data and save it as CSV or Parquet |
+| `stats` | Inspect CSV, CSV.GZ, or Parquet datasets for counts, ranges, gaps, duplicates, and ordering |
+| `manifest inspect` | Print checkpoint manifest summaries and partition status |
+| `manifest verify` | Verify partition files and final outputs against manifest metadata |
+| `manifest repair` | Rebuild missing or invalid files from valid existing data when possible |
+| `manifest prune` | Remove obsolete temp files and orphan partition files safely |
+| `list-timeframes` | Print supported timeframe values |
+| `version` | Print embedded version, commit, and build date information |
+
+Global config flag:
+
+```bash
+dukascopy-go --config ./dukascopy.json instruments --query xauusd
+```
+
+## Common Examples
+
+Search as JSON:
+
+```bash
+dukascopy-go instruments --query xauusd --json
+```
+
+Download compressed CSV directly:
+
+```bash
+dukascopy-go download \
+  --symbol xauusd \
+  --timeframe m1 \
+  --from 2024-01-02T00:00:00Z \
+  --to 2024-01-02T06:00:00Z \
+  --output ./data/xauusd-m1.csv.gz \
+  --simple
+```
+
+Stream CSV to `stdout`:
+
+```bash
+dukascopy-go download \
+  --symbol xauusd \
+  --timeframe m1 \
+  --from 2024-01-02T00:00:00Z \
+  --to 2024-01-02T00:03:00Z \
+  --output - \
+  --simple
+```
+
+Use custom columns:
+
+```bash
+dukascopy-go download \
+  --symbol xauusd \
+  --timeframe m1 \
+  --from 2024-01-02T00:00:00Z \
+  --to 2024-01-02T06:00:00Z \
+  --output ./data/xauusd-custom.csv \
+  --custom-columns timestamp,bid_open,ask_open,volume
+```
+
+Resume an interrupted CSV download:
+
+```bash
+dukascopy-go download \
+  --symbol xauusd \
+  --timeframe m1 \
+  --from 2024-01-02T00:00:00Z \
+  --to 2024-01-02T06:00:00Z \
+  --output ./data/xauusd-m1.csv \
+  --simple \
+  --resume
+```
+
+Verify a manifest without downloading anything:
+
+```bash
+dukascopy-go manifest verify --manifest ./data/xauusd-m1.csv.manifest.json
+```
+
+Verify the finished output and include data quality checks:
+
+```bash
+dukascopy-go manifest verify --output ./data/xauusd-m1.csv --check-data-quality
+```
+
+Repair a dataset from valid existing files:
+
+```bash
+dukascopy-go manifest repair --output ./data/xauusd-m1.csv
+```
+
+Clean orphan partition and temp files:
+
+```bash
+dukascopy-go manifest prune --output ./data/xauusd-m1.csv
+```
+
+## Output Formats
+
+Supported output targets:
+
+- `.csv`
+- `.csv.gz`
+- `.parquet`
+- `-` for CSV to `stdout`
+
+Schema options:
+
+- `--simple` writes the smallest practical schema
+- `--full` writes midpoint, spread, and explicit bid/ask fields
+- `--custom-columns` writes only the columns you ask for
+- `--resume` is intentionally CSV-only; for durable Parquet workflows, prefer `--partition`
 
 Simple bar schema:
 
@@ -415,12 +242,6 @@ Full bar schema:
 timestamp,mid_open,mid_high,mid_low,mid_close,spread,volume,bid_open,bid_high,bid_low,bid_close,ask_open,ask_high,ask_low,ask_close
 ```
 
-In `--full` bar output, midpoint values are exposed explicitly as `mid_open`, `mid_high`, `mid_low`, and `mid_close`. `spread` is computed as `ask_close - bid_close`.
-
-Midpoint columns are written with one extra decimal place of precision relative to the instrument price scale when needed, so values like `2064.4735` are preserved instead of being rounded to `2064.474`.
-
-When `--custom-columns` is used for bars, you can request any combination of `mid_*`, `bid_*`, `ask_*`, `spread`, and `volume`. Requesting any `mid_*`, `bid_*`, `ask_*`, or `spread` column makes the CLI fetch bid/ask data for the requested range.
-
 Simple tick schema:
 
 ```text
@@ -433,9 +254,11 @@ Full tick schema:
 timestamp,bid,ask,bid_volume,ask_volume
 ```
 
+When `--custom-columns` is used for bars, you can request any combination of `mid_*`, `bid_*`, `ask_*`, `spread`, and `volume`.
+
 ## Timeframes
 
-Preferred timeframe values:
+Supported values:
 
 ```text
 tick
@@ -450,8 +273,6 @@ d1
 w1
 mn1
 ```
-
-The older `--granularity` flag is still accepted as a compatibility alias.
 
 Timeframe behavior:
 
@@ -469,57 +290,39 @@ w1    aggregated from d1
 mn1   aggregated from d1 by calendar month
 ```
 
-## CLI Notes
+You can also print them from the CLI:
 
-- `--simple` writes the smallest useful schema.
-- `--full` writes midpoint, spread, and explicit bid/ask columns.
-- `--custom-columns` lets you request only the columns you need.
-- `--config` loads JSON defaults for commands. Explicit CLI flags always override config values.
-- If `--output` ends with `.gz`, the CLI writes gzip-compressed CSV.
-- If `--output` ends with `.parquet`, the CLI writes Parquet instead of CSV.
-- If `--output` is `-`, the CLI writes raw CSV rows to `stdout` and skips the success summary line.
-- `--resume` reuses an existing CSV header and appends only rows after the last saved record.
-- `--resume` requires the selected columns to include `timestamp`.
-- `--resume` is intentionally CSV-only. For durable Parquet downloads, use `--partition` and checkpoints instead.
-- `--retries` and `--retry-backoff` control retry behavior for transient HTTP failures such as `429` and `5xx`.
-- `--rate-limit` adds a minimum delay between HTTP requests. This is useful when you want gentler pacing against the upstream API.
-- `--progress` prints chunk and retry updates to `stderr`.
-- `--partition` splits a large range into durable sub-ranges. Supported values are `none`, `auto`, `hour`, `day`, `week`, `month`, and `year`.
-- `--parallelism` controls how many partition workers run at once. Values greater than `1` require `--partition`.
-- `--checkpoint-manifest` overrides the default checkpoint path. If omitted, the CLI uses `<output>.manifest.json`.
-- Partitioned downloads keep completed part files in `<output>.parts/` and reuse them automatically on the next run.
-- Reused partition files are audited before reuse. If row count or SHA-256 hash does not match the manifest, the CLI downloads that partition again.
-- The final output file is assembled from the partition files after all partitions are complete, then audited with row count and SHA-256.
-- The manifest includes a summary section with total partition counts and final output row totals.
-- If the final output file is modified or corrupted later, the next run detects the mismatch and re-assembles it from valid partition files.
-- `--list-timeframes` prints the currently supported timeframe values and their meaning.
-- `stats` prints row counts, timestamp range, duplicate counts, inferred timeframe, expected interval, gap counts, and out-of-order row counts for CSV, CSV.GZ, and Parquet files.
-- `manifest inspect` prints a readable manifest summary and partition status table.
-- `manifest prune` removes orphan partition files and leftover temp files that are no longer referenced by the manifest.
-- `manifest repair` tries to rebuild missing or invalid partition files from a valid final CSV, or rebuild the final CSV from valid partition files.
-- `manifest verify` audits partition files and the final output CSV against the manifest and exits non-zero on mismatch.
-- `manifest verify --check-data-quality` also inspects the final CSV for duplicate rows, duplicate timestamps, and out-of-order records. Gaps are reported as warnings.
-- `--version` prints embedded version, commit, and build date metadata.
-- `--side` controls the primary side for simple bar exports.
-- Commands use ANSI colors for headings, success messages, and table headers by default; set `NO_COLOR=1` to disable coloring.
+```bash
+dukascopy-go --list-timeframes
+```
 
 ## Checkpointed Downloads
 
-Partitioned downloads are the safest option for long-running jobs.
+Large downloads are where `dukascopy-go` really separates itself from a simple exporter.
 
-What happens when `--partition` is enabled:
+When `--partition` is enabled:
 
-- Each sub-range is written to its own CSV file inside `<output>.parts/`.
-- Partition files stay in CSV form even when the final output is Parquet. This keeps repair and re-assembly simple and durable.
-- A checkpoint manifest tracks which partitions are already complete.
-- The manifest stores row counts and SHA-256 hashes for completed partition files.
-- The manifest also stores the final output audit and a summary of completed work.
-- If the process crashes or the network fails, completed partition files remain intact.
-- Running the same command again reuses completed partitions and only downloads missing or invalid ones.
-- If `--parallelism` is greater than `1`, multiple partitions can download at the same time while the manifest is still updated safely after each completed part.
-- After every partition is complete, the CLI assembles the final output file from the partition files and audits it.
+- Each sub-range is written to its own CSV file inside `<output>.parts/`
+- A checkpoint manifest tracks partition completion, row counts, and SHA-256 hashes
+- Use `--checkpoint-manifest` if you want a custom manifest path instead of `<output>.manifest.json`
+- Completed partition files are reused only after passing integrity checks
+- Final outputs are assembled from partition files after every partition is complete
+- If a run is interrupted, only missing or invalid partitions are downloaded next time
+- If the final output is later damaged, the CLI can often rebuild it from valid partition files
 
-`auto` chooses a partition size based on timeframe:
+Supported partition values:
+
+```text
+none
+auto
+hour
+day
+week
+month
+year
+```
+
+`auto` uses sensible defaults based on timeframe:
 
 ```text
 tick  hour
@@ -535,6 +338,15 @@ w1    week
 mn1   month
 ```
 
+## Reliability Features
+
+- `--retries` and `--retry-backoff` handle transient `429` and `5xx` failures
+- `--rate-limit` adds a minimum delay between requests
+- `--progress` prints chunk and retry progress to `stderr`
+- `--resume` appends only rows after the latest saved CSV timestamp
+- Partitioned downloads keep durable intermediate files for recovery and reuse
+- `stats` helps spot gaps, duplicates, unexpected intervals, and out-of-order rows
+
 ## Configuration
 
 Default API base URL:
@@ -543,9 +355,13 @@ Default API base URL:
 https://jetta.dukascopy.com
 ```
 
-You can override it with the `DUKASCOPY_API_BASE_URL` environment variable. This is mainly useful for tests or local mocks.
+Override it with:
 
-The CLI can also load defaults from a JSON config file:
+```bash
+DUKASCOPY_API_BASE_URL=https://jetta.dukascopy.com
+```
+
+You can also store defaults in a JSON config file:
 
 ```json
 {
@@ -566,20 +382,41 @@ The CLI can also load defaults from a JSON config file:
 }
 ```
 
-Pass it explicitly:
+Use it explicitly:
 
 ```bash
-dukascopy-go --config ./dukascopy.json instruments --query xauusd
+dukascopy-go --config ./dukascopy.json download \
+  --symbol xauusd \
+  --from 2024-01-02T00:00:00Z \
+  --to 2024-01-02T06:00:00Z \
+  --output ./data/xauusd.csv
 ```
 
 Or export it once:
 
 ```bash
 export DUKASCOPY_CONFIG=./dukascopy.json
-dukascopy-go download --symbol xauusd --from 2024-01-02T00:00:00Z --to 2024-01-02T06:00:00Z --output ./data/xauusd.csv
+dukascopy-go instruments --query xauusd
 ```
 
-## Tests
+## Releases
+
+Tagged releases are built automatically through GitHub Actions and published as GitHub Release artifacts for Linux, macOS, and Windows.
+
+Typical release flow:
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+Inspect version metadata in any built binary:
+
+```bash
+dukascopy-go --version
+```
+
+## Development
 
 Run all tests:
 
@@ -592,3 +429,13 @@ Run end-to-end tests only:
 ```bash
 go test ./e2e -v
 ```
+
+Build locally:
+
+```bash
+go build -o dukascopy-go ./cmd/dukascopy-go
+```
+
+## Legal Disclaimer
+
+`dukascopy-go` is not affiliated with, endorsed by, or vetted by Dukascopy Bank SA. It is an independent open-source CLI that works with Dukascopy's publicly accessible endpoints and is intended for research, automation, and data engineering workflows.

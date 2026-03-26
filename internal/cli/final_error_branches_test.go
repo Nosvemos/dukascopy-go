@@ -105,16 +105,18 @@ func TestPartitionAndDownloadAdditionalBranches(t *testing.T) {
 	server := newCLITestServer()
 	defer server.Close()
 
+	now := time.Now()
+
 	if _, err := normalizePartition("auto", dukascopy.Granularity("odd")); err == nil {
 		t.Fatal("expected unsupported auto partition error")
 	}
 	if _, err := normalizePartition("weird", dukascopy.GranularityM1); err == nil {
 		t.Fatal("expected unsupported partition value error")
 	}
-	if _, err := buildPartitions(time.Now(), time.Now(), partitionDay); err == nil {
+	if _, err := buildPartitions(now, now, partitionDay); err == nil {
 		t.Fatal("expected empty partition range error")
 	}
-	if _, err := nextPartitionBoundary(time.Now(), "odd"); err == nil {
+	if _, err := nextPartitionBoundary(now, "odd"); err == nil {
 		t.Fatal("expected unsupported boundary mode error")
 	}
 
