@@ -61,7 +61,7 @@ func runCLIExpectError(t *testing.T, baseURL string, args ...string) string {
 
 func repoRoot() string {
 	_, currentFile, _, _ := runtime.Caller(0)
-	return filepath.Clean(filepath.Join(filepath.Dir(currentFile), ".."))
+	return filepath.Clean(filepath.Join(filepath.Dir(currentFile), "..", ".."))
 }
 
 func newMockServer() *httptest.Server {

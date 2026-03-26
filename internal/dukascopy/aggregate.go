@@ -25,10 +25,7 @@ func AggregateTicksToBars(ticks []Tick, granularity Granularity, side PriceSide,
 	keys := make([]time.Time, 0)
 
 	for _, tick := range ticks {
-		bucketTime, err := bucketStart(tick.Time.UTC(), granularity)
-		if err != nil {
-			return nil, err
-		}
+		bucketTime, _ := bucketStart(tick.Time.UTC(), granularity)
 		state, exists := buckets[bucketTime]
 		if !exists {
 			state = &bucketState{}
@@ -93,10 +90,7 @@ func AggregateBars(sourceBars []Bar, granularity Granularity, from time.Time, to
 	keys := make([]time.Time, 0)
 
 	for _, source := range sourceBars {
-		bucketTime, err := bucketStart(source.Time.UTC(), granularity)
-		if err != nil {
-			return nil, err
-		}
+		bucketTime, _ := bucketStart(source.Time.UTC(), granularity)
 		state, exists := buckets[bucketTime]
 		if !exists {
 			state = &bucketState{}

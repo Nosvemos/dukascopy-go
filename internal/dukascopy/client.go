@@ -374,10 +374,7 @@ func (c *Client) getJSON(ctx context.Context, segments []string, target any) err
 
 	var lastErr error
 	for attempt := 0; attempt <= c.maxRetries; attempt++ {
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, requestURL.String(), nil)
-		if err != nil {
-			return err
-		}
+		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, requestURL.String(), nil)
 		if err := c.waitForRateLimit(ctx); err != nil {
 			return err
 		}

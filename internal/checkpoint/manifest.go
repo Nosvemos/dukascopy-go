@@ -3,12 +3,28 @@ package checkpoint
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"time"
 )
 
 const CurrentManifestVersion = 1
+
+type tempWriteFile interface {
+	io.Writer
+	io.Closer
+	Name() string
+}
+
+var (
+	mkdirAllFn      = os.MkdirAll
+	marshalIndentFn = json.MarshalIndent
+	createTempFn    = func(dir string, pattern string) (tempWriteFile, error) { return os.CreateTemp(dir, pattern) }
+	statFn          = os.Stat
+	removeFn        = os.Remove
+	renameFn        = os.Rename
+)
 
 type Manifest struct {
 	Version     int             `json:"version"`
@@ -84,19 +100,19 @@ func Load(path string) (Manifest, error) {
 }
 
 func Save(path string, manifest Manifest) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := mkdirAllFn(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
 
 	RefreshSummary(&manifest)
 	manifest.UpdatedAt = time.Now().UTC()
-	data, err := json.MarshalIndent(manifest, "", "  ")
+	data, err := marshalIndentFn(manifest, "", "  ")
 	if err != nil {
 		return err
 	}
 	data = append(data, '\n')
 
-	tempFile, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".tmp-*")
+	tempFile, err := createTempFn(filepath.Dir(path), filepath.Base(path)+".tmp-*")
 	if err != nil {
 		return err
 	}
@@ -111,13 +127,13 @@ func Save(path string, manifest Manifest) error {
 		return err
 	}
 
-	if _, err := os.Stat(path); err == nil {
-		if err := os.Remove(path); err != nil {
+	if _, err := statFn(path); err == nil {
+		if err := removeFn(path); err != nil {
 			return err
 		}
 	}
 
-	return os.Rename(tempPath, path)
+	return renameFn(tempPath, path)
 }
 
 func ValidateCompatibility(existing Manifest, expected Manifest) error {

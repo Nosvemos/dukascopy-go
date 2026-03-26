@@ -18,6 +18,25 @@ import (
 
 const parquetColumnsMetadataKey = "dukascopy.columns"
 
+type parquetRecordWriter interface {
+	SetKeyValueMetadata(key string, value string)
+	Write(rows []map[string]any) (int, error)
+	Close() error
+}
+
+type parquetRecordReader interface {
+	Read(rows []map[string]any) (int, error)
+	Close() error
+}
+
+var parquetWriterFactory = func(file *os.File, schema *parquet.Schema) parquetRecordWriter {
+	return parquet.NewGenericWriter[map[string]any](file, schema)
+}
+
+var parquetReaderFactory = func(file *os.File, schema *parquet.Schema) parquetRecordReader {
+	return parquet.NewGenericReader[map[string]any](file, schema)
+}
+
 func writeBarsParquet(outputPath string, instrument dukascopy.Instrument, columns []string, primaryBars []dukascopy.Bar, bidBars []dukascopy.Bar, askBars []dukascopy.Bar) error {
 	records, err := buildBarParquetRecords(instrument, columns, primaryBars, bidBars, askBars)
 	if err != nil {
@@ -110,7 +129,8 @@ func writeParquetRecords(outputPath string, columns []string, records []map[stri
 	}
 
 	schema := parquetSchemaForColumns(columns)
-	writer := parquet.NewGenericWriter[map[string]any](file, schema)
+	writer := parquetWriterFactory(file, schema)
+	defer file.Close()
 	writer.SetKeyValueMetadata(parquetColumnsMetadataKey, strings.Join(columns, ","))
 	if len(records) > 0 {
 		if _, err := writer.Write(records); err != nil {
@@ -118,10 +138,9 @@ func writeParquetRecords(outputPath string, columns []string, records []map[stri
 		}
 	}
 	if err := writer.Close(); err != nil {
-		file.Close()
 		return err
 	}
-	return file.Close()
+	return nil
 }
 
 func parquetSchemaForColumns(columns []string) *parquet.Schema {
@@ -196,7 +215,7 @@ func inspectParquet(path string) (CSVStats, error) {
 	timestampIndex := indexOfColumn(stats.Columns, "timestamp")
 	stats.HasTimestamp = timestampIndex >= 0
 
-	reader := parquet.NewGenericReader[map[string]any](file, parquetFile.Schema())
+	reader := parquetReaderFactory(file, parquetFile.Schema())
 	defer reader.Close()
 
 	seenRows := make(map[string]int)
@@ -299,7 +318,7 @@ func assembleParquetFromCSVParts(outputPath string, partPaths []string, from tim
 
 	var (
 		columns        []string
-		writer         *parquet.GenericWriter[map[string]any]
+		writer         parquetRecordWriter
 		file           *os.File
 		lastTimestamp  string
 		lastRecordKey  string
@@ -307,17 +326,25 @@ func assembleParquetFromCSVParts(outputPath string, partPaths []string, from tim
 	)
 
 	closeWriter := func() error {
-		if writer != nil {
-			if err := writer.Close(); err != nil {
-				file.Close()
+		currentWriter := writer
+		currentFile := file
+		writer = nil
+		file = nil
+
+		if currentWriter != nil {
+			if err := currentWriter.Close(); err != nil {
+				if currentFile != nil {
+					currentFile.Close()
+				}
 				return err
 			}
 		}
-		if file != nil {
-			return file.Close()
+		if currentFile != nil {
+			return currentFile.Close()
 		}
 		return nil
 	}
+	defer closeWriter()
 
 	for _, partPath := range partPaths {
 		_, reader, closeReader, err := openCSVReader(partPath)
@@ -341,7 +368,7 @@ func assembleParquetFromCSVParts(outputPath string, partPaths []string, from tim
 				closeReader()
 				return err
 			}
-			writer = parquet.NewGenericWriter[map[string]any](file, parquetSchemaForColumns(columns))
+			writer = parquetWriterFactory(file, parquetSchemaForColumns(columns))
 			writer.SetKeyValueMetadata(parquetColumnsMetadataKey, strings.Join(columns, ","))
 			headerPrepared = true
 		} else if !HeadersMatch(columns, partHeader) {
@@ -429,7 +456,7 @@ func extractRangeFromParquet(sourcePath string, outputPath string, from time.Tim
 		return fmt.Errorf("source parquet %s does not contain a timestamp column", sourcePath)
 	}
 
-	reader := parquet.NewGenericReader[map[string]any](file, parquetFile.Schema())
+	reader := parquetReaderFactory(file, parquetFile.Schema())
 	defer reader.Close()
 
 	if isParquetPath(outputPath) {
@@ -443,7 +470,7 @@ func extractRangeFromParquet(sourcePath string, outputPath string, from time.Tim
 		if err != nil {
 			return err
 		}
-		writer := parquet.NewGenericWriter[map[string]any](outFile, parquetSchemaForColumns(columns))
+		writer := parquetWriterFactory(outFile, parquetSchemaForColumns(columns))
 		writer.SetKeyValueMetadata(parquetColumnsMetadataKey, strings.Join(columns, ","))
 
 		for {
@@ -578,7 +605,7 @@ func extractRangeCSVToParquet(sourcePath string, outputPath string, from time.Ti
 	if err != nil {
 		return err
 	}
-	writer := parquet.NewGenericWriter[map[string]any](file, parquetSchemaForColumns(header))
+	writer := parquetWriterFactory(file, parquetSchemaForColumns(header))
 	writer.SetKeyValueMetadata(parquetColumnsMetadataKey, strings.Join(header, ","))
 
 	for {
