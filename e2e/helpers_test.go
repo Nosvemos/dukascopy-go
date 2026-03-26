@@ -84,6 +84,13 @@ func newMockServer() *httptest.Server {
 					"description": "Euro vs US Dollar",
 					"priceScale":  5,
 				},
+				{
+					"id":          3,
+					"name":        "BTC/USD",
+					"code":        "BTC-USD",
+					"description": "Bitcoin vs US Dollar",
+					"priceScale":  1,
+				},
 			},
 		})
 	})

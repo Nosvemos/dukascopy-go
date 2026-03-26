@@ -22,7 +22,7 @@ const (
 )
 
 var simpleBarColumns = []string{"timestamp", "open", "high", "low", "close", "volume"}
-var fullBarColumns = []string{"timestamp", "open", "high", "low", "close", "volume", "bid_open", "bid_high", "bid_low", "bid_close", "ask_open", "ask_high", "ask_low", "ask_close"}
+var fullBarColumns = []string{"timestamp", "mid_open", "mid_high", "mid_low", "mid_close", "spread", "volume", "bid_open", "bid_high", "bid_low", "bid_close", "ask_open", "ask_high", "ask_low", "ask_close"}
 var simpleTickColumns = []string{"timestamp", "bid", "ask"}
 var fullTickColumns = []string{"timestamp", "bid", "ask", "bid_volume", "ask_volume"}
 
@@ -55,6 +55,11 @@ func ParseBarColumns(value string) ([]string, error) {
 		"high":      {},
 		"low":       {},
 		"close":     {},
+		"mid_open":  {},
+		"mid_high":  {},
+		"mid_low":   {},
+		"mid_close": {},
+		"spread":    {},
 		"volume":    {},
 		"bid_open":  {},
 		"bid_high":  {},
@@ -79,7 +84,7 @@ func ParseTickColumns(value string) ([]string, error) {
 
 func BarColumnsNeedBidAsk(columns []string) bool {
 	for _, column := range columns {
-		if strings.HasPrefix(column, "bid_") || strings.HasPrefix(column, "ask_") {
+		if strings.HasPrefix(column, "bid_") || strings.HasPrefix(column, "ask_") || strings.HasPrefix(column, "mid_") || column == "spread" {
 			return true
 		}
 	}
@@ -217,6 +222,14 @@ func formatPrimaryBarColumn(column string, scale int, bar dukascopy.Bar) (string
 		return formatPrice(bar.Low, scale), nil
 	case "close":
 		return formatPrice(bar.Close, scale), nil
+	case "mid_open":
+		return formatPrice(bar.Open, scale), nil
+	case "mid_high":
+		return formatPrice(bar.High, scale), nil
+	case "mid_low":
+		return formatPrice(bar.Low, scale), nil
+	case "mid_close":
+		return formatPrice(bar.Close, scale), nil
 	case "volume":
 		return formatVolume(bar.Volume), nil
 	default:
@@ -236,6 +249,16 @@ func formatBarColumn(column string, scale int, bid dukascopy.Bar, ask dukascopy.
 		return formatPrice(midpoint(bid.Low, ask.Low), scale), nil
 	case "close":
 		return formatPrice(midpoint(bid.Close, ask.Close), scale), nil
+	case "mid_open":
+		return formatPrice(midpoint(bid.Open, ask.Open), scale), nil
+	case "mid_high":
+		return formatPrice(midpoint(bid.High, ask.High), scale), nil
+	case "mid_low":
+		return formatPrice(midpoint(bid.Low, ask.Low), scale), nil
+	case "mid_close":
+		return formatPrice(midpoint(bid.Close, ask.Close), scale), nil
+	case "spread":
+		return formatPrice(ask.Close-bid.Close, scale), nil
 	case "volume":
 		return formatVolume(bid.Volume), nil
 	case "bid_open":

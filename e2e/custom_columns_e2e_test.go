@@ -21,7 +21,7 @@ func TestDownloadCustomBarColumns(t *testing.T) {
 		"--from", "2024-01-02T00:00:00Z",
 		"--to", "2024-01-02T00:03:00Z",
 		"--output", outputPath,
-		"--custom-columns", "timestamp,bid_open,ask_open,volume",
+		"--custom-columns", "timestamp,mid_open,bid_open,ask_open,volume",
 	)
 
 	if !strings.Contains(output, "wrote 3 bars") {
@@ -34,10 +34,10 @@ func TestDownloadCustomBarColumns(t *testing.T) {
 	}
 
 	content := string(data)
-	if !strings.Contains(content, "timestamp,bid_open,ask_open,volume") {
+	if !strings.Contains(content, "timestamp,mid_open,bid_open,ask_open,volume") {
 		t.Fatalf("missing custom header: %s", content)
 	}
-	if !strings.Contains(content, "2024-01-02T00:00:00Z,100.000,100.200,1100") {
+	if !strings.Contains(content, "2024-01-02T00:00:00Z,100.100,100.000,100.200,1100") {
 		t.Fatalf("missing custom row: %s", content)
 	}
 }

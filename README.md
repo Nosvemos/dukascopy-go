@@ -5,6 +5,7 @@ A Go CLI for searching Dukascopy instruments and exporting historical market dat
 ## Features
 
 - Resolves flexible symbols such as `xauusd`, `eur/usd`, and `BTC-USD`
+- Supports any instrument returned by Dukascopy's `/v1/instruments` catalog, not just `XAUUSD`
 - Searches instruments with the `instruments` command
 - Downloads `tick`, `m1`, `h1`, and `d1` data as CSV
 - Supports reduced, expanded, and custom CSV column sets with `--simple`, `--full`, and `--custom-columns`
@@ -84,12 +85,12 @@ timestamp,open,high,low,close,volume
 Full bar schema:
 
 ```text
-timestamp,open,high,low,close,volume,bid_open,bid_high,bid_low,bid_close,ask_open,ask_high,ask_low,ask_close
+timestamp,mid_open,mid_high,mid_low,mid_close,spread,volume,bid_open,bid_high,bid_low,bid_close,ask_open,ask_high,ask_low,ask_close
 ```
 
-In `--full` bar output, the generic `open/high/low/close` columns are midpoint values derived from bid and ask candles. Spread can be computed later from the explicit bid and ask columns.
+In `--full` bar output, midpoint values are exposed explicitly as `mid_open`, `mid_high`, `mid_low`, and `mid_close`. `spread` is computed as `ask_close - bid_close`.
 
-When `--custom-columns` is used for bars, requesting any `bid_*` or `ask_*` column makes the CLI fetch bid/ask data and populate the generic `open/high/low/close` columns as midpoint values as well.
+When `--custom-columns` is used for bars, you can request any combination of `mid_*`, `bid_*`, `ask_*`, `spread`, and `volume`. Requesting any `mid_*`, `bid_*`, `ask_*`, or `spread` column makes the CLI fetch bid/ask data for the requested range.
 
 Simple tick schema:
 
