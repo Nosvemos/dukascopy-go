@@ -63,6 +63,18 @@ type DownloadRequest struct {
 	To          time.Time
 }
 
+type ProgressEvent struct {
+	Kind       string
+	Scope      string
+	Current    int
+	Total      int
+	Detail     string
+	Attempt    int
+	MaxAttempt int
+}
+
+type ProgressFunc func(ProgressEvent)
+
 type Bar struct {
 	Time   time.Time
 	Open   float64
@@ -92,6 +104,9 @@ type DownloadResult struct {
 type Client struct {
 	baseURL    *url.URL
 	httpClient *http.Client
+	maxRetries int
+	backoff    time.Duration
+	progress   ProgressFunc
 }
 
 func NewClient(rawBaseURL string, timeout time.Duration) *Client {
@@ -105,7 +120,30 @@ func NewClient(rawBaseURL string, timeout time.Duration) *Client {
 		httpClient: &http.Client{
 			Timeout: timeout,
 		},
+		maxRetries: 3,
+		backoff:    500 * time.Millisecond,
 	}
+}
+
+func (c *Client) WithRetries(maxRetries int) *Client {
+	if maxRetries < 0 {
+		maxRetries = 0
+	}
+	c.maxRetries = maxRetries
+	return c
+}
+
+func (c *Client) WithBackoff(backoff time.Duration) *Client {
+	if backoff <= 0 {
+		backoff = 500 * time.Millisecond
+	}
+	c.backoff = backoff
+	return c
+}
+
+func (c *Client) WithProgress(progress ProgressFunc) *Client {
+	c.progress = progress
+	return c
 }
 
 func (c *Client) ListInstruments(ctx context.Context) ([]Instrument, error) {
@@ -206,7 +244,19 @@ func (c *Client) downloadBars(ctx context.Context, instrument Instrument, side P
 
 func (c *Client) downloadMinuteBars(ctx context.Context, instrument Instrument, side PriceSide, from time.Time, to time.Time) ([]Bar, error) {
 	var all []Bar
+	days := make([]time.Time, 0)
 	for current := midnightUTC(from); current.Before(to); current = current.AddDate(0, 0, 1) {
+		days = append(days, current)
+	}
+
+	for index, current := range days {
+		c.emitProgress(ProgressEvent{
+			Kind:    "chunk",
+			Scope:   "minute",
+			Current: index + 1,
+			Total:   len(days),
+			Detail:  current.Format("2006-01-02"),
+		})
 		var payload candlePayload
 		if err := c.getJSON(ctx, []string{
 			"v1", "candles", "minute", instrument.Code, string(side),
@@ -223,7 +273,19 @@ func (c *Client) downloadMinuteBars(ctx context.Context, instrument Instrument, 
 
 func (c *Client) downloadHourlyBars(ctx context.Context, instrument Instrument, side PriceSide, from time.Time, to time.Time) ([]Bar, error) {
 	var all []Bar
+	months := make([]time.Time, 0)
 	for current := monthStartUTC(from); current.Before(to); current = current.AddDate(0, 1, 0) {
+		months = append(months, current)
+	}
+
+	for index, current := range months {
+		c.emitProgress(ProgressEvent{
+			Kind:    "chunk",
+			Scope:   "hour",
+			Current: index + 1,
+			Total:   len(months),
+			Detail:  current.Format("2006-01"),
+		})
 		var payload candlePayload
 		if err := c.getJSON(ctx, []string{
 			"v1", "candles", "hour", instrument.Code, string(side),
@@ -239,7 +301,19 @@ func (c *Client) downloadHourlyBars(ctx context.Context, instrument Instrument, 
 
 func (c *Client) downloadDailyBars(ctx context.Context, instrument Instrument, side PriceSide, from time.Time, to time.Time) ([]Bar, error) {
 	var all []Bar
+	years := make([]int, 0)
 	for year := from.Year(); year <= to.Add(-time.Nanosecond).Year(); year++ {
+		years = append(years, year)
+	}
+
+	for index, year := range years {
+		c.emitProgress(ProgressEvent{
+			Kind:    "chunk",
+			Scope:   "day",
+			Current: index + 1,
+			Total:   len(years),
+			Detail:  fmt.Sprintf("%d", year),
+		})
 		var payload candlePayload
 		if err := c.getJSON(ctx, []string{
 			"v1", "candles", "day", instrument.Code, string(side),
@@ -254,7 +328,19 @@ func (c *Client) downloadDailyBars(ctx context.Context, instrument Instrument, s
 
 func (c *Client) downloadTicks(ctx context.Context, instrument Instrument, from time.Time, to time.Time) ([]Tick, error) {
 	var all []Tick
+	hours := make([]time.Time, 0)
 	for current := hourStartUTC(from); current.Before(to); current = current.Add(time.Hour) {
+		hours = append(hours, current)
+	}
+
+	for index, current := range hours {
+		c.emitProgress(ProgressEvent{
+			Kind:    "chunk",
+			Scope:   "tick",
+			Current: index + 1,
+			Total:   len(hours),
+			Detail:  current.Format(time.RFC3339),
+		})
 		var payload tickPayload
 		if err := c.getJSON(ctx, []string{
 			"v1", "ticks", instrument.Code,
@@ -274,24 +360,71 @@ func (c *Client) getJSON(ctx context.Context, segments []string, target any) err
 	requestURL := *c.baseURL
 	requestURL.Path = path.Join(append([]string{c.baseURL.Path}, segments...)...)
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, requestURL.String(), nil)
-	if err != nil {
-		return err
+	var lastErr error
+	for attempt := 0; attempt <= c.maxRetries; attempt++ {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, requestURL.String(), nil)
+		if err != nil {
+			return err
+		}
+
+		res, err := c.httpClient.Do(req)
+		if err == nil {
+			func() {
+				defer res.Body.Close()
+				if res.StatusCode >= 200 && res.StatusCode < 300 {
+					lastErr = json.NewDecoder(res.Body).Decode(target)
+					if lastErr != nil {
+						lastErr = fmt.Errorf("decode %s: %w", requestURL.String(), lastErr)
+					}
+					return
+				}
+
+				body, _ := io.ReadAll(io.LimitReader(res.Body, 512))
+				lastErr = fmt.Errorf("dukascopy api %s returned %s: %s", requestURL.String(), res.Status, strings.TrimSpace(string(body)))
+				if !shouldRetryStatus(res.StatusCode) {
+					attempt = c.maxRetries
+				}
+			}()
+		} else {
+			lastErr = err
+		}
+
+		if lastErr == nil {
+			return nil
+		}
+
+		if attempt == c.maxRetries {
+			break
+		}
+
+		c.emitProgress(ProgressEvent{
+			Kind:       "retry",
+			Scope:      "http",
+			Detail:     requestURL.String(),
+			Attempt:    attempt + 1,
+			MaxAttempt: c.maxRetries + 1,
+		})
+
+		wait := c.backoff * time.Duration(attempt+1)
+		timer := time.NewTimer(wait)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return ctx.Err()
+		case <-timer.C:
+		}
 	}
 
-	res, err := c.httpClient.Do(req)
-	if err != nil {
-		return err
-	}
-	defer res.Body.Close()
+	return lastErr
+}
 
-	if res.StatusCode < 200 || res.StatusCode >= 300 {
-		body, _ := io.ReadAll(io.LimitReader(res.Body, 512))
-		return fmt.Errorf("dukascopy api %s returned %s: %s", requestURL.String(), res.Status, strings.TrimSpace(string(body)))
-	}
+func shouldRetryStatus(statusCode int) bool {
+	return statusCode == http.StatusTooManyRequests || statusCode >= 500
+}
 
-	if err := json.NewDecoder(res.Body).Decode(target); err != nil {
-		return fmt.Errorf("decode %s: %w", requestURL.String(), err)
+func (c *Client) emitProgress(event ProgressEvent) {
+	if c.progress == nil {
+		return
 	}
-	return nil
+	c.progress(event)
 }

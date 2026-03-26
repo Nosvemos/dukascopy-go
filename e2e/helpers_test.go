@@ -131,6 +131,42 @@ func newMockServer() *httptest.Server {
 		})
 	})
 
+	mux.HandleFunc("/v1/candles/minute/XAU-USD/BID/2024/1/3", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, map[string]any{
+			"timestamp":  1704240000000,
+			"multiplier": 1.0,
+			"open":       102.0,
+			"high":       103.0,
+			"low":        101.0,
+			"close":      102.5,
+			"shift":      60000,
+			"times":      []int{0, 1, 1},
+			"opens":      []float64{0, 0.5, 0.75},
+			"highs":      []float64{0, 0.25, 0.75},
+			"lows":       []float64{0, 0.5, 1.25},
+			"closes":     []float64{0, 0.25, 0.75},
+			"volumes":    []float64{0.0014, 0.0012, 0.0010},
+		})
+	})
+
+	mux.HandleFunc("/v1/candles/minute/XAU-USD/ASK/2024/1/3", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, map[string]any{
+			"timestamp":  1704240000000,
+			"multiplier": 1.0,
+			"open":       102.2,
+			"high":       103.2,
+			"low":        101.2,
+			"close":      102.7,
+			"shift":      60000,
+			"times":      []int{0, 1, 1},
+			"opens":      []float64{0, 0.5, 0.75},
+			"highs":      []float64{0, 0.25, 0.75},
+			"lows":       []float64{0, 0.5, 1.25},
+			"closes":     []float64{0, 0.25, 0.75},
+			"volumes":    []float64{0.0014, 0.0012, 0.0010},
+		})
+	})
+
 	mux.HandleFunc("/v1/candles/hour/XAU-USD/BID/2024/1", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, map[string]any{
 			"timestamp":  1704153600000,

@@ -10,6 +10,16 @@ A Go CLI for searching Dukascopy instruments and exporting historical market dat
 - Downloads `tick`, `m1`, `m3`, `m5`, `m15`, `m30`, `h1`, `h4`, `d1`, `w1`, and `mn1` data as CSV
 - Supports reduced, expanded, and custom CSV column sets with `--simple`, `--full`, and `--custom-columns`
 - Exports raw volume values intended to be more suitable for backtesting
+- Retries transient HTTP failures with configurable retry count and backoff
+- Shows optional progress output for chunk downloads and retries
+- Can resume into an existing CSV without duplicating the last saved row
+- Supports partitioned downloads with checkpoint manifests for large ranges
+- Reassembles the final CSV from completed partition files after interrupted runs
+- Audits completed partition files with row counts and SHA-256 hashes before reusing them
+- Audits the assembled final CSV and stores a manifest summary for quick verification
+- Includes `manifest inspect` and `manifest verify` commands for offline dataset checks
+- Includes `manifest repair` for download-free recovery from valid existing files
+- Includes `manifest prune` to clean orphan partition and temp files safely
 - Includes end-to-end tests that run the compiled CLI against a mock HTTP server
 
 ## Build
@@ -99,6 +109,30 @@ Search instruments:
 
 ```bash
 go run ./cmd/dukascopy instruments --query xauusd
+```
+
+Inspect a checkpoint manifest:
+
+```bash
+go run ./cmd/dukascopy manifest inspect --output ./data/xauusd.csv
+```
+
+Verify a dataset against its manifest without downloading anything:
+
+```bash
+go run ./cmd/dukascopy manifest verify --manifest ./data/xauusd.csv.manifest.json
+```
+
+Repair a damaged final CSV or missing partition from existing valid files:
+
+```bash
+go run ./cmd/dukascopy manifest repair --output ./data/xauusd.csv
+```
+
+Clean orphan partition files and leftover temp artifacts:
+
+```bash
+go run ./cmd/dukascopy manifest prune --output ./data/xauusd.csv
 ```
 
 Print version metadata:
@@ -191,6 +225,62 @@ go run ./cmd/dukascopy download \
   --full
 ```
 
+Resume an interrupted download:
+
+```bash
+go run ./cmd/dukascopy download \
+  --symbol xauusd \
+  --timeframe m1 \
+  --from 2024-01-02T00:00:00Z \
+  --to 2024-01-02T06:00:00Z \
+  --output ./data/xauusd-minute.csv \
+  --simple \
+  --resume
+```
+
+Download with progress and custom retry settings:
+
+```bash
+go run ./cmd/dukascopy download \
+  --symbol xauusd \
+  --timeframe m1 \
+  --from 2024-01-02T00:00:00Z \
+  --to 2024-01-02T06:00:00Z \
+  --output ./data/xauusd-minute.csv \
+  --simple \
+  --progress \
+  --retries 5 \
+  --retry-backoff 750ms
+```
+
+Download a large range with partition checkpoints:
+
+```bash
+go run ./cmd/dukascopy download \
+  --symbol xauusd \
+  --timeframe m1 \
+  --from 2024-01-01T00:00:00Z \
+  --to 2024-02-01T00:00:00Z \
+  --output ./data/xauusd-january.csv \
+  --simple \
+  --partition auto \
+  --progress
+```
+
+Use a custom checkpoint manifest path:
+
+```bash
+go run ./cmd/dukascopy download \
+  --symbol eurusd \
+  --timeframe h1 \
+  --from 2024-01-01T00:00:00Z \
+  --to 2024-03-01T00:00:00Z \
+  --output ./data/eurusd-h1.csv \
+  --full \
+  --partition month \
+  --checkpoint-manifest ./data/eurusd-h1.checkpoint.json
+```
+
 ## CSV Schemas
 
 Simple bar schema:
@@ -264,10 +354,55 @@ mn1   aggregated from d1 by calendar month
 - `--simple` writes the smallest useful schema.
 - `--full` writes midpoint, spread, and explicit bid/ask columns.
 - `--custom-columns` lets you request only the columns you need.
+- `--resume` reuses an existing CSV header and appends only rows after the last saved record.
+- `--resume` requires the selected columns to include `timestamp`.
+- `--retries` and `--retry-backoff` control retry behavior for transient HTTP failures such as `429` and `5xx`.
+- `--progress` prints chunk and retry updates to `stderr`.
+- `--partition` splits a large range into durable sub-ranges. Supported values are `none`, `auto`, `hour`, `day`, `week`, `month`, and `year`.
+- `--checkpoint-manifest` overrides the default checkpoint path. If omitted, the CLI uses `<output>.manifest.json`.
+- Partitioned downloads keep completed part files in `<output>.parts/` and reuse them automatically on the next run.
+- Reused partition files are audited before reuse. If row count or SHA-256 hash does not match the manifest, the CLI downloads that partition again.
+- The final output file is assembled from the partition files after all partitions are complete, then audited with row count and SHA-256.
+- The manifest includes a summary section with total partition counts and final output row totals.
+- If the final output file is modified or corrupted later, the next run detects the mismatch and re-assembles it from valid partition files.
 - `--list-timeframes` prints the currently supported timeframe values and their meaning.
+- `manifest inspect` prints a readable manifest summary and partition status table.
+- `manifest prune` removes orphan partition files and leftover temp files that are no longer referenced by the manifest.
+- `manifest repair` tries to rebuild missing or invalid partition files from a valid final CSV, or rebuild the final CSV from valid partition files.
+- `manifest verify` audits partition files and the final output CSV against the manifest and exits non-zero on mismatch.
 - `--version` prints embedded version, commit, and build date metadata.
 - `--side` controls the primary side for simple bar exports.
 - Commands use ANSI colors for headings, success messages, and table headers by default; set `NO_COLOR=1` to disable coloring.
+
+## Checkpointed Downloads
+
+Partitioned downloads are the safest option for long-running jobs.
+
+What happens when `--partition` is enabled:
+
+- Each sub-range is written to its own CSV file inside `<output>.parts/`.
+- A checkpoint manifest tracks which partitions are already complete.
+- The manifest stores row counts and SHA-256 hashes for completed partition files.
+- The manifest also stores the final output audit and a summary of completed work.
+- If the process crashes or the network fails, completed partition files remain intact.
+- Running the same command again reuses completed partitions and only downloads missing or invalid ones.
+- After every partition is complete, the CLI assembles the final output CSV from the partition files and audits it.
+
+`auto` chooses a partition size based on timeframe:
+
+```text
+tick  hour
+m1    day
+m3    day
+m5    day
+m15   day
+m30   day
+h1    month
+h4    month
+d1    year
+w1    week
+mn1   month
+```
 
 ## Configuration
 

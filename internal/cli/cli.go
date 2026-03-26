@@ -7,10 +7,12 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/Nosvemos/dukascopy-data-downloader/internal/buildinfo"
+	"github.com/Nosvemos/dukascopy-data-downloader/internal/checkpoint"
 	"github.com/Nosvemos/dukascopy-data-downloader/internal/csvout"
 	"github.com/Nosvemos/dukascopy-data-downloader/internal/dukascopy"
 )
@@ -45,8 +47,14 @@ func Run(args []string, stdout io.Writer, stderr io.Writer) int {
 			return 1
 		}
 		return 0
+	case "manifest":
+		if err := runManifest(args[1:], stdout); err != nil {
+			fmt.Fprintf(stderr, "%serror:%s %v\n", colorize(colorRed), colorize(colorReset), err)
+			return 1
+		}
+		return 0
 	case "download":
-		if err := runDownload(args[1:], stdout); err != nil {
+		if err := runDownload(args[1:], stdout, stderr); err != nil {
 			fmt.Fprintf(stderr, "%serror:%s %v\n", colorize(colorRed), colorize(colorReset), err)
 			return 1
 		}
@@ -66,6 +74,7 @@ func printUsage(w io.Writer) {
 	fmt.Fprintf(w, "Version: %s\n\n", buildinfo.VersionString())
 	fmt.Fprintf(w, "%sCommands%s\n", colorize(colorCyan), colorize(colorReset))
 	fmt.Fprint(w, `  instruments  Search Dukascopy instruments
+  manifest     Inspect or verify checkpoint manifests
   download     Download historical data and save it as CSV
   list-timeframes  Print supported timeframe values
   version      Print build version information
@@ -74,9 +83,15 @@ examples:
   dukascopy-data instruments --query xauusd
   dukascopy-data --list-timeframes
   dukascopy-data --version
+  dukascopy-data manifest inspect --output ./data/xauusd.csv
+  dukascopy-data manifest prune --output ./data/xauusd.csv
+  dukascopy-data manifest repair --output ./data/xauusd.csv
+  dukascopy-data manifest verify --manifest ./data/xauusd.csv.manifest.json
   dukascopy-data download --symbol xauusd --timeframe m1 --from 2024-01-02T00:00:00Z --to 2024-01-02T01:00:00Z --output ./data/xauusd.csv --simple
   dukascopy-data download --symbol xauusd --timeframe h1 --from 2024-01-01T00:00:00Z --to 2024-01-02T00:00:00Z --output ./data/xauusd-full.csv --full
   dukascopy-data download --symbol xauusd --timeframe m1 --from 2024-01-02T00:00:00Z --to 2024-01-02T01:00:00Z --output ./data/xauusd-custom.csv --custom-columns timestamp,bid_open,ask_open,volume
+  dukascopy-data download --symbol xauusd --timeframe m1 --from 2024-01-02T00:00:00Z --to 2024-01-02T06:00:00Z --output ./data/xauusd.csv --simple --resume --progress --retries 5
+  dukascopy-data download --symbol xauusd --timeframe m1 --from 2024-01-01T00:00:00Z --to 2024-02-01T00:00:00Z --output ./data/xauusd.csv --simple --partition auto --progress
 `)
 }
 
@@ -115,7 +130,7 @@ func runInstruments(args []string, stdout io.Writer) error {
 	return nil
 }
 
-func runDownload(args []string, stdout io.Writer) error {
+func runDownload(args []string, stdout io.Writer, stderr io.Writer) error {
 	fs := flag.NewFlagSet("download", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 
@@ -129,6 +144,12 @@ func runDownload(args []string, stdout io.Writer) error {
 	fromValue := fs.String("from", "", "inclusive RFC3339 start timestamp")
 	toValue := fs.String("to", "", "exclusive RFC3339 end timestamp")
 	outputPath := fs.String("output", "", "target CSV path")
+	retries := fs.Int("retries", 3, "retry count for transient HTTP errors")
+	retryBackoff := fs.Duration("retry-backoff", 500*time.Millisecond, "base retry backoff duration such as 500ms or 2s")
+	progress := fs.Bool("progress", false, "print progress updates to stderr")
+	resume := fs.Bool("resume", false, "append missing rows to an existing CSV when possible")
+	partition := fs.String("partition", "none", "partition mode: none, auto, hour, day, week, month, year")
+	checkpointManifest := fs.String("checkpoint-manifest", "", "optional checkpoint manifest path for partitioned downloads")
 	baseURL := fs.String("base-url", readBaseURL(), "Dukascopy API base URL")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -160,6 +181,12 @@ func runDownload(args []string, stdout io.Writer) error {
 	if !from.Before(to) {
 		return errors.New("--from must be earlier than --to")
 	}
+	if *retries < 0 {
+		return errors.New("--retries must be 0 or greater")
+	}
+	if *retryBackoff <= 0 {
+		return errors.New("--retry-backoff must be greater than 0")
+	}
 	if *simpleOutput && *fullOutput {
 		return errors.New("--simple and --full cannot be used together")
 	}
@@ -180,26 +207,8 @@ func runDownload(args []string, stdout io.Writer) error {
 
 	barColumns := csvout.BarColumnsForProfile(profile)
 	tickColumns := csvout.TickColumnsForProfile(profile)
-
-	request := dukascopy.DownloadRequest{
-		Symbol:      *symbol,
-		Granularity: normalizedTimeframe,
-		Side:        dukascopy.PriceSide(*side),
-		From:        from.UTC(),
-		To:          to.UTC(),
-	}
-
-	client := dukascopy.NewClient(*baseURL, defaultTimeout)
-	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
-	defer cancel()
-
-	result, err := client.Download(ctx, request)
-	if err != nil {
-		return err
-	}
-
 	if strings.TrimSpace(*customColumns) != "" {
-		if result.Kind == dukascopy.ResultKindTick {
+		if normalizedTimeframe == dukascopy.GranularityTick {
 			tickColumns, err = csvout.ParseTickColumns(*customColumns)
 			if err != nil {
 				return err
@@ -212,11 +221,68 @@ func runDownload(args []string, stdout io.Writer) error {
 		}
 	}
 
+	request := dukascopy.DownloadRequest{
+		Symbol:      *symbol,
+		Granularity: normalizedTimeframe,
+		Side:        dukascopy.PriceSide(*side),
+		From:        from.UTC(),
+		To:          to.UTC(),
+	}
+
+	resultKind := dukascopy.ResultKindBar
+	if normalizedTimeframe == dukascopy.GranularityTick {
+		resultKind = dukascopy.ResultKindTick
+	}
+
+	partitionValue := strings.TrimSpace(*partition)
+	if partitionValue == "" && strings.TrimSpace(*checkpointManifest) != "" {
+		partitionValue = partitionAuto
+	}
+	if partitionValue == partitionNone && strings.TrimSpace(*checkpointManifest) != "" {
+		partitionValue = partitionAuto
+	}
+	normalizedPartition, err := normalizePartition(partitionValue, normalizedTimeframe)
+	if err != nil {
+		return err
+	}
+
+	client := dukascopy.NewClient(*baseURL, defaultTimeout).
+		WithRetries(*retries).
+		WithBackoff(*retryBackoff)
+	if *progress {
+		client = client.WithProgress(newProgressPrinter(stderr).Print)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+
+	if normalizedPartition != partitionNone {
+		manifestPath := strings.TrimSpace(*checkpointManifest)
+		if manifestPath == "" {
+			manifestPath = checkpoint.DefaultManifestPath(*outputPath)
+		}
+		return runPartitionedDownload(ctx, client, stdout, stderr, *outputPath, manifestPath, request, resultKind, barColumns, tickColumns, normalizedPartition)
+	}
+
+	resumeState, dedupeRecord, err := prepareResume(*resume, *outputPath, resultKind, barColumns, tickColumns, &request)
+	if err != nil {
+		return err
+	}
+	if !request.From.Before(request.To) {
+		fmt.Fprintf(stdout, "%sresume%s no new rows needed for %s\n", colorize(colorCyan), colorize(colorReset), *outputPath)
+		return nil
+	}
+
+	result, err := client.Download(ctx, request)
+	if err != nil {
+		return err
+	}
+
 	if result.Kind == dukascopy.ResultKindTick {
-		if err := csvout.WriteTicks(*outputPath, result.Instrument, tickColumns, result.Ticks); err != nil {
+		appended, err := writeTickOutput(*outputPath, resumeState, dedupeRecord, result.Instrument, tickColumns, result.Ticks)
+		if err != nil {
 			return err
 		}
-		fmt.Fprintf(stdout, "%swrote%s %d ticks to %s\n", colorize(colorGreen), colorize(colorReset), len(result.Ticks), *outputPath)
+		fmt.Fprintf(stdout, "%swrote%s %d ticks to %s\n", colorize(colorGreen), colorize(colorReset), appended, *outputPath)
 		return nil
 	}
 
@@ -225,18 +291,20 @@ func runDownload(args []string, stdout io.Writer) error {
 		if err != nil {
 			return err
 		}
-		if err := csvout.WriteBars(*outputPath, instrument, barColumns, nil, bidBars, askBars); err != nil {
+		appended, err := writeBarOutput(*outputPath, resumeState, dedupeRecord, instrument, barColumns, nil, bidBars, askBars)
+		if err != nil {
 			return err
 		}
-		fmt.Fprintf(stdout, "%swrote%s %d bars to %s\n", colorize(colorGreen), colorize(colorReset), len(bidBars), *outputPath)
+		fmt.Fprintf(stdout, "%swrote%s %d bars to %s\n", colorize(colorGreen), colorize(colorReset), appended, *outputPath)
 		return nil
 	}
 
-	if err := csvout.WriteBars(*outputPath, result.Instrument, barColumns, result.Bars, nil, nil); err != nil {
+	appended, err := writeBarOutput(*outputPath, resumeState, dedupeRecord, result.Instrument, barColumns, result.Bars, nil, nil)
+	if err != nil {
 		return err
 	}
 
-	fmt.Fprintf(stdout, "%swrote%s %d bars to %s\n", colorize(colorGreen), colorize(colorReset), len(result.Bars), *outputPath)
+	fmt.Fprintf(stdout, "%swrote%s %d bars to %s\n", colorize(colorGreen), colorize(colorReset), appended, *outputPath)
 	return nil
 }
 
@@ -373,4 +441,130 @@ func maxInt(a int, b int) int {
 		return a
 	}
 	return b
+}
+
+func prepareResume(enabled bool, outputPath string, resultKind dukascopy.ResultKind, barColumns []string, tickColumns []string, request *dukascopy.DownloadRequest) (*csvout.ResumeState, []string, error) {
+	if !enabled {
+		return nil, nil, nil
+	}
+
+	expectedColumns := barColumns
+	if resultKind == dukascopy.ResultKindTick {
+		expectedColumns = tickColumns
+	}
+	if !csvout.ColumnsContainTimestamp(expectedColumns) {
+		return nil, nil, errors.New("--resume requires the selected columns to include timestamp")
+	}
+
+	state, err := csvout.InspectExistingCSV(outputPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil, nil
+		}
+		return nil, nil, err
+	}
+
+	if len(state.Columns) > 0 && !csvout.HeadersMatch(expectedColumns, state.Columns) {
+		return nil, nil, fmt.Errorf("existing CSV header does not match the selected columns for %s", outputPath)
+	}
+
+	var dedupeRecord []string
+	if state.HasRows && (request.From.Before(state.LastTime) || request.From.Equal(state.LastTime)) {
+		request.From = state.LastTime
+		dedupeRecord = state.LastRecord
+	}
+
+	return &state, dedupeRecord, nil
+}
+
+func writeTickOutput(outputPath string, resumeState *csvout.ResumeState, dedupeRecord []string, instrument dukascopy.Instrument, columns []string, ticks []dukascopy.Tick) (int, error) {
+	if resumeState == nil || !resumeState.Exists || len(resumeState.Columns) == 0 {
+		if err := csvout.WriteTicks(outputPath, instrument, columns, ticks); err != nil {
+			return 0, err
+		}
+		return len(ticks), nil
+	}
+
+	tempPath, err := createResumeTempPath(outputPath)
+	if err != nil {
+		return 0, err
+	}
+	defer os.Remove(tempPath)
+
+	if err := csvout.WriteTicks(tempPath, instrument, columns, ticks); err != nil {
+		return 0, err
+	}
+
+	return csvout.MergeResumeCSV(outputPath, tempPath, dedupeRecord)
+}
+
+func writeBarOutput(outputPath string, resumeState *csvout.ResumeState, dedupeRecord []string, instrument dukascopy.Instrument, columns []string, primaryBars []dukascopy.Bar, bidBars []dukascopy.Bar, askBars []dukascopy.Bar) (int, error) {
+	if resumeState == nil || !resumeState.Exists || len(resumeState.Columns) == 0 {
+		if err := csvout.WriteBars(outputPath, instrument, columns, primaryBars, bidBars, askBars); err != nil {
+			return 0, err
+		}
+		if csvout.BarColumnsNeedBidAsk(columns) {
+			return len(bidBars), nil
+		}
+		return len(primaryBars), nil
+	}
+
+	tempPath, err := createResumeTempPath(outputPath)
+	if err != nil {
+		return 0, err
+	}
+	defer os.Remove(tempPath)
+
+	if err := csvout.WriteBars(tempPath, instrument, columns, primaryBars, bidBars, askBars); err != nil {
+		return 0, err
+	}
+
+	return csvout.MergeResumeCSV(outputPath, tempPath, dedupeRecord)
+}
+
+func createResumeTempPath(outputPath string) (string, error) {
+	dir := filepath.Dir(outputPath)
+	file, err := os.CreateTemp(dir, filepath.Base(outputPath)+".resume-*.csv")
+	if err != nil {
+		return "", err
+	}
+	path := file.Name()
+	if err := file.Close(); err != nil {
+		return "", err
+	}
+	return path, nil
+}
+
+type progressPrinter struct {
+	w io.Writer
+}
+
+func newProgressPrinter(w io.Writer) progressPrinter {
+	return progressPrinter{w: w}
+}
+
+func (p progressPrinter) Print(event dukascopy.ProgressEvent) {
+	switch event.Kind {
+	case "chunk":
+		fmt.Fprintf(
+			p.w,
+			"%sprogress%s [%s] %d/%d %s\n",
+			colorize(colorCyan),
+			colorize(colorReset),
+			event.Scope,
+			event.Current,
+			event.Total,
+			event.Detail,
+		)
+	case "retry":
+		fmt.Fprintf(
+			p.w,
+			"%sretry%s attempt %d/%d %s\n",
+			colorize(colorYellow),
+			colorize(colorReset),
+			event.Attempt,
+			event.MaxAttempt,
+			event.Detail,
+		)
+	}
 }
