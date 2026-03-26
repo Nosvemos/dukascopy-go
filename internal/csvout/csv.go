@@ -3,6 +3,7 @@ package csvout
 import (
 	"encoding/csv"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -238,45 +239,54 @@ func formatPrimaryBarColumn(column string, scale int, bar dukascopy.Bar) (string
 }
 
 func formatBarColumn(column string, scale int, bid dukascopy.Bar, ask dukascopy.Bar) (string, error) {
+	roundedBidOpen := roundToScale(bid.Open, scale)
+	roundedBidHigh := roundToScale(bid.High, scale)
+	roundedBidLow := roundToScale(bid.Low, scale)
+	roundedBidClose := roundToScale(bid.Close, scale)
+	roundedAskOpen := roundToScale(ask.Open, scale)
+	roundedAskHigh := roundToScale(ask.High, scale)
+	roundedAskLow := roundToScale(ask.Low, scale)
+	roundedAskClose := roundToScale(ask.Close, scale)
+
 	switch column {
 	case "timestamp":
 		return bid.Time.UTC().Format(timestampLayout), nil
 	case "open":
-		return formatPrice(midpoint(bid.Open, ask.Open), scale), nil
+		return formatMidPrice(midpoint(roundedBidOpen, roundedAskOpen), scale), nil
 	case "high":
-		return formatPrice(midpoint(bid.High, ask.High), scale), nil
+		return formatMidPrice(midpoint(roundedBidHigh, roundedAskHigh), scale), nil
 	case "low":
-		return formatPrice(midpoint(bid.Low, ask.Low), scale), nil
+		return formatMidPrice(midpoint(roundedBidLow, roundedAskLow), scale), nil
 	case "close":
-		return formatPrice(midpoint(bid.Close, ask.Close), scale), nil
+		return formatMidPrice(midpoint(roundedBidClose, roundedAskClose), scale), nil
 	case "mid_open":
-		return formatPrice(midpoint(bid.Open, ask.Open), scale), nil
+		return formatMidPrice(midpoint(roundedBidOpen, roundedAskOpen), scale), nil
 	case "mid_high":
-		return formatPrice(midpoint(bid.High, ask.High), scale), nil
+		return formatMidPrice(midpoint(roundedBidHigh, roundedAskHigh), scale), nil
 	case "mid_low":
-		return formatPrice(midpoint(bid.Low, ask.Low), scale), nil
+		return formatMidPrice(midpoint(roundedBidLow, roundedAskLow), scale), nil
 	case "mid_close":
-		return formatPrice(midpoint(bid.Close, ask.Close), scale), nil
+		return formatMidPrice(midpoint(roundedBidClose, roundedAskClose), scale), nil
 	case "spread":
-		return formatPrice(ask.Close-bid.Close, scale), nil
+		return formatPrice(roundedAskClose-roundedBidClose, scale), nil
 	case "volume":
 		return formatVolume(bid.Volume), nil
 	case "bid_open":
-		return formatPrice(bid.Open, scale), nil
+		return formatPrice(roundedBidOpen, scale), nil
 	case "bid_high":
-		return formatPrice(bid.High, scale), nil
+		return formatPrice(roundedBidHigh, scale), nil
 	case "bid_low":
-		return formatPrice(bid.Low, scale), nil
+		return formatPrice(roundedBidLow, scale), nil
 	case "bid_close":
-		return formatPrice(bid.Close, scale), nil
+		return formatPrice(roundedBidClose, scale), nil
 	case "ask_open":
-		return formatPrice(ask.Open, scale), nil
+		return formatPrice(roundedAskOpen, scale), nil
 	case "ask_high":
-		return formatPrice(ask.High, scale), nil
+		return formatPrice(roundedAskHigh, scale), nil
 	case "ask_low":
-		return formatPrice(ask.Low, scale), nil
+		return formatPrice(roundedAskLow, scale), nil
 	case "ask_close":
-		return formatPrice(ask.Close, scale), nil
+		return formatPrice(roundedAskClose, scale), nil
 	default:
 		return "", fmt.Errorf("unsupported bar column %q", column)
 	}
@@ -339,10 +349,28 @@ func formatPrice(value float64, scale int) string {
 	return strconv.FormatFloat(value, 'f', scale, 64)
 }
 
+func formatMidPrice(value float64, scale int) string {
+	precision := scale + 1
+	if precision < 0 {
+		precision = -1
+	}
+	factor := math.Pow10(precision)
+	rounded := math.Round(value*factor) / factor
+	return strconv.FormatFloat(rounded, 'f', -1, 64)
+}
+
 func formatVolume(value float64) string {
 	return strconv.FormatFloat(value, 'f', -1, 64)
 }
 
 func midpoint(a float64, b float64) float64 {
 	return (a + b) / 2
+}
+
+func roundToScale(value float64, scale int) float64 {
+	if scale < 0 {
+		return value
+	}
+	factor := math.Pow10(scale)
+	return math.Round(value*factor) / factor
 }

@@ -34,7 +34,7 @@ func runCLI(t *testing.T, baseURL string, args ...string) string {
 
 	cmd := exec.Command(builtCLI, args...)
 	cmd.Dir = repoRoot()
-	cmd.Env = append(os.Environ(), "DUKASCOPY_API_BASE_URL="+baseURL)
+	cmd.Env = append(os.Environ(), "DUKASCOPY_API_BASE_URL="+baseURL, "NO_COLOR=1")
 
 	output, err := cmd.CombinedOutput()
 	if err != nil {
@@ -49,7 +49,7 @@ func runCLIExpectError(t *testing.T, baseURL string, args ...string) string {
 
 	cmd := exec.Command(builtCLI, args...)
 	cmd.Dir = repoRoot()
-	cmd.Env = append(os.Environ(), "DUKASCOPY_API_BASE_URL="+baseURL)
+	cmd.Env = append(os.Environ(), "DUKASCOPY_API_BASE_URL="+baseURL, "NO_COLOR=1")
 
 	output, err := cmd.CombinedOutput()
 	if err == nil {
@@ -140,12 +140,30 @@ func newMockServer() *httptest.Server {
 			"low":        99.0,
 			"close":      100.5,
 			"shift":      3600000,
-			"times":      []int{0, 1},
-			"opens":      []float64{0, 1},
-			"highs":      []float64{0, 1},
-			"lows":       []float64{0, 1},
-			"closes":     []float64{0, 1},
-			"volumes":    []float64{0.002, 0.003},
+			"times":      []int{0, 1, 1, 1},
+			"opens":      []float64{0, 1, 1, 1},
+			"highs":      []float64{0, 1, 1, 1},
+			"lows":       []float64{0, 1, 1, 1},
+			"closes":     []float64{0, 1, 1, 1},
+			"volumes":    []float64{0.002, 0.003, 0.004, 0.005},
+		})
+	})
+
+	mux.HandleFunc("/v1/candles/day/XAU-USD/BID/2024", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, map[string]any{
+			"timestamp":  1704067200000,
+			"multiplier": 1.0,
+			"open":       100.0,
+			"high":       101.0,
+			"low":        99.0,
+			"close":      100.5,
+			"shift":      86400000,
+			"times":      []int{0, 1, 1},
+			"opens":      []float64{0, 1, 1},
+			"highs":      []float64{0, 1, 1},
+			"lows":       []float64{0, 1, 1},
+			"closes":     []float64{0, 1, 1},
+			"volumes":    []float64{0.002, 0.003, 0.004},
 		})
 	})
 

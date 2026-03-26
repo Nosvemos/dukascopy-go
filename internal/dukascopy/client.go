@@ -16,10 +16,17 @@ import (
 type Granularity string
 
 const (
-	GranularityTick   Granularity = "tick"
-	GranularityMinute Granularity = "minute"
-	GranularityHour   Granularity = "hour"
-	GranularityDay    Granularity = "day"
+	GranularityTick Granularity = "tick"
+	GranularityM1   Granularity = "m1"
+	GranularityM3   Granularity = "m3"
+	GranularityM5   Granularity = "m5"
+	GranularityM15  Granularity = "m15"
+	GranularityM30  Granularity = "m30"
+	GranularityH1   Granularity = "h1"
+	GranularityH4   Granularity = "h4"
+	GranularityD1   Granularity = "d1"
+	GranularityW1   Granularity = "w1"
+	GranularityMN1  Granularity = "mn1"
 )
 
 type PriceSide string
@@ -137,26 +144,12 @@ func (c *Client) Download(ctx context.Context, request DownloadRequest) (Downloa
 			return DownloadResult{}, err
 		}
 		return DownloadResult{Kind: ResultKindTick, Instrument: instrument, Ticks: ticks}, nil
-	case GranularityMinute:
-		bars, err := c.downloadMinuteBars(ctx, instrument, side, request.From, request.To)
-		if err != nil {
-			return DownloadResult{}, err
-		}
-		return DownloadResult{Kind: ResultKindBar, Instrument: instrument, Bars: bars}, nil
-	case GranularityHour:
-		bars, err := c.downloadHourlyBars(ctx, instrument, side, request.From, request.To)
-		if err != nil {
-			return DownloadResult{}, err
-		}
-		return DownloadResult{Kind: ResultKindBar, Instrument: instrument, Bars: bars}, nil
-	case GranularityDay:
-		bars, err := c.downloadDailyBars(ctx, instrument, side, request.From, request.To)
-		if err != nil {
-			return DownloadResult{}, err
-		}
-		return DownloadResult{Kind: ResultKindBar, Instrument: instrument, Bars: bars}, nil
 	default:
-		return DownloadResult{}, fmt.Errorf("unsupported granularity %q", request.Granularity)
+		bars, err := c.downloadBars(ctx, instrument, side, request.Granularity, request.From, request.To)
+		if err != nil {
+			return DownloadResult{}, err
+		}
+		return DownloadResult{Kind: ResultKindBar, Instrument: instrument, Bars: bars}, nil
 	}
 }
 
@@ -176,18 +169,38 @@ func (c *Client) DownloadBarsForSide(ctx context.Context, request DownloadReques
 		return Instrument{}, nil, err
 	}
 
-	switch normalizeGranularity(request.Granularity) {
-	case GranularityMinute:
-		bars, err := c.downloadMinuteBars(ctx, instrument, normalizedSide, request.From, request.To)
-		return instrument, bars, err
-	case GranularityHour:
-		bars, err := c.downloadHourlyBars(ctx, instrument, normalizedSide, request.From, request.To)
-		return instrument, bars, err
-	case GranularityDay:
-		bars, err := c.downloadDailyBars(ctx, instrument, normalizedSide, request.From, request.To)
-		return instrument, bars, err
+	bars, err := c.downloadBars(ctx, instrument, normalizedSide, request.Granularity, request.From, request.To)
+	return instrument, bars, err
+}
+
+func (c *Client) downloadBars(ctx context.Context, instrument Instrument, side PriceSide, granularity Granularity, from time.Time, to time.Time) ([]Bar, error) {
+	switch normalizeGranularity(granularity) {
+	case GranularityM1:
+		return c.downloadMinuteBars(ctx, instrument, side, from, to)
+	case GranularityM3, GranularityM5, GranularityM15, GranularityM30:
+		minuteBars, err := c.downloadMinuteBars(ctx, instrument, side, from, to)
+		if err != nil {
+			return nil, err
+		}
+		return AggregateBars(minuteBars, granularity, from, to)
+	case GranularityH1:
+		return c.downloadHourlyBars(ctx, instrument, side, from, to)
+	case GranularityH4:
+		hourlyBars, err := c.downloadHourlyBars(ctx, instrument, side, from, to)
+		if err != nil {
+			return nil, err
+		}
+		return AggregateBars(hourlyBars, granularity, from, to)
+	case GranularityD1:
+		return c.downloadDailyBars(ctx, instrument, side, from, to)
+	case GranularityW1, GranularityMN1:
+		dailyBars, err := c.downloadDailyBars(ctx, instrument, side, from, to)
+		if err != nil {
+			return nil, err
+		}
+		return AggregateBars(dailyBars, granularity, from, to)
 	default:
-		return Instrument{}, nil, fmt.Errorf("unsupported bar granularity %q", request.Granularity)
+		return nil, fmt.Errorf("unsupported bar granularity %q", granularity)
 	}
 }
 

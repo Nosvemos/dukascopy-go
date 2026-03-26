@@ -37,7 +37,7 @@ func TestDownloadCustomBarColumns(t *testing.T) {
 	if !strings.Contains(content, "timestamp,mid_open,bid_open,ask_open,volume") {
 		t.Fatalf("missing custom header: %s", content)
 	}
-	if !strings.Contains(content, "2024-01-02T00:00:00Z,100.100,100.000,100.200,1100") {
+	if !strings.Contains(content, "2024-01-02T00:00:00Z,100.1,100.000,100.200,1100") {
 		t.Fatalf("missing custom row: %s", content)
 	}
 }

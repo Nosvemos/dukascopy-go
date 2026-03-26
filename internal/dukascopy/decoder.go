@@ -112,11 +112,25 @@ func normalizeGranularity(value Granularity) Granularity {
 	case "tick", "t1":
 		return GranularityTick
 	case "minute", "min", "m1":
-		return GranularityMinute
+		return GranularityM1
+	case "m3":
+		return GranularityM3
+	case "m5":
+		return GranularityM5
+	case "m15":
+		return GranularityM15
+	case "m30":
+		return GranularityM30
 	case "hour", "hr", "h1":
-		return GranularityHour
+		return GranularityH1
+	case "h4":
+		return GranularityH4
 	case "day", "d1":
-		return GranularityDay
+		return GranularityD1
+	case "w1", "week":
+		return GranularityW1
+	case "mn1", "month", "monthly":
+		return GranularityMN1
 	default:
 		return Granularity(strings.ToLower(strings.TrimSpace(string(value))))
 	}
@@ -264,11 +278,6 @@ func filterTicks(ticks []Tick, from time.Time, to time.Time) []Tick {
 func midnightUTC(value time.Time) time.Time {
 	value = value.UTC()
 	return time.Date(value.Year(), value.Month(), value.Day(), 0, 0, 0, 0, time.UTC)
-}
-
-func monthStartUTC(value time.Time) time.Time {
-	value = value.UTC()
-	return time.Date(value.Year(), value.Month(), 1, 0, 0, 0, 0, time.UTC)
 }
 
 func hourStartUTC(value time.Time) time.Time {

@@ -17,6 +17,12 @@ import (
 const (
 	defaultBaseURL = "https://jetta.dukascopy.com"
 	defaultTimeout = 30 * time.Second
+	colorReset     = "\033[0m"
+	colorBold      = "\033[1m"
+	colorRed       = "\033[31m"
+	colorGreen     = "\033[32m"
+	colorCyan      = "\033[36m"
+	colorYellow    = "\033[33m"
 )
 
 func Run(args []string, stdout io.Writer, stderr io.Writer) int {
@@ -26,15 +32,18 @@ func Run(args []string, stdout io.Writer, stderr io.Writer) int {
 	}
 
 	switch args[0] {
+	case "list-timeframes", "--list-timeframes":
+		printTimeframes(stdout)
+		return 0
 	case "instruments":
 		if err := runInstruments(args[1:], stdout); err != nil {
-			fmt.Fprintf(stderr, "error: %v\n", err)
+			fmt.Fprintf(stderr, "%serror:%s %v\n", colorize(colorRed), colorize(colorReset), err)
 			return 1
 		}
 		return 0
 	case "download":
 		if err := runDownload(args[1:], stdout); err != nil {
-			fmt.Fprintf(stderr, "error: %v\n", err)
+			fmt.Fprintf(stderr, "%serror:%s %v\n", colorize(colorRed), colorize(colorReset), err)
 			return 1
 		}
 		return 0
@@ -42,19 +51,22 @@ func Run(args []string, stdout io.Writer, stderr io.Writer) int {
 		printUsage(stdout)
 		return 0
 	default:
-		fmt.Fprintf(stderr, "error: unknown command %q\n\n", args[0])
+		fmt.Fprintf(stderr, "%serror:%s unknown command %q\n\n", colorize(colorRed), colorize(colorReset), args[0])
 		printUsage(stderr)
 		return 2
 	}
 }
 
 func printUsage(w io.Writer) {
-	fmt.Fprint(w, `dukascopy-data commands:
-  instruments  Search Dukascopy instruments
+	fmt.Fprintf(w, "%sdukascopy-data%s\n\n", colorize(colorBold), colorize(colorReset))
+	fmt.Fprintf(w, "%sCommands%s\n", colorize(colorCyan), colorize(colorReset))
+	fmt.Fprint(w, `  instruments  Search Dukascopy instruments
   download     Download historical data and save it as CSV
+  list-timeframes  Print supported timeframe values
 
 examples:
   dukascopy-data instruments --query xauusd
+  dukascopy-data --list-timeframes
   dukascopy-data download --symbol xauusd --timeframe m1 --from 2024-01-02T00:00:00Z --to 2024-01-02T01:00:00Z --output ./data/xauusd.csv --simple
   dukascopy-data download --symbol xauusd --timeframe h1 --from 2024-01-01T00:00:00Z --to 2024-01-02T00:00:00Z --output ./data/xauusd-full.csv --full
   dukascopy-data download --symbol xauusd --timeframe m1 --from 2024-01-02T00:00:00Z --to 2024-01-02T01:00:00Z --output ./data/xauusd-custom.csv --custom-columns timestamp,bid_open,ask_open,volume
@@ -92,10 +104,7 @@ func runInstruments(args []string, stdout io.Writer) error {
 		return fmt.Errorf("no instruments found for %q", *query)
 	}
 
-	for _, instrument := range matches {
-		fmt.Fprintf(stdout, "%s\t%s\t%s\n", instrument.Name, instrument.Code, instrument.Description)
-	}
-
+	printInstrumentTable(stdout, matches)
 	return nil
 }
 
@@ -104,7 +113,7 @@ func runDownload(args []string, stdout io.Writer) error {
 	fs.SetOutput(io.Discard)
 
 	symbol := fs.String("symbol", "", "instrument symbol such as xauusd or eur/usd")
-	timeframe := fs.String("timeframe", "m1", "tick, m1, h1, d1")
+	timeframe := fs.String("timeframe", "m1", "tick, m1, m3, m5, m15, m30, h1, h4, d1, w1, mn1")
 	granularity := fs.String("granularity", "", "deprecated alias for --timeframe")
 	side := fs.String("side", "bid", "bid or ask")
 	simpleOutput := fs.Bool("simple", false, "write the reduced CSV column set")
@@ -200,7 +209,7 @@ func runDownload(args []string, stdout io.Writer) error {
 		if err := csvout.WriteTicks(*outputPath, result.Instrument, tickColumns, result.Ticks); err != nil {
 			return err
 		}
-		fmt.Fprintf(stdout, "wrote %d ticks to %s\n", len(result.Ticks), *outputPath)
+		fmt.Fprintf(stdout, "%swrote%s %d ticks to %s\n", colorize(colorGreen), colorize(colorReset), len(result.Ticks), *outputPath)
 		return nil
 	}
 
@@ -212,7 +221,7 @@ func runDownload(args []string, stdout io.Writer) error {
 		if err := csvout.WriteBars(*outputPath, instrument, barColumns, nil, bidBars, askBars); err != nil {
 			return err
 		}
-		fmt.Fprintf(stdout, "wrote %d bars to %s\n", len(bidBars), *outputPath)
+		fmt.Fprintf(stdout, "%swrote%s %d bars to %s\n", colorize(colorGreen), colorize(colorReset), len(bidBars), *outputPath)
 		return nil
 	}
 
@@ -220,7 +229,7 @@ func runDownload(args []string, stdout io.Writer) error {
 		return err
 	}
 
-	fmt.Fprintf(stdout, "wrote %d bars to %s\n", len(result.Bars), *outputPath)
+	fmt.Fprintf(stdout, "%swrote%s %d bars to %s\n", colorize(colorGreen), colorize(colorReset), len(result.Bars), *outputPath)
 	return nil
 }
 
@@ -256,4 +265,95 @@ func readBaseURL() string {
 		return value
 	}
 	return defaultBaseURL
+}
+
+func colorize(code string) string {
+	if strings.TrimSpace(os.Getenv("NO_COLOR")) != "" {
+		return ""
+	}
+	return code
+}
+
+func printTimeframes(w io.Writer) {
+	fmt.Fprintf(w, "%sSupported timeframes%s\n", colorize(colorCyan), colorize(colorReset))
+	fmt.Fprint(w, `  tick  raw tick quotes
+  m1    native 1-minute bars
+  m3    aggregated from m1
+  m5    aggregated from m1
+  m15   aggregated from m1
+  m30   aggregated from m1
+  h1    native 1-hour bars
+  h4    aggregated from h1
+  d1    native 1-day bars
+  w1    aggregated from d1
+  mn1   aggregated from d1
+`)
+}
+
+func printInstrumentTable(w io.Writer, instruments []dukascopy.Instrument) {
+	nameWidth := maxStringWidth("NAME", instrumentFieldLengths(instruments, func(instrument dukascopy.Instrument) string {
+		return instrument.Name
+	}))
+	codeWidth := maxStringWidth("CODE", instrumentFieldLengths(instruments, func(instrument dukascopy.Instrument) string {
+		return instrument.Code
+	}))
+
+	fmt.Fprintf(
+		w,
+		"%s%-*s  %-*s  %s%s\n",
+		colorize(colorCyan),
+		nameWidth,
+		"NAME",
+		codeWidth,
+		"CODE",
+		"DESCRIPTION",
+		colorize(colorReset),
+	)
+
+	fmt.Fprintf(
+		w,
+		"%s%s  %s  %s%s\n",
+		colorize(colorYellow),
+		strings.Repeat("-", nameWidth),
+		strings.Repeat("-", codeWidth),
+		strings.Repeat("-", maxInt(11, 24)),
+		colorize(colorReset),
+	)
+
+	for _, instrument := range instruments {
+		fmt.Fprintf(
+			w,
+			"%-*s  %-*s  %s\n",
+			nameWidth,
+			instrument.Name,
+			codeWidth,
+			instrument.Code,
+			instrument.Description,
+		)
+	}
+}
+
+func instrumentFieldLengths(instruments []dukascopy.Instrument, selector func(dukascopy.Instrument) string) []int {
+	lengths := make([]int, 0, len(instruments))
+	for _, instrument := range instruments {
+		lengths = append(lengths, len(selector(instrument)))
+	}
+	return lengths
+}
+
+func maxStringWidth(defaultLabel string, lengths []int) int {
+	maxWidth := len(defaultLabel)
+	for _, length := range lengths {
+		if length > maxWidth {
+			maxWidth = length
+		}
+	}
+	return maxWidth
+}
+
+func maxInt(a int, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }

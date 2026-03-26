@@ -16,3 +16,10 @@ func TestCombineBarRowsRejectsMismatchedTimestamps(t *testing.T) {
 		t.Fatal("expected timestamp mismatch error")
 	}
 }
+
+func TestFormatMidPriceKeepsExtraHalfPipPrecision(t *testing.T) {
+	got := formatMidPrice((2064.295+2064.652)/2, 3)
+	if got != "2064.4735" {
+		t.Fatalf("formatMidPrice() = %s, want 2064.4735", got)
+	}
+}
