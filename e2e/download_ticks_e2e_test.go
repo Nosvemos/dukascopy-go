@@ -72,7 +72,7 @@ func TestDownloadTickFullCSV(t *testing.T) {
 	if !strings.Contains(content, "timestamp,bid,ask,bid_volume,ask_volume") {
 		t.Fatalf("missing full tick header: %s", content)
 	}
-	if !strings.Contains(content, "2024-01-02T00:00:00Z,100.000,100.200,1.5,1") {
+	if !strings.Contains(content, "2024-01-02T00:00:00Z,100.000,100.200,15,10") {
 		t.Fatalf("missing expected full tick row: %s", content)
 	}
 }

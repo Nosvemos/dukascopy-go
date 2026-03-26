@@ -55,8 +55,9 @@ func printUsage(w io.Writer) {
 
 examples:
   dukascopy-data instruments --query xauusd
-  dukascopy-data download --symbol xauusd --granularity minute --from 2024-01-02T00:00:00Z --to 2024-01-02T01:00:00Z --output ./data/xauusd.csv --simple
-  dukascopy-data download --symbol xauusd --granularity hour --from 2024-01-01T00:00:00Z --to 2024-01-02T00:00:00Z --output ./data/xauusd-full.csv --full
+  dukascopy-data download --symbol xauusd --timeframe m1 --from 2024-01-02T00:00:00Z --to 2024-01-02T01:00:00Z --output ./data/xauusd.csv --simple
+  dukascopy-data download --symbol xauusd --timeframe h1 --from 2024-01-01T00:00:00Z --to 2024-01-02T00:00:00Z --output ./data/xauusd-full.csv --full
+  dukascopy-data download --symbol xauusd --timeframe m1 --from 2024-01-02T00:00:00Z --to 2024-01-02T01:00:00Z --output ./data/xauusd-custom.csv --custom-columns timestamp,bid_open,ask_open,volume
 `)
 }
 
@@ -103,10 +104,12 @@ func runDownload(args []string, stdout io.Writer) error {
 	fs.SetOutput(io.Discard)
 
 	symbol := fs.String("symbol", "", "instrument symbol such as xauusd or eur/usd")
-	granularity := fs.String("granularity", "minute", "tick, minute, hour, or day")
+	timeframe := fs.String("timeframe", "m1", "tick, m1, h1, d1")
+	granularity := fs.String("granularity", "", "deprecated alias for --timeframe")
 	side := fs.String("side", "bid", "bid or ask")
 	simpleOutput := fs.Bool("simple", false, "write the reduced CSV column set")
 	fullOutput := fs.Bool("full", false, "write the full CSV column set with bid/ask columns")
+	customColumns := fs.String("custom-columns", "", "comma-separated CSV column list")
 	fromValue := fs.String("from", "", "inclusive RFC3339 start timestamp")
 	toValue := fs.String("to", "", "exclusive RFC3339 end timestamp")
 	outputPath := fs.String("output", "", "target CSV path")
@@ -144,15 +147,27 @@ func runDownload(args []string, stdout io.Writer) error {
 	if *simpleOutput && *fullOutput {
 		return errors.New("--simple and --full cannot be used together")
 	}
+	if strings.TrimSpace(*customColumns) != "" && (*simpleOutput || *fullOutput) {
+		return errors.New("--custom-columns cannot be combined with --simple or --full")
+	}
 
+	timeframeValue := strings.TrimSpace(*timeframe)
+	if strings.TrimSpace(*granularity) != "" {
+		timeframeValue = strings.TrimSpace(*granularity)
+	}
+
+	normalizedTimeframe := dukascopy.Granularity(timeframeValue)
 	profile := csvout.ProfileSimple
 	if *fullOutput {
 		profile = csvout.ProfileFull
 	}
 
+	barColumns := csvout.BarColumnsForProfile(profile)
+	tickColumns := csvout.TickColumnsForProfile(profile)
+
 	request := dukascopy.DownloadRequest{
 		Symbol:      *symbol,
-		Granularity: dukascopy.Granularity(*granularity),
+		Granularity: normalizedTimeframe,
 		Side:        dukascopy.PriceSide(*side),
 		From:        from.UTC(),
 		To:          to.UTC(),
@@ -167,55 +182,73 @@ func runDownload(args []string, stdout io.Writer) error {
 		return err
 	}
 
+	if strings.TrimSpace(*customColumns) != "" {
+		if result.Kind == dukascopy.ResultKindTick {
+			tickColumns, err = csvout.ParseTickColumns(*customColumns)
+			if err != nil {
+				return err
+			}
+		} else {
+			barColumns, err = csvout.ParseBarColumns(*customColumns)
+			if err != nil {
+				return err
+			}
+		}
+	}
+
 	if result.Kind == dukascopy.ResultKindTick {
-		if err := csvout.WriteTicks(*outputPath, result.Instrument, profile, result.Ticks); err != nil {
+		if err := csvout.WriteTicks(*outputPath, result.Instrument, tickColumns, result.Ticks); err != nil {
 			return err
 		}
 		fmt.Fprintf(stdout, "wrote %d ticks to %s\n", len(result.Ticks), *outputPath)
 		return nil
 	}
 
-	if profile == csvout.ProfileFull {
-		instrument, bidBars, err := client.DownloadBarsForSide(ctx, request, dukascopy.PriceSideBid)
-		if err == nil {
-			_, askBars, askErr := client.DownloadBarsForSide(ctx, request, dukascopy.PriceSideAsk)
-			if askErr == nil {
-				if err := csvout.WriteBars(*outputPath, instrument, profile, nil, bidBars, askBars); err != nil {
-					return err
-				}
-				fmt.Fprintf(stdout, "wrote %d bars to %s\n", len(bidBars), *outputPath)
-				return nil
-			}
-		}
-
-		tickRequest := request
-		tickRequest.Granularity = dukascopy.GranularityTick
-		tickResult, err := client.Download(ctx, tickRequest)
+	if csvout.BarColumnsNeedBidAsk(barColumns) {
+		instrument, bidBars, askBars, err := loadBidAskBars(ctx, client, request)
 		if err != nil {
 			return err
 		}
-
-		bidBars, err = dukascopy.AggregateTicksToBars(tickResult.Ticks, request.Granularity, dukascopy.PriceSideBid, request.From, request.To)
-		if err != nil {
-			return err
-		}
-		askBars, err := dukascopy.AggregateTicksToBars(tickResult.Ticks, request.Granularity, dukascopy.PriceSideAsk, request.From, request.To)
-		if err != nil {
-			return err
-		}
-		if err := csvout.WriteBars(*outputPath, tickResult.Instrument, profile, nil, bidBars, askBars); err != nil {
+		if err := csvout.WriteBars(*outputPath, instrument, barColumns, nil, bidBars, askBars); err != nil {
 			return err
 		}
 		fmt.Fprintf(stdout, "wrote %d bars to %s\n", len(bidBars), *outputPath)
 		return nil
 	}
 
-	if err := csvout.WriteBars(*outputPath, result.Instrument, profile, result.Bars, nil, nil); err != nil {
+	if err := csvout.WriteBars(*outputPath, result.Instrument, barColumns, result.Bars, nil, nil); err != nil {
 		return err
 	}
 
 	fmt.Fprintf(stdout, "wrote %d bars to %s\n", len(result.Bars), *outputPath)
 	return nil
+}
+
+func loadBidAskBars(ctx context.Context, client *dukascopy.Client, request dukascopy.DownloadRequest) (dukascopy.Instrument, []dukascopy.Bar, []dukascopy.Bar, error) {
+	instrument, bidBars, bidErr := client.DownloadBarsForSide(ctx, request, dukascopy.PriceSideBid)
+	if bidErr == nil {
+		_, askBars, askErr := client.DownloadBarsForSide(ctx, request, dukascopy.PriceSideAsk)
+		if askErr == nil {
+			return instrument, bidBars, askBars, nil
+		}
+	}
+
+	tickRequest := request
+	tickRequest.Granularity = dukascopy.GranularityTick
+	tickResult, err := client.Download(ctx, tickRequest)
+	if err != nil {
+		return dukascopy.Instrument{}, nil, nil, err
+	}
+
+	bidBars, err = dukascopy.AggregateTicksToBars(tickResult.Ticks, request.Granularity, dukascopy.PriceSideBid, request.From, request.To)
+	if err != nil {
+		return dukascopy.Instrument{}, nil, nil, err
+	}
+	askBars, err := dukascopy.AggregateTicksToBars(tickResult.Ticks, request.Granularity, dukascopy.PriceSideAsk, request.From, request.To)
+	if err != nil {
+		return dukascopy.Instrument{}, nil, nil, err
+	}
+	return tickResult.Instrument, bidBars, askBars, nil
 }
 
 func readBaseURL() string {

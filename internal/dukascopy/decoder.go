@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-const tickVolumeDivider = 1_000_000
+const barVolumeMultiplier = 1_000_000
 
 type candlePayload struct {
 	Timestamp  int64     `json:"timestamp"`
@@ -109,13 +109,13 @@ func FilterInstruments(instruments []Instrument, raw string, limit int) []Instru
 
 func normalizeGranularity(value Granularity) Granularity {
 	switch strings.ToLower(strings.TrimSpace(string(value))) {
-	case "tick":
+	case "tick", "t1":
 		return GranularityTick
-	case "minute", "min":
+	case "minute", "min", "m1":
 		return GranularityMinute
-	case "hour", "hr":
+	case "hour", "hr", "h1":
 		return GranularityHour
-	case "day":
+	case "day", "d1":
 		return GranularityDay
 	default:
 		return Granularity(strings.ToLower(strings.TrimSpace(string(value))))
@@ -200,7 +200,7 @@ func decodeBars(payload candlePayload) []Bar {
 			High:   currentHigh,
 			Low:    currentLow,
 			Close:  currentClose,
-			Volume: payload.Volumes[i],
+			Volume: payload.Volumes[i] * barVolumeMultiplier,
 		})
 	}
 
@@ -233,8 +233,8 @@ func decodeTicks(payload tickPayload) []Tick {
 			Time:      time.UnixMilli(currentTime).UTC(),
 			Ask:       currentAsk,
 			Bid:       currentBid,
-			AskVolume: payload.AskVolumes[i] / tickVolumeDivider,
-			BidVolume: payload.BidVolumes[i] / tickVolumeDivider,
+			AskVolume: payload.AskVolumes[i],
+			BidVolume: payload.BidVolumes[i],
 		})
 	}
 

@@ -102,7 +102,7 @@ func newMockServer() *httptest.Server {
 			"highs":      []float64{0, 0.25, 0.75},
 			"lows":       []float64{0, 0.5, 1.25},
 			"closes":     []float64{0, 0.25, 0.75},
-			"volumes":    []float64{1.1, 0.9, 0.8},
+			"volumes":    []float64{0.0011, 0.0009, 0.0008},
 		})
 	})
 
@@ -120,7 +120,25 @@ func newMockServer() *httptest.Server {
 			"highs":      []float64{0, 0.25, 0.75},
 			"lows":       []float64{0, 0.5, 1.25},
 			"closes":     []float64{0, 0.25, 0.75},
-			"volumes":    []float64{1.1, 0.9, 0.8},
+			"volumes":    []float64{0.0011, 0.0009, 0.0008},
+		})
+	})
+
+	mux.HandleFunc("/v1/candles/hour/XAU-USD/BID/2024/1", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, map[string]any{
+			"timestamp":  1704153600000,
+			"multiplier": 1.0,
+			"open":       100.0,
+			"high":       101.0,
+			"low":        99.0,
+			"close":      100.5,
+			"shift":      3600000,
+			"times":      []int{0, 1},
+			"opens":      []float64{0, 1},
+			"highs":      []float64{0, 1},
+			"lows":       []float64{0, 1},
+			"closes":     []float64{0, 1},
+			"volumes":    []float64{0.002, 0.003},
 		})
 	})
 
@@ -133,8 +151,8 @@ func newMockServer() *httptest.Server {
 			"times":      []int{0, 500, 500},
 			"asks":       []float64{0, 0.1, 0.2},
 			"bids":       []float64{0, 0.1, 0.2},
-			"askVolumes": []float64{1000000, 2000000, 3000000},
-			"bidVolumes": []float64{1500000, 2500000, 3500000},
+			"askVolumes": []float64{10, 20, 30},
+			"bidVolumes": []float64{15, 25, 35},
 		})
 	})
 

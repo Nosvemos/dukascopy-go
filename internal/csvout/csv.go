@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"dukascopy-data-downloader/internal/dukascopy"
@@ -20,7 +21,72 @@ const (
 	ProfileFull   Profile = "full"
 )
 
-func WriteBars(outputPath string, instrument dukascopy.Instrument, profile Profile, bars []dukascopy.Bar, bidBars []dukascopy.Bar, askBars []dukascopy.Bar) error {
+var simpleBarColumns = []string{"timestamp", "open", "high", "low", "close", "volume"}
+var fullBarColumns = []string{"timestamp", "open", "high", "low", "close", "volume", "bid_open", "bid_high", "bid_low", "bid_close", "ask_open", "ask_high", "ask_low", "ask_close"}
+var simpleTickColumns = []string{"timestamp", "bid", "ask"}
+var fullTickColumns = []string{"timestamp", "bid", "ask", "bid_volume", "ask_volume"}
+
+func BarColumnsForProfile(profile Profile) []string {
+	switch profile {
+	case ProfileSimple:
+		return cloneColumns(simpleBarColumns)
+	case ProfileFull:
+		return cloneColumns(fullBarColumns)
+	default:
+		return nil
+	}
+}
+
+func TickColumnsForProfile(profile Profile) []string {
+	switch profile {
+	case ProfileSimple:
+		return cloneColumns(simpleTickColumns)
+	case ProfileFull:
+		return cloneColumns(fullTickColumns)
+	default:
+		return nil
+	}
+}
+
+func ParseBarColumns(value string) ([]string, error) {
+	return parseColumns(value, map[string]struct{}{
+		"timestamp": {},
+		"open":      {},
+		"high":      {},
+		"low":       {},
+		"close":     {},
+		"volume":    {},
+		"bid_open":  {},
+		"bid_high":  {},
+		"bid_low":   {},
+		"bid_close": {},
+		"ask_open":  {},
+		"ask_high":  {},
+		"ask_low":   {},
+		"ask_close": {},
+	})
+}
+
+func ParseTickColumns(value string) ([]string, error) {
+	return parseColumns(value, map[string]struct{}{
+		"timestamp":  {},
+		"bid":        {},
+		"ask":        {},
+		"bid_volume": {},
+		"ask_volume": {},
+	})
+}
+
+func BarColumnsNeedBidAsk(columns []string) bool {
+	for _, column := range columns {
+		if strings.HasPrefix(column, "bid_") || strings.HasPrefix(column, "ask_") {
+			return true
+		}
+	}
+	return false
+}
+
+func WriteBars(outputPath string, instrument dukascopy.Instrument, columns []string, primaryBars []dukascopy.Bar, bidBars []dukascopy.Bar, askBars []dukascopy.Bar) error {
 	if err := ensureParentDir(outputPath); err != nil {
 		return err
 	}
@@ -34,79 +100,51 @@ func WriteBars(outputPath string, instrument dukascopy.Instrument, profile Profi
 	writer := csv.NewWriter(file)
 	defer writer.Flush()
 
-	switch profile {
-	case ProfileSimple:
-		if err := writer.Write([]string{"timestamp", "open", "high", "low", "close", "volume"}); err != nil {
-			return err
-		}
+	if err := writer.Write(columns); err != nil {
+		return err
+	}
 
-		for _, bar := range bars {
-			row := []string{
-				bar.Time.UTC().Format(timestampLayout),
-				formatPrice(bar.Open, instrument.PriceScale),
-				formatPrice(bar.High, instrument.PriceScale),
-				formatPrice(bar.Low, instrument.PriceScale),
-				formatPrice(bar.Close, instrument.PriceScale),
-				formatVolume(bar.Volume),
-			}
-			if err := writer.Write(row); err != nil {
-				return err
-			}
-		}
-	case ProfileFull:
-		if err := writer.Write([]string{
-			"timestamp",
-			"open",
-			"high",
-			"low",
-			"close",
-			"volume",
-			"bid_open",
-			"bid_high",
-			"bid_low",
-			"bid_close",
-			"ask_open",
-			"ask_high",
-			"ask_low",
-			"ask_close",
-		}); err != nil {
-			return err
-		}
-
+	if BarColumnsNeedBidAsk(columns) {
 		rows, err := combineBarRows(bidBars, askBars)
 		if err != nil {
 			return err
 		}
 
 		for _, row := range rows {
-			record := []string{
-				row.Time.UTC().Format(timestampLayout),
-				formatPrice(midpoint(row.Bid.Open, row.Ask.Open), instrument.PriceScale),
-				formatPrice(midpoint(row.Bid.High, row.Ask.High), instrument.PriceScale),
-				formatPrice(midpoint(row.Bid.Low, row.Ask.Low), instrument.PriceScale),
-				formatPrice(midpoint(row.Bid.Close, row.Ask.Close), instrument.PriceScale),
-				formatVolume(row.Bid.Volume),
-				formatPrice(row.Bid.Open, instrument.PriceScale),
-				formatPrice(row.Bid.High, instrument.PriceScale),
-				formatPrice(row.Bid.Low, instrument.PriceScale),
-				formatPrice(row.Bid.Close, instrument.PriceScale),
-				formatPrice(row.Ask.Open, instrument.PriceScale),
-				formatPrice(row.Ask.High, instrument.PriceScale),
-				formatPrice(row.Ask.Low, instrument.PriceScale),
-				formatPrice(row.Ask.Close, instrument.PriceScale),
+			record := make([]string, 0, len(columns))
+			for _, column := range columns {
+				value, valueErr := formatBarColumn(column, instrument.PriceScale, row.Bid, row.Ask)
+				if valueErr != nil {
+					return valueErr
+				}
+				record = append(record, value)
 			}
 			if err := writer.Write(record); err != nil {
 				return err
 			}
 		}
-	default:
-		return fmt.Errorf("unsupported csv profile %q", profile)
+
+		return writer.Error()
+	}
+
+	for _, bar := range primaryBars {
+		record := make([]string, 0, len(columns))
+		for _, column := range columns {
+			value, err := formatPrimaryBarColumn(column, instrument.PriceScale, bar)
+			if err != nil {
+				return err
+			}
+			record = append(record, value)
+		}
+		if err := writer.Write(record); err != nil {
+			return err
+		}
 	}
 
 	return writer.Error()
 }
 
-func WriteTicks(outputPath string, instrument dukascopy.Instrument, profile Profile, ticks []dukascopy.Tick) error {
+func WriteTicks(outputPath string, instrument dukascopy.Instrument, columns []string, ticks []dukascopy.Tick) error {
 	if err := ensureParentDir(outputPath); err != nil {
 		return err
 	}
@@ -120,41 +158,22 @@ func WriteTicks(outputPath string, instrument dukascopy.Instrument, profile Prof
 	writer := csv.NewWriter(file)
 	defer writer.Flush()
 
-	switch profile {
-	case ProfileSimple:
-		if err := writer.Write([]string{"timestamp", "bid", "ask"}); err != nil {
+	if err := writer.Write(columns); err != nil {
+		return err
+	}
+
+	for _, tick := range ticks {
+		record := make([]string, 0, len(columns))
+		for _, column := range columns {
+			value, valueErr := formatTickColumn(column, instrument.PriceScale, tick)
+			if valueErr != nil {
+				return valueErr
+			}
+			record = append(record, value)
+		}
+		if err := writer.Write(record); err != nil {
 			return err
 		}
-
-		for _, tick := range ticks {
-			row := []string{
-				tick.Time.UTC().Format(timestampLayout),
-				formatPrice(tick.Bid, instrument.PriceScale),
-				formatPrice(tick.Ask, instrument.PriceScale),
-			}
-			if err := writer.Write(row); err != nil {
-				return err
-			}
-		}
-	case ProfileFull:
-		if err := writer.Write([]string{"timestamp", "bid", "ask", "bid_volume", "ask_volume"}); err != nil {
-			return err
-		}
-
-		for _, tick := range ticks {
-			row := []string{
-				tick.Time.UTC().Format(timestampLayout),
-				formatPrice(tick.Bid, instrument.PriceScale),
-				formatPrice(tick.Ask, instrument.PriceScale),
-				formatVolume(tick.BidVolume),
-				formatVolume(tick.AskVolume),
-			}
-			if err := writer.Write(row); err != nil {
-				return err
-			}
-		}
-	default:
-		return fmt.Errorf("unsupported csv profile %q", profile)
 	}
 
 	return writer.Error()
@@ -184,6 +203,102 @@ func combineBarRows(bidBars []dukascopy.Bar, askBars []dukascopy.Bar) ([]combine
 	}
 
 	return rows, nil
+}
+
+func formatPrimaryBarColumn(column string, scale int, bar dukascopy.Bar) (string, error) {
+	switch column {
+	case "timestamp":
+		return bar.Time.UTC().Format(timestampLayout), nil
+	case "open":
+		return formatPrice(bar.Open, scale), nil
+	case "high":
+		return formatPrice(bar.High, scale), nil
+	case "low":
+		return formatPrice(bar.Low, scale), nil
+	case "close":
+		return formatPrice(bar.Close, scale), nil
+	case "volume":
+		return formatVolume(bar.Volume), nil
+	default:
+		return "", fmt.Errorf("column %q requires bid/ask data or is unsupported for simple bars", column)
+	}
+}
+
+func formatBarColumn(column string, scale int, bid dukascopy.Bar, ask dukascopy.Bar) (string, error) {
+	switch column {
+	case "timestamp":
+		return bid.Time.UTC().Format(timestampLayout), nil
+	case "open":
+		return formatPrice(midpoint(bid.Open, ask.Open), scale), nil
+	case "high":
+		return formatPrice(midpoint(bid.High, ask.High), scale), nil
+	case "low":
+		return formatPrice(midpoint(bid.Low, ask.Low), scale), nil
+	case "close":
+		return formatPrice(midpoint(bid.Close, ask.Close), scale), nil
+	case "volume":
+		return formatVolume(bid.Volume), nil
+	case "bid_open":
+		return formatPrice(bid.Open, scale), nil
+	case "bid_high":
+		return formatPrice(bid.High, scale), nil
+	case "bid_low":
+		return formatPrice(bid.Low, scale), nil
+	case "bid_close":
+		return formatPrice(bid.Close, scale), nil
+	case "ask_open":
+		return formatPrice(ask.Open, scale), nil
+	case "ask_high":
+		return formatPrice(ask.High, scale), nil
+	case "ask_low":
+		return formatPrice(ask.Low, scale), nil
+	case "ask_close":
+		return formatPrice(ask.Close, scale), nil
+	default:
+		return "", fmt.Errorf("unsupported bar column %q", column)
+	}
+}
+
+func formatTickColumn(column string, scale int, tick dukascopy.Tick) (string, error) {
+	switch column {
+	case "timestamp":
+		return tick.Time.UTC().Format(timestampLayout), nil
+	case "bid":
+		return formatPrice(tick.Bid, scale), nil
+	case "ask":
+		return formatPrice(tick.Ask, scale), nil
+	case "bid_volume":
+		return formatVolume(tick.BidVolume), nil
+	case "ask_volume":
+		return formatVolume(tick.AskVolume), nil
+	default:
+		return "", fmt.Errorf("unsupported tick column %q", column)
+	}
+}
+
+func parseColumns(value string, allowed map[string]struct{}) ([]string, error) {
+	parts := strings.Split(value, ",")
+	columns := make([]string, 0, len(parts))
+	for _, part := range parts {
+		column := strings.TrimSpace(strings.ToLower(part))
+		if column == "" {
+			continue
+		}
+		if _, ok := allowed[column]; !ok {
+			return nil, fmt.Errorf("unsupported column %q", column)
+		}
+		columns = append(columns, column)
+	}
+	if len(columns) == 0 {
+		return nil, fmt.Errorf("at least one column must be provided")
+	}
+	return columns, nil
+}
+
+func cloneColumns(columns []string) []string {
+	cloned := make([]string, len(columns))
+	copy(cloned, columns)
+	return cloned
 }
 
 func ensureParentDir(outputPath string) error {

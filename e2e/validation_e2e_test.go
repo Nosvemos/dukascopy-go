@@ -26,3 +26,25 @@ func TestDownloadRejectsConflictingProfiles(t *testing.T) {
 		t.Fatalf("unexpected validation output: %s", output)
 	}
 }
+
+func TestDownloadRejectsCustomColumnsWithProfileFlags(t *testing.T) {
+	server := newMockServer()
+	defer server.Close()
+
+	output := runCLIExpectError(
+		t,
+		server.URL,
+		"download",
+		"--symbol", "xauusd",
+		"--timeframe", "m1",
+		"--from", "2024-01-02T00:00:00Z",
+		"--to", "2024-01-02T00:03:00Z",
+		"--output", "ignored.csv",
+		"--simple",
+		"--custom-columns", "timestamp,open",
+	)
+
+	if !strings.Contains(output, "--custom-columns cannot be combined with --simple or --full") {
+		t.Fatalf("unexpected validation output: %s", output)
+	}
+}

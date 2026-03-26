@@ -40,7 +40,7 @@ func TestDownloadMinuteSimpleCSV(t *testing.T) {
 	if strings.Contains(content, "bid_open") || strings.Contains(content, "ask_open") {
 		t.Fatalf("simple output should not include bid/ask columns: %s", content)
 	}
-	if !strings.Contains(content, "2024-01-02T00:02:00Z,101.250,102.000,100.750,101.500,0.8") {
+	if !strings.Contains(content, "2024-01-02T00:02:00Z,101.250,102.000,100.750,101.500,800") {
 		t.Fatalf("missing expected simple row: %s", content)
 	}
 }
@@ -75,7 +75,7 @@ func TestDownloadMinuteFullCSV(t *testing.T) {
 	if !strings.Contains(content, "timestamp,open,high,low,close,volume,bid_open,bid_high,bid_low,bid_close,ask_open,ask_high,ask_low,ask_close") {
 		t.Fatalf("missing full header: %s", content)
 	}
-	if !strings.Contains(content, "2024-01-02T00:00:00Z,100.100,101.100,99.100,100.600,1.1,100.000,101.000,99.000,100.500,100.200,101.200,99.200,100.700") {
+	if !strings.Contains(content, "2024-01-02T00:00:00Z,100.100,101.100,99.100,100.600,1100,100.000,101.000,99.000,100.500,100.200,101.200,99.200,100.700") {
 		t.Fatalf("missing expected full row: %s", content)
 	}
 }
