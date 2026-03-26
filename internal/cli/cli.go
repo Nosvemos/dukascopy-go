@@ -12,10 +12,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Nosvemos/dukascopy-data-downloader/internal/buildinfo"
-	"github.com/Nosvemos/dukascopy-data-downloader/internal/checkpoint"
-	"github.com/Nosvemos/dukascopy-data-downloader/internal/csvout"
-	"github.com/Nosvemos/dukascopy-data-downloader/internal/dukascopy"
+	"github.com/Nosvemos/dukascopy-go/internal/buildinfo"
+	"github.com/Nosvemos/dukascopy-go/internal/checkpoint"
+	"github.com/Nosvemos/dukascopy-go/internal/csvout"
+	"github.com/Nosvemos/dukascopy-go/internal/dukascopy"
 )
 
 const (
@@ -84,7 +84,7 @@ func Run(args []string, stdout io.Writer, stderr io.Writer) int {
 }
 
 func printUsage(w io.Writer) {
-	fmt.Fprintf(w, "%sdukascopy-data%s\n\n", colorize(colorBold), colorize(colorReset))
+	fmt.Fprintf(w, "%sdukascopy-go%s\n\n", colorize(colorBold), colorize(colorReset))
 	fmt.Fprintf(w, "Version: %s\n\n", buildinfo.VersionString())
 	fmt.Fprintf(w, "Global flags: --config <path.json>\n\n")
 	fmt.Fprintf(w, "%sCommands%s\n", colorize(colorCyan), colorize(colorReset))
@@ -96,24 +96,24 @@ func printUsage(w io.Writer) {
   version      Print build version information
 
 examples:
-  dukascopy-data --config ./dukascopy.json instruments --query xauusd
-  dukascopy-data instruments --query xauusd
-  dukascopy-data instruments --query xauusd --json
-  dukascopy-data --list-timeframes
-  dukascopy-data --version
-  dukascopy-data stats --input ./data/xauusd.csv
-  dukascopy-data manifest inspect --output ./data/xauusd.csv
-  dukascopy-data manifest prune --output ./data/xauusd.csv
-  dukascopy-data manifest repair --output ./data/xauusd.csv
-  dukascopy-data manifest verify --manifest ./data/xauusd.csv.manifest.json
-  dukascopy-data download --symbol xauusd --timeframe m1 --from 2024-01-02T00:00:00Z --to 2024-01-02T01:00:00Z --output ./data/xauusd.csv --simple
-  dukascopy-data download --symbol xauusd --timeframe h1 --from 2024-01-01T00:00:00Z --to 2024-01-02T00:00:00Z --output ./data/xauusd-full.csv --full
-  dukascopy-data download --symbol xauusd --timeframe m1 --from 2024-01-02T00:00:00Z --to 2024-01-02T06:00:00Z --output ./data/xauusd.parquet --full
-  dukascopy-data download --symbol xauusd --timeframe m1 --from 2024-01-02T00:00:00Z --to 2024-01-02T01:00:00Z --output ./data/xauusd-custom.csv --custom-columns timestamp,bid_open,ask_open,volume
-  dukascopy-data download --symbol xauusd --timeframe m1 --from 2024-01-02T00:00:00Z --to 2024-01-02T00:03:00Z --output - --simple
-  dukascopy-data download --symbol xauusd --timeframe m1 --from 2024-01-02T00:00:00Z --to 2024-01-02T06:00:00Z --output ./data/xauusd.csv --simple --resume --progress --retries 5
-  dukascopy-data download --symbol xauusd --timeframe m1 --from 2024-01-02T00:00:00Z --to 2024-01-02T06:00:00Z --output ./data/xauusd.csv --simple --rate-limit 150ms
-  dukascopy-data download --symbol xauusd --timeframe m1 --from 2024-01-01T00:00:00Z --to 2024-02-01T00:00:00Z --output ./data/xauusd.csv --simple --partition auto --parallelism 4 --progress
+  dukascopy-go --config ./dukascopy.json instruments --query xauusd
+  dukascopy-go instruments --query xauusd
+  dukascopy-go instruments --query xauusd --json
+  dukascopy-go --list-timeframes
+  dukascopy-go --version
+  dukascopy-go stats --input ./data/xauusd.csv
+  dukascopy-go manifest inspect --output ./data/xauusd.csv
+  dukascopy-go manifest prune --output ./data/xauusd.csv
+  dukascopy-go manifest repair --output ./data/xauusd.csv
+  dukascopy-go manifest verify --manifest ./data/xauusd.csv.manifest.json
+  dukascopy-go download --symbol xauusd --timeframe m1 --from 2024-01-02T00:00:00Z --to 2024-01-02T01:00:00Z --output ./data/xauusd.csv --simple
+  dukascopy-go download --symbol xauusd --timeframe h1 --from 2024-01-01T00:00:00Z --to 2024-01-02T00:00:00Z --output ./data/xauusd-full.csv --full
+  dukascopy-go download --symbol xauusd --timeframe m1 --from 2024-01-02T00:00:00Z --to 2024-01-02T06:00:00Z --output ./data/xauusd.parquet --full
+  dukascopy-go download --symbol xauusd --timeframe m1 --from 2024-01-02T00:00:00Z --to 2024-01-02T01:00:00Z --output ./data/xauusd-custom.csv --custom-columns timestamp,bid_open,ask_open,volume
+  dukascopy-go download --symbol xauusd --timeframe m1 --from 2024-01-02T00:00:00Z --to 2024-01-02T00:03:00Z --output - --simple
+  dukascopy-go download --symbol xauusd --timeframe m1 --from 2024-01-02T00:00:00Z --to 2024-01-02T06:00:00Z --output ./data/xauusd.csv --simple --resume --progress --retries 5
+  dukascopy-go download --symbol xauusd --timeframe m1 --from 2024-01-02T00:00:00Z --to 2024-01-02T06:00:00Z --output ./data/xauusd.csv --simple --rate-limit 150ms
+  dukascopy-go download --symbol xauusd --timeframe m1 --from 2024-01-01T00:00:00Z --to 2024-02-01T00:00:00Z --output ./data/xauusd.csv --simple --partition auto --parallelism 4 --progress
 `)
 }
 
@@ -437,7 +437,7 @@ func colorize(code string) string {
 }
 
 func printVersion(w io.Writer) {
-	fmt.Fprintf(w, "%sdukascopy-data%s %s\n", colorize(colorBold), colorize(colorReset), buildinfo.VersionString())
+	fmt.Fprintf(w, "%sdukascopy-go%s %s\n", colorize(colorBold), colorize(colorReset), buildinfo.VersionString())
 	if buildinfo.Commit != "none" {
 		fmt.Fprintf(w, "commit: %s\n", buildinfo.Commit)
 	}

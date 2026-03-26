@@ -10,7 +10,7 @@ func TestVersionFlag(t *testing.T) {
 	defer server.Close()
 
 	output := runCLI(t, server.URL, "--version")
-	if !strings.Contains(output, "dukascopy-data") {
+	if !strings.Contains(output, "dukascopy-go") {
 		t.Fatalf("unexpected version output: %s", output)
 	}
 }

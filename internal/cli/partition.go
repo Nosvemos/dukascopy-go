@@ -11,9 +11,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Nosvemos/dukascopy-data-downloader/internal/checkpoint"
-	"github.com/Nosvemos/dukascopy-data-downloader/internal/csvout"
-	"github.com/Nosvemos/dukascopy-data-downloader/internal/dukascopy"
+	"github.com/Nosvemos/dukascopy-go/internal/checkpoint"
+	"github.com/Nosvemos/dukascopy-go/internal/csvout"
+	"github.com/Nosvemos/dukascopy-go/internal/dukascopy"
 )
 
 const (

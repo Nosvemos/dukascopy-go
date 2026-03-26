@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Nosvemos/dukascopy-data-downloader/internal/checkpoint"
-	"github.com/Nosvemos/dukascopy-data-downloader/internal/csvout"
+	"github.com/Nosvemos/dukascopy-go/internal/checkpoint"
+	"github.com/Nosvemos/dukascopy-go/internal/csvout"
 )
 
 func runManifest(args []string, stdout io.Writer) error {
@@ -426,11 +426,11 @@ func printManifestUsage(w io.Writer) {
   manifest verify   Audit part files and the final CSV against the manifest
 
 examples:
-  dukascopy-data manifest inspect --output ./data/xauusd.csv
-  dukascopy-data manifest prune --output ./data/xauusd.csv
-  dukascopy-data manifest repair --output ./data/xauusd.csv
-  dukascopy-data manifest verify --manifest ./data/xauusd.csv.manifest.json
-  dukascopy-data manifest verify --output ./data/xauusd.csv --check-data-quality
+  dukascopy-go manifest inspect --output ./data/xauusd.csv
+  dukascopy-go manifest prune --output ./data/xauusd.csv
+  dukascopy-go manifest repair --output ./data/xauusd.csv
+  dukascopy-go manifest verify --manifest ./data/xauusd.csv.manifest.json
+  dukascopy-go manifest verify --output ./data/xauusd.csv --check-data-quality
 `)
 }
 

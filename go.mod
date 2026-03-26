@@ -1,4 +1,4 @@
-module github.com/Nosvemos/dukascopy-data-downloader
+module github.com/Nosvemos/dukascopy-go
 
 go 1.26.0
 

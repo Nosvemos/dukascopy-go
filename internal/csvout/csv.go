@@ -15,7 +15,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Nosvemos/dukascopy-data-downloader/internal/dukascopy"
+	"github.com/Nosvemos/dukascopy-go/internal/dukascopy"
 )
 
 const timestampLayout = time.RFC3339Nano

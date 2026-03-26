@@ -1,4 +1,4 @@
-# dukascopy-data-downloader
+# dukascopy-go
 
 A Go CLI for searching Dukascopy instruments and exporting historical market data from the Dukascopy `jetta` API.
 
@@ -33,7 +33,7 @@ A Go CLI for searching Dukascopy instruments and exporting historical market dat
 ## Build
 
 ```bash
-go build -o dukascopy-data ./cmd/dukascopy
+go build -o dukascopy-go ./cmd/dukascopy-go
 ```
 
 ## Quick Start
@@ -41,31 +41,31 @@ go build -o dukascopy-data ./cmd/dukascopy
 Run directly from the checked-out repository:
 
 ```bash
-go run ./cmd/dukascopy --help
+go run ./cmd/dukascopy-go --help
 ```
 
 Run with a shared config file:
 
 ```bash
-go run ./cmd/dukascopy --config ./dukascopy.json --help
+go run ./cmd/dukascopy-go --config ./dukascopy.json --help
 ```
 
 List supported timeframes:
 
 ```bash
-go run ./cmd/dukascopy --list-timeframes
+go run ./cmd/dukascopy-go --list-timeframes
 ```
 
 Search an instrument:
 
 ```bash
-go run ./cmd/dukascopy instruments --query xauusd
+go run ./cmd/dukascopy-go instruments --query xauusd
 ```
 
 Download 1-minute bars:
 
 ```bash
-go run ./cmd/dukascopy download \
+go run ./cmd/dukascopy-go download \
   --symbol xauusd \
   --timeframe m1 \
   --from 2024-01-02T00:00:00Z \
@@ -77,7 +77,7 @@ go run ./cmd/dukascopy download \
 Download 1-minute bars as Parquet:
 
 ```bash
-go run ./cmd/dukascopy download \
+go run ./cmd/dukascopy-go download \
   --symbol xauusd \
   --timeframe m1 \
   --from 2024-01-02T00:00:00Z \
@@ -91,19 +91,19 @@ go run ./cmd/dukascopy download \
 Install a local binary:
 
 ```bash
-go install github.com/Nosvemos/dukascopy-data-downloader/cmd/dukascopy@latest
+go install github.com/Nosvemos/dukascopy-go/cmd/dukascopy-go@latest
 ```
 
 Run directly from the published module without cloning the repository:
 
 ```bash
-go run github.com/Nosvemos/dukascopy-data-downloader/cmd/dukascopy@latest --help
+go run github.com/Nosvemos/dukascopy-go/cmd/dukascopy-go@latest --help
 ```
 
 Build from a local checkout:
 
 ```bash
-go build -o dukascopy-data ./cmd/dukascopy
+go build -o dukascopy-go ./cmd/dukascopy-go
 ```
 
 ## Releases
@@ -126,7 +126,7 @@ Each release embeds:
 You can inspect the installed binary with:
 
 ```bash
-dukascopy-data --version
+dukascopy-go --version
 ```
 
 ## Usage Patterns
@@ -134,73 +134,73 @@ dukascopy-data --version
 Search instruments:
 
 ```bash
-go run ./cmd/dukascopy instruments --query xauusd
+go run ./cmd/dukascopy-go instruments --query xauusd
 ```
 
 Search instruments as JSON:
 
 ```bash
-go run ./cmd/dukascopy instruments --query xauusd --json
+go run ./cmd/dukascopy-go instruments --query xauusd --json
 ```
 
 Print dataset stats:
 
 ```bash
-go run ./cmd/dukascopy stats --input ./data/xauusd.csv
+go run ./cmd/dukascopy-go stats --input ./data/xauusd.csv
 ```
 
 Print dataset stats as JSON:
 
 ```bash
-go run ./cmd/dukascopy stats --input ./data/xauusd.csv --json
+go run ./cmd/dukascopy-go stats --input ./data/xauusd.csv --json
 ```
 
 Inspect a Parquet dataset:
 
 ```bash
-go run ./cmd/dukascopy stats --input ./data/xauusd.parquet
+go run ./cmd/dukascopy-go stats --input ./data/xauusd.parquet
 ```
 
 Inspect a checkpoint manifest:
 
 ```bash
-go run ./cmd/dukascopy manifest inspect --output ./data/xauusd.csv
+go run ./cmd/dukascopy-go manifest inspect --output ./data/xauusd.csv
 ```
 
 Verify a dataset against its manifest without downloading anything:
 
 ```bash
-go run ./cmd/dukascopy manifest verify --manifest ./data/xauusd.csv.manifest.json
+go run ./cmd/dukascopy-go manifest verify --manifest ./data/xauusd.csv.manifest.json
 ```
 
 Verify manifest integrity plus duplicate and ordering quality checks:
 
 ```bash
-go run ./cmd/dukascopy manifest verify --output ./data/xauusd.csv --check-data-quality
+go run ./cmd/dukascopy-go manifest verify --output ./data/xauusd.csv --check-data-quality
 ```
 
 Repair a damaged final CSV or missing partition from existing valid files:
 
 ```bash
-go run ./cmd/dukascopy manifest repair --output ./data/xauusd.csv
+go run ./cmd/dukascopy-go manifest repair --output ./data/xauusd.csv
 ```
 
 Clean orphan partition files and leftover temp artifacts:
 
 ```bash
-go run ./cmd/dukascopy manifest prune --output ./data/xauusd.csv
+go run ./cmd/dukascopy-go manifest prune --output ./data/xauusd.csv
 ```
 
 Print version metadata:
 
 ```bash
-go run ./cmd/dukascopy --version
+go run ./cmd/dukascopy-go --version
 ```
 
 Download minute bars with the reduced schema:
 
 ```bash
-go run ./cmd/dukascopy download \
+go run ./cmd/dukascopy-go download \
   --symbol xauusd \
   --timeframe m1 \
   --from 2024-01-02T00:00:00Z \
@@ -212,7 +212,7 @@ go run ./cmd/dukascopy download \
 Download compressed CSV directly:
 
 ```bash
-go run ./cmd/dukascopy download \
+go run ./cmd/dukascopy-go download \
   --symbol xauusd \
   --timeframe m1 \
   --from 2024-01-02T00:00:00Z \
@@ -224,7 +224,7 @@ go run ./cmd/dukascopy download \
 Download Parquet directly:
 
 ```bash
-go run ./cmd/dukascopy download \
+go run ./cmd/dukascopy-go download \
   --symbol xauusd \
   --timeframe m1 \
   --from 2024-01-02T00:00:00Z \
@@ -236,7 +236,7 @@ go run ./cmd/dukascopy download \
 Stream CSV to stdout:
 
 ```bash
-go run ./cmd/dukascopy download \
+go run ./cmd/dukascopy-go download \
   --symbol xauusd \
   --timeframe m1 \
   --from 2024-01-02T00:00:00Z \
@@ -248,7 +248,7 @@ go run ./cmd/dukascopy download \
 Download minute bars with the expanded schema:
 
 ```bash
-go run ./cmd/dukascopy download \
+go run ./cmd/dukascopy-go download \
   --symbol xauusd \
   --timeframe m1 \
   --from 2024-01-02T00:00:00Z \
@@ -260,7 +260,7 @@ go run ./cmd/dukascopy download \
 Download ticks:
 
 ```bash
-go run ./cmd/dukascopy download \
+go run ./cmd/dukascopy-go download \
   --symbol eurusd \
   --timeframe tick \
   --from 2024-01-02T00:00:00Z \
@@ -272,7 +272,7 @@ go run ./cmd/dukascopy download \
 Download with custom columns:
 
 ```bash
-go run ./cmd/dukascopy download \
+go run ./cmd/dukascopy-go download \
   --symbol xauusd \
   --timeframe m1 \
   --from 2024-01-02T00:00:00Z \
@@ -284,7 +284,7 @@ go run ./cmd/dukascopy download \
 Download an aggregated timeframe:
 
 ```bash
-go run ./cmd/dukascopy download \
+go run ./cmd/dukascopy-go download \
   --symbol xauusd \
   --timeframe m5 \
   --from 2024-01-02T00:00:00Z \
@@ -296,7 +296,7 @@ go run ./cmd/dukascopy download \
 Download monthly aggregated bars:
 
 ```bash
-go run ./cmd/dukascopy download \
+go run ./cmd/dukascopy-go download \
   --symbol xauusd \
   --timeframe mn1 \
   --from 2024-01-01T00:00:00Z \
@@ -308,7 +308,7 @@ go run ./cmd/dukascopy download \
 Download another Dukascopy instrument:
 
 ```bash
-go run ./cmd/dukascopy download \
+go run ./cmd/dukascopy-go download \
   --symbol eurusd \
   --timeframe h1 \
   --from 2024-01-01T00:00:00Z \
@@ -320,7 +320,7 @@ go run ./cmd/dukascopy download \
 Resume an interrupted download:
 
 ```bash
-go run ./cmd/dukascopy download \
+go run ./cmd/dukascopy-go download \
   --symbol xauusd \
   --timeframe m1 \
   --from 2024-01-02T00:00:00Z \
@@ -333,7 +333,7 @@ go run ./cmd/dukascopy download \
 Download with progress and custom retry settings:
 
 ```bash
-go run ./cmd/dukascopy download \
+go run ./cmd/dukascopy-go download \
   --symbol xauusd \
   --timeframe m1 \
   --from 2024-01-02T00:00:00Z \
@@ -348,7 +348,7 @@ go run ./cmd/dukascopy download \
 Download with request pacing:
 
 ```bash
-go run ./cmd/dukascopy download \
+go run ./cmd/dukascopy-go download \
   --symbol xauusd \
   --timeframe m1 \
   --from 2024-01-02T00:00:00Z \
@@ -361,7 +361,7 @@ go run ./cmd/dukascopy download \
 Download a large range with partition checkpoints:
 
 ```bash
-go run ./cmd/dukascopy download \
+go run ./cmd/dukascopy-go download \
   --symbol xauusd \
   --timeframe m1 \
   --from 2024-01-01T00:00:00Z \
@@ -375,7 +375,7 @@ go run ./cmd/dukascopy download \
 Download a large range with parallel partition workers:
 
 ```bash
-go run ./cmd/dukascopy download \
+go run ./cmd/dukascopy-go download \
   --symbol xauusd \
   --timeframe m1 \
   --from 2024-01-01T00:00:00Z \
@@ -390,7 +390,7 @@ go run ./cmd/dukascopy download \
 Use a custom checkpoint manifest path:
 
 ```bash
-go run ./cmd/dukascopy download \
+go run ./cmd/dukascopy-go download \
   --symbol eurusd \
   --timeframe h1 \
   --from 2024-01-01T00:00:00Z \
@@ -569,14 +569,14 @@ The CLI can also load defaults from a JSON config file:
 Pass it explicitly:
 
 ```bash
-dukascopy-data --config ./dukascopy.json instruments --query xauusd
+dukascopy-go --config ./dukascopy.json instruments --query xauusd
 ```
 
 Or export it once:
 
 ```bash
 export DUKASCOPY_CONFIG=./dukascopy.json
-dukascopy-data download --symbol xauusd --from 2024-01-02T00:00:00Z --to 2024-01-02T06:00:00Z --output ./data/xauusd.csv
+dukascopy-go download --symbol xauusd --from 2024-01-02T00:00:00Z --to 2024-01-02T06:00:00Z --output ./data/xauusd.csv
 ```
 
 ## Tests

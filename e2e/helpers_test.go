@@ -15,9 +15,9 @@ var builtCLI string
 
 func TestMain(m *testing.M) {
 	root := repoRoot()
-	builtCLI = filepath.Join(os.TempDir(), "dukascopy-data-e2e.exe")
+	builtCLI = filepath.Join(os.TempDir(), "dukascopy-go-e2e.exe")
 
-	build := exec.Command("go", "build", "-o", builtCLI, "./cmd/dukascopy")
+	build := exec.Command("go", "build", "-o", builtCLI, "./cmd/dukascopy-go")
 	build.Dir = root
 	output, err := build.CombinedOutput()
 	if err != nil {

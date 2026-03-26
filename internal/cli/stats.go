@@ -8,7 +8,7 @@ import (
 	"io"
 	"strings"
 
-	"github.com/Nosvemos/dukascopy-data-downloader/internal/csvout"
+	"github.com/Nosvemos/dukascopy-go/internal/csvout"
 )
 
 func runStats(args []string, stdout io.Writer) error {

@@ -1,22 +1,22 @@
 version: 2
 
-project_name: dukascopy-data
+project_name: dukascopy-go
 
 before:
   hooks:
     - go test ./...
 
 builds:
-  - id: dukascopy-data
-    main: ./cmd/dukascopy
-    binary: dukascopy-data
+  - id: dukascopy-go
+    main: ./cmd/dukascopy-go
+    binary: dukascopy-go
     env:
       - CGO_ENABLED=0
     ldflags:
       - -s -w
-      - -X github.com/Nosvemos/dukascopy-data-downloader/internal/buildinfo.Version={{ .Version }}
-      - -X github.com/Nosvemos/dukascopy-data-downloader/internal/buildinfo.Commit={{ .ShortCommit }}
-      - -X github.com/Nosvemos/dukascopy-data-downloader/internal/buildinfo.Date={{ .Date }}
+      - -X github.com/Nosvemos/dukascopy-go/internal/buildinfo.Version={{ .Version }}
+      - -X github.com/Nosvemos/dukascopy-go/internal/buildinfo.Commit={{ .ShortCommit }}
+      - -X github.com/Nosvemos/dukascopy-go/internal/buildinfo.Date={{ .Date }}
     goos:
       - linux
       - windows
@@ -47,4 +47,4 @@ changelog:
 release:
   github:
     owner: Nosvemos
-    name: dukascopy-data-downloader
+    name: dukascopy-go

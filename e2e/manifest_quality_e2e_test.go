@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Nosvemos/dukascopy-data-downloader/internal/checkpoint"
-	"github.com/Nosvemos/dukascopy-data-downloader/internal/csvout"
+	"github.com/Nosvemos/dukascopy-go/internal/checkpoint"
+	"github.com/Nosvemos/dukascopy-go/internal/csvout"
 )
 
 func TestManifestVerifyCanCheckDataQuality(t *testing.T) {

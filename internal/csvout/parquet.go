@@ -13,7 +13,7 @@ import (
 
 	parquet "github.com/parquet-go/parquet-go"
 
-	"github.com/Nosvemos/dukascopy-data-downloader/internal/dukascopy"
+	"github.com/Nosvemos/dukascopy-go/internal/dukascopy"
 )
 
 const parquetColumnsMetadataKey = "dukascopy.columns"
