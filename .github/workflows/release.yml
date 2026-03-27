@@ -4,6 +4,15 @@ on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
+    inputs:
+      version_tag:
+        description: "Release tag to create, for example v0.2.0"
+        required: true
+      target_commitish:
+        description: "Branch or commit to release from"
+        required: false
+        default: "main"
 
 permissions:
   contents: write
@@ -16,6 +25,40 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          ref: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.target_commitish || github.ref }}
+
+      - name: Validate workflow dispatch tag
+        if: github.event_name == 'workflow_dispatch'
+        shell: bash
+        run: |
+          tag="${{ github.event.inputs.version_tag }}"
+          if [[ ! "$tag" =~ ^v.+ ]]; then
+            echo "workflow_dispatch version_tag must start with v, got: $tag" >&2
+            exit 1
+          fi
+
+      - name: Create and push release tag
+        if: github.event_name == 'workflow_dispatch'
+        shell: bash
+        run: |
+          tag="${{ github.event.inputs.version_tag }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git rev-parse "$tag" >/dev/null 2>&1; then
+            echo "tag already exists locally: $tag" >&2
+            exit 1
+          fi
+          if git ls-remote --tags origin "refs/tags/$tag" | grep -q "$tag"; then
+            echo "tag already exists on origin: $tag" >&2
+            exit 1
+          fi
+          git tag -a "$tag" -m "Release $tag"
+          git push origin "refs/tags/$tag"
+
+      - name: Checkout release tag
+        if: github.event_name == 'workflow_dispatch'
+        shell: bash
+        run: git checkout "${{ github.event.inputs.version_tag }}"
 
       - name: Setup Go
         uses: actions/setup-go@v5

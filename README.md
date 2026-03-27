@@ -55,6 +55,15 @@ It supports flexible symbol input like `xauusd`, `eur/usd`, and `BTC-USD`, and w
 
 `Go 1.26+` is the current target in this repository.
 
+## Releases
+
+The release workflow supports two paths:
+
+- push a tag such as `v0.2.0`
+- run the `Release` workflow from the GitHub Actions UI with a `version_tag` such as `v0.2.0`
+
+When you use the UI button, the workflow creates and pushes the tag for you before running GoReleaser.
+
 ## Quick Start
 
 Search for an instrument:
