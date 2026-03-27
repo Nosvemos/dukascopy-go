@@ -25,6 +25,8 @@ func TestStatsReportsGapsAndOutOfOrderRows(t *testing.T) {
 		"",
 		"stats",
 		"--input", inputPath,
+		"--symbol", "xauusd",
+		"--show-suspicious-gaps",
 	)
 
 	if !strings.Contains(output, "inferred frame:    m1") {
@@ -35,5 +37,8 @@ func TestStatsReportsGapsAndOutOfOrderRows(t *testing.T) {
 	}
 	if !strings.Contains(output, "out of order:      1") {
 		t.Fatalf("expected out-of-order details in stats output: %s", output)
+	}
+	if !strings.Contains(output, "Suspicious Gaps") || !strings.Contains(output, "2024-01-02T00:02:00Z") {
+		t.Fatalf("expected suspicious gap listing in stats output: %s", output)
 	}
 }

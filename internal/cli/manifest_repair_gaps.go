@@ -23,7 +23,9 @@ type gapRedownloadOptions struct {
 }
 
 func redownloadManifestGaps(manifestPath string, manifest *checkpoint.Manifest, stdout io.Writer, options gapRedownloadOptions) (int, error) {
-	stats, err := csvout.InspectCSV(manifest.OutputPath)
+	stats, err := csvout.InspectCSVWithOptions(manifest.OutputPath, csvout.InspectOptions{
+		Symbol: manifest.Symbol,
+	})
 	if err != nil {
 		return 0, err
 	}
@@ -144,7 +146,7 @@ func detectManifestGapPartIndexes(manifest checkpoint.Manifest, expectedInterval
 
 			if !previousTimestamp.IsZero() {
 				delta := timestamp.Sub(previousTimestamp)
-				if delta > expectedInterval && !csvout.IsExpectedMarketClosureGap(previousTimestamp, timestamp, expectedInterval) {
+				if delta > expectedInterval && !csvout.IsExpectedGapForProfile(previousTimestamp, timestamp, expectedInterval, manifest.Symbol, csvout.MarketProfileAuto) {
 					if previousPartIndex >= 0 {
 						indexes[previousPartIndex] = struct{}{}
 					}

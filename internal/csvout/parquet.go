@@ -199,11 +199,17 @@ func auditParquet(path string) (FileAudit, error) {
 }
 
 func inspectParquet(path string) (CSVStats, error) {
+	return inspectParquetWithOptions(path, InspectOptions{})
+}
+
+func inspectParquetWithOptions(path string, options InspectOptions) (CSVStats, error) {
 	stats := CSVStats{
 		Path:       path,
 		Compressed: false,
 		Format:     "parquet",
+		GapSymbol:  defaultGapSymbol(path, options.Symbol),
 	}
+	stats.GapProfile = ResolveGapMarketProfile(stats.GapSymbol, options.MarketProfile)
 
 	file, parquetFile, closeFile, err := openParquetFile(path)
 	if err != nil {
@@ -292,7 +298,7 @@ func inspectParquet(path string) (CSVStats, error) {
 	stats.InferredTimeframe = inferTimeframe(intervals)
 	if expectedInterval > 0 {
 		stats.ExpectedInterval = expectedInterval.String()
-		applyGapStats(&stats, gapObservations, expectedInterval)
+		applyGapStats(&stats, gapObservations, expectedInterval, stats.GapSymbol, stats.GapProfile, options)
 	}
 
 	return stats, nil

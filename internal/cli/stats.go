@@ -17,12 +17,19 @@ func runStats(args []string, stdout io.Writer) error {
 	fs.SetOutput(io.Discard)
 
 	inputPath := fs.String("input", "", "CSV, CSV.GZ, or Parquet file path")
+	symbol := fs.String("symbol", "", "optional instrument symbol hint such as xauusd or eurusd for gap classification")
+	marketProfile := fs.String("market-profile", csvout.MarketProfileAuto, "gap profile: auto, otc-24x5, crypto-24x7, always")
+	showSuspiciousGaps := fs.Bool("show-suspicious-gaps", false, "print suspicious gap ranges after the summary")
+	suspiciousGapLimit := fs.Int("suspicious-gap-limit", 20, "maximum number of suspicious gap ranges to print when --show-suspicious-gaps is enabled; 0 means all")
 	jsonOutput := fs.Bool("json", false, "print stats as JSON")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if strings.TrimSpace(*inputPath) == "" {
 		return errors.New("--input is required")
+	}
+	if *suspiciousGapLimit < 0 {
+		return errors.New("--suspicious-gap-limit must be 0 or greater")
 	}
 
 	var printer *operationPrinter
@@ -34,7 +41,12 @@ func runStats(args []string, stdout io.Writer) error {
 		defer printer.Finish()
 	}
 
-	stats, err := csvout.InspectCSV(*inputPath)
+	stats, err := csvout.InspectCSVWithOptions(*inputPath, csvout.InspectOptions{
+		Symbol:                  *symbol,
+		MarketProfile:           *marketProfile,
+		IncludeSuspiciousGaps:   *showSuspiciousGaps,
+		MaxSuspiciousGapDetails: *suspiciousGapLimit,
+	})
 	if err != nil {
 		if printer != nil {
 			printer.SetStatus("failed")
@@ -45,6 +57,7 @@ func runStats(args []string, stdout io.Writer) error {
 		printer.SetMetric("format", stats.Format)
 		printer.SetMetric("rows", formatCount(stats.Rows))
 		if stats.HasTimestamp {
+			printer.SetMetric("profile", stats.GapProfile)
 			printer.SetMetric("range", stats.FirstTimestamp.Format(time.RFC3339)+" -> "+stats.LastTimestamp.Format(time.RFC3339))
 			printer.SetMetric("suspicious", formatCount(stats.SuspiciousGapCount))
 		}
@@ -73,6 +86,8 @@ func runStats(args []string, stdout io.Writer) error {
 		fmt.Fprintf(stdout, "first timestamp:   %s\n", stats.FirstTimestamp.Format("2006-01-02T15:04:05.999999999Z07:00"))
 		fmt.Fprintf(stdout, "last timestamp:    %s\n", stats.LastTimestamp.Format("2006-01-02T15:04:05.999999999Z07:00"))
 		fmt.Fprintf(stdout, "inferred frame:    %s\n", stats.InferredTimeframe)
+		fmt.Fprintf(stdout, "gap profile:       %s\n", defaultString(stats.GapProfile, csvout.MarketProfileAuto))
+		fmt.Fprintf(stdout, "gap symbol:        %s\n", defaultString(stats.GapSymbol, "auto"))
 		fmt.Fprintf(stdout, "expected interval: %s\n", defaultString(stats.ExpectedInterval, "unknown"))
 		fmt.Fprintf(stdout, "gap count:         %d\n", stats.GapCount)
 		fmt.Fprintf(stdout, "missing intervals: %d\n", stats.MissingIntervals)
@@ -87,6 +102,7 @@ func runStats(args []string, stdout io.Writer) error {
 	fmt.Fprintf(stdout, "duplicate rows:    %d\n", stats.DuplicateRows)
 	fmt.Fprintf(stdout, "duplicate stamps:  %d\n", stats.DuplicateStamps)
 	fmt.Fprintf(stdout, "out of order:      %d\n", stats.OutOfOrderRows)
+	printSuspiciousGapDetails(stdout, stats.SuspiciousGaps, stats.SuspiciousGapCount, *showSuspiciousGaps, *suspiciousGapLimit)
 	return nil
 }
 
@@ -95,4 +111,36 @@ func defaultString(value string, fallback string) string {
 		return fallback
 	}
 	return value
+}
+
+func printSuspiciousGapDetails(stdout io.Writer, gaps []csvout.GapDetail, total int, enabled bool, limit int) {
+	if !enabled {
+		return
+	}
+
+	fmt.Fprintf(stdout, "\n%sSuspicious Gaps%s\n", colorize(colorCyan), colorize(colorReset))
+	if total == 0 {
+		fmt.Fprintln(stdout, "none")
+		return
+	}
+
+	for index, gap := range gaps {
+		fmt.Fprintf(
+			stdout,
+			"%d. from %s to %s  missing=%d  gap=%s\n",
+			index+1,
+			gap.MissingFrom.Format(time.RFC3339),
+			gap.MissingTo.Format(time.RFC3339),
+			gap.MissingIntervals,
+			gap.Interval,
+		)
+	}
+
+	if remaining := total - len(gaps); remaining > 0 {
+		if limit == 0 {
+			fmt.Fprintf(stdout, "... %d more suspicious gap(s) omitted\n", remaining)
+			return
+		}
+		fmt.Fprintf(stdout, "... %d more suspicious gap(s); raise --suspicious-gap-limit to see more\n", remaining)
+	}
 }

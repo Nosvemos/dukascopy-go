@@ -120,8 +120,16 @@ func runManifestVerify(args []string, stdout io.Writer) error {
 	outputPath := fs.String("output", "", "output CSV path used to derive <output>.manifest.json")
 	jsonOutput := fs.Bool("json", false, "print the verification report as JSON")
 	checkDataQuality := fs.Bool("check-data-quality", false, "inspect the final CSV for duplicates, out-of-order rows, and gaps")
+	showSuspiciousGaps := fs.Bool("show-suspicious-gaps", false, "print suspicious gap ranges after data-quality checks")
+	suspiciousGapLimit := fs.Int("suspicious-gap-limit", 20, "maximum number of suspicious gap ranges to print when --show-suspicious-gaps is enabled; 0 means all")
 	if err := fs.Parse(args); err != nil {
 		return err
+	}
+	if *suspiciousGapLimit < 0 {
+		return errors.New("--suspicious-gap-limit must be 0 or greater")
+	}
+	if *showSuspiciousGaps {
+		*checkDataQuality = true
 	}
 
 	path, err := resolveManifestPath(strings.TrimSpace(*manifestPath), strings.TrimSpace(*outputPath))
@@ -136,6 +144,14 @@ func runManifestVerify(args []string, stdout io.Writer) error {
 		printer.SetStatus("verifying manifest")
 		printer.SetPhase("hash and row audit")
 		defer printer.Finish()
+	}
+
+	manifest, err := checkpoint.Load(path)
+	if err != nil {
+		if printer != nil {
+			printer.SetStatus("failed")
+		}
+		return err
 	}
 
 	report, err := checkpoint.VerifyManifest(path)
@@ -160,7 +176,11 @@ func runManifestVerify(args []string, stdout io.Writer) error {
 			printer.SetStatus("scanning final output")
 			printer.SetPhase("data quality audit")
 		}
-		stats, err := csvout.InspectCSV(report.FinalOutput.Path)
+		stats, err := csvout.InspectCSVWithOptions(report.FinalOutput.Path, csvout.InspectOptions{
+			Symbol:                  manifest.Symbol,
+			IncludeSuspiciousGaps:   *showSuspiciousGaps,
+			MaxSuspiciousGapDetails: *suspiciousGapLimit,
+		})
 		if err != nil {
 			if printer != nil {
 				printer.SetStatus("failed")
@@ -170,6 +190,7 @@ func runManifestVerify(args []string, stdout io.Writer) error {
 		outputStats = &stats
 		dataQualityIssues, dataQualityWarnings = evaluateDataQuality(stats)
 		if printer != nil {
+			printer.SetMetric("profile", stats.GapProfile)
 			printer.SetMetric("suspicious", formatCount(stats.SuspiciousGapCount))
 			printer.SetMetric("duplicates", formatCount(stats.DuplicateRows+stats.DuplicateStamps))
 		}
@@ -233,8 +254,9 @@ func runManifestVerify(args []string, stdout io.Writer) error {
 	if outputStats != nil {
 		fmt.Fprintf(
 			stdout,
-			"quality inferred=%s duplicate_rows=%d duplicate_stamps=%d out_of_order=%d gaps=%d missing_intervals=%d expected_gaps=%d expected_missing=%d suspicious_gaps=%d suspicious_missing=%d\n",
+			"quality inferred=%s profile=%s duplicate_rows=%d duplicate_stamps=%d out_of_order=%d gaps=%d missing_intervals=%d expected_gaps=%d expected_missing=%d suspicious_gaps=%d suspicious_missing=%d\n",
 			outputStats.InferredTimeframe,
+			outputStats.GapProfile,
 			outputStats.DuplicateRows,
 			outputStats.DuplicateStamps,
 			outputStats.OutOfOrderRows,
@@ -251,6 +273,7 @@ func runManifestVerify(args []string, stdout io.Writer) error {
 		for _, issue := range dataQualityIssues {
 			fmt.Fprintf(stdout, "quality %-22s %s\n", "invalid", issue)
 		}
+		printSuspiciousGapDetails(stdout, outputStats.SuspiciousGaps, outputStats.SuspiciousGapCount, *showSuspiciousGaps, *suspiciousGapLimit)
 	}
 
 	if !report.Valid || len(dataQualityIssues) > 0 {

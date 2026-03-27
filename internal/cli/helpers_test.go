@@ -367,6 +367,67 @@ func TestRunStatsManifestAndInstruments(t *testing.T) {
 	}
 }
 
+func TestRunStatsAndManifestCanPrintSuspiciousGapDetails(t *testing.T) {
+	dir := t.TempDir()
+	dataPath := filepath.Join(dir, "xauusd-gaps.csv")
+	content := strings.Join([]string{
+		"timestamp,mid_close",
+		"2024-01-07T23:00:00Z,1.1",
+		"2024-01-07T23:01:00Z,1.2",
+		"2024-01-07T23:05:00Z,1.3",
+		"",
+	}, "\n")
+	if err := os.WriteFile(dataPath, []byte(content), 0o644); err != nil {
+		t.Fatalf("WriteFile returned error: %v", err)
+	}
+
+	audit, err := csvout.AuditCSV(dataPath)
+	if err != nil {
+		t.Fatalf("AuditCSV returned error: %v", err)
+	}
+	manifest := checkpoint.Manifest{
+		Version:    checkpoint.CurrentManifestVersion,
+		OutputPath: dataPath,
+		PartsDir:   dir,
+		Symbol:     "xauusd",
+		Timeframe:  "m1",
+		Side:       "BID",
+		ResultKind: "bar",
+		Columns:    []string{"timestamp", "mid_close"},
+		Partition:  "day",
+		Parts: []checkpoint.ManifestPart{{
+			ID:     "part-1",
+			Start:  time.Date(2024, 1, 7, 23, 0, 0, 0, time.UTC),
+			End:    time.Date(2024, 1, 8, 0, 0, 0, 0, time.UTC),
+			File:   filepath.Base(dataPath),
+			Status: "completed",
+			Rows:   audit.Rows,
+			Bytes:  audit.Bytes,
+			SHA256: audit.SHA256,
+		}},
+		FinalOutput: &checkpoint.ManifestOutput{Rows: audit.Rows, Bytes: audit.Bytes, SHA256: audit.SHA256},
+	}
+	if err := checkpoint.Save(checkpoint.DefaultManifestPath(dataPath), manifest); err != nil {
+		t.Fatalf("Save returned error: %v", err)
+	}
+
+	var out bytes.Buffer
+	if err := runStats([]string{"--input", dataPath, "--symbol", "xauusd", "--show-suspicious-gaps", "--suspicious-gap-limit", "5"}, &out); err != nil {
+		t.Fatalf("runStats returned error: %v", err)
+	}
+	if !strings.Contains(out.String(), "Suspicious Gaps") || !strings.Contains(out.String(), "2024-01-07T23:02:00Z") {
+		t.Fatalf("unexpected suspicious gap output: %s", out.String())
+	}
+
+	out.Reset()
+	if err := runManifestVerify([]string{"--output", dataPath, "--show-suspicious-gaps", "--suspicious-gap-limit", "5"}, &out); err != nil {
+		t.Fatalf("runManifestVerify returned error: %v", err)
+	}
+	if !strings.Contains(out.String(), "Suspicious Gaps") || !strings.Contains(out.String(), "2024-01-07T23:04:00Z") {
+		t.Fatalf("unexpected manifest suspicious gap output: %s", out.String())
+	}
+}
+
 func TestLoadBidAskBarsAndManifestUtilityLogic(t *testing.T) {
 	server := newCLITestServer()
 	defer server.Close()
@@ -466,7 +527,7 @@ func TestDetectManifestGapPartIndexesIgnoresExpectedWeekendClosure(t *testing.T)
 	if err := os.WriteFile(partOne, []byte("timestamp,open\n2024-01-05T21:59:00Z,1\n"), 0o644); err != nil {
 		t.Fatalf("WriteFile returned error: %v", err)
 	}
-	if err := os.WriteFile(partTwo, []byte("timestamp,open\n2024-01-07T22:00:00Z,2\n"), 0o644); err != nil {
+	if err := os.WriteFile(partTwo, []byte("timestamp,open\n2024-01-07T23:00:00Z,2\n"), 0o644); err != nil {
 		t.Fatalf("WriteFile returned error: %v", err)
 	}
 

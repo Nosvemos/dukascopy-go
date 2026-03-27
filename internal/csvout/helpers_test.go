@@ -199,10 +199,25 @@ func TestFormattingAndInferenceHelpers(t *testing.T) {
 	}
 	if !IsExpectedMarketClosureGap(
 		time.Date(2024, 1, 5, 21, 59, 0, 0, time.UTC),
-		time.Date(2024, 1, 7, 22, 0, 0, 0, time.UTC),
+		time.Date(2024, 1, 7, 23, 0, 0, 0, time.UTC),
 		time.Minute,
 	) {
 		t.Fatal("expected weekend closure gap to be classified as expected")
+	}
+	if got := ResolveGapMarketProfile("btcusd", MarketProfileAuto); got != MarketProfileCrypto24x7 {
+		t.Fatalf("expected crypto profile, got %q", got)
+	}
+	if got := ResolveGapMarketProfile("eurusd", MarketProfileAuto); got != MarketProfileFX24x5 {
+		t.Fatalf("expected fx profile, got %q", got)
+	}
+	if IsExpectedGapForProfile(
+		time.Date(2024, 1, 5, 21, 59, 0, 0, time.UTC),
+		time.Date(2024, 1, 7, 23, 0, 0, 0, time.UTC),
+		time.Minute,
+		"btcusd",
+		MarketProfileAuto,
+	) {
+		t.Fatal("expected crypto profile to keep weekend gaps suspicious")
 	}
 	if IsExpectedMarketClosureGap(
 		time.Date(2024, 1, 2, 10, 0, 0, 0, time.UTC),
@@ -210,6 +225,24 @@ func TestFormattingAndInferenceHelpers(t *testing.T) {
 		time.Minute,
 	) {
 		t.Fatal("expected mid-session gap to stay suspicious")
+	}
+	if !IsExpectedGapForProfile(
+		time.Date(2018, 1, 15, 18, 0, 0, 0, time.UTC),
+		time.Date(2018, 1, 15, 23, 0, 0, 0, time.UTC),
+		time.Minute,
+		"xauusd",
+		MarketProfileAuto,
+	) {
+		t.Fatal("expected MLK holiday afternoon closure to be classified as expected for otc symbols")
+	}
+	if !IsExpectedGapForProfile(
+		time.Date(2024, 3, 29, 4, 0, 0, 0, time.UTC),
+		time.Date(2024, 3, 29, 21, 0, 0, 0, time.UTC),
+		time.Minute,
+		"eurusd",
+		MarketProfileAuto,
+	) {
+		t.Fatal("expected Good Friday daytime closure to be classified as expected for fx symbols")
 	}
 	if got := formatPrice(1.23456, 3); got != "1.235" {
 		t.Fatalf("unexpected formatted price: %q", got)
@@ -239,10 +272,10 @@ func TestInspectCSVClassifiesExpectedAndSuspiciousGaps(t *testing.T) {
 		"2024-01-05T21:57:00Z,1",
 		"2024-01-05T21:58:00Z,2",
 		"2024-01-05T21:59:00Z,3",
-		"2024-01-07T22:00:00Z,4",
-		"2024-01-07T22:01:00Z,5",
-		"2024-01-07T22:02:00Z,6",
-		"2024-01-07T22:07:00Z,7",
+		"2024-01-07T23:00:00Z,4",
+		"2024-01-07T23:01:00Z,5",
+		"2024-01-07T23:02:00Z,6",
+		"2024-01-07T23:07:00Z,7",
 		"",
 	}, "\n")
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
@@ -258,6 +291,33 @@ func TestInspectCSVClassifiesExpectedAndSuspiciousGaps(t *testing.T) {
 	}
 	if stats.ExpectedMissingIntervals == 0 || stats.SuspiciousMissingIntervals == 0 {
 		t.Fatalf("expected missing interval buckets to be populated, got %+v", stats)
+	}
+}
+
+func TestInspectCSVClassifiesHolidayGapAsExpected(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "xauusd-holiday.csv")
+	content := strings.Join([]string{
+		"timestamp,open",
+		"2018-01-15T17:59:00Z,1",
+		"2018-01-15T18:00:00Z,2",
+		"2018-01-15T23:00:00Z,3",
+		"2018-01-15T23:01:00Z,4",
+		"",
+	}, "\n")
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("WriteFile returned error: %v", err)
+	}
+
+	stats, err := InspectCSVWithOptions(path, InspectOptions{Symbol: "xauusd"})
+	if err != nil {
+		t.Fatalf("InspectCSVWithOptions returned error: %v", err)
+	}
+	if stats.ExpectedGapCount != 1 {
+		t.Fatalf("expected holiday gap to be expected, got %+v", stats)
+	}
+	if stats.SuspiciousGapCount != 0 {
+		t.Fatalf("expected no suspicious holiday gaps, got %+v", stats)
 	}
 }
 

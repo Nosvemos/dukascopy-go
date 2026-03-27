@@ -107,6 +107,18 @@ Inspect the finished dataset:
 dukascopy-go stats --input ./data/xauusd-january.csv
 ```
 
+Override the gap classifier with an explicit symbol when needed:
+
+```bash
+dukascopy-go stats --input ./data/eurusd-m1.csv --symbol eurusd
+```
+
+Print the first suspicious gap ranges after the summary:
+
+```bash
+dukascopy-go stats --input ./data/xauusd-m1.csv --show-suspicious-gaps --suspicious-gap-limit 20
+```
+
 When you run `stats` or `manifest` commands in a real terminal, `dukascopy-go` now opens the same compact interactive dashboard style used by downloads. JSON output stays plain text and non-interactive pipes still print normal line-based output.
 
 If you are working from a clone instead of an installed binary, use:
@@ -121,7 +133,7 @@ go run ./cmd/dukascopy-go --help
 | --- | --- |
 | `instruments` | Search Dukascopy instruments and print matches as text or JSON |
 | `download` | Download historical data and save it as CSV or Parquet |
-| `stats` | Inspect CSV, CSV.GZ, or Parquet datasets for counts, ranges, expected vs suspicious gaps, duplicates, and ordering |
+| `stats` | Inspect CSV, CSV.GZ, or Parquet datasets for counts, ranges, profile-aware expected vs suspicious gaps, duplicates, and ordering |
 | `manifest inspect` | Print checkpoint manifest summaries and partition status |
 | `manifest verify` | Verify partition files and final outputs against manifest metadata, and classify expected vs suspicious gaps |
 | `manifest repair` | Rebuild missing or invalid files from valid existing data, or re-download partition files that intersect suspicious gaps |
@@ -204,10 +216,24 @@ Verify the finished output and include data quality checks:
 dukascopy-go manifest verify --output ./data/xauusd-m1.csv --check-data-quality
 ```
 
+Show suspicious gap ranges during verification:
+
+```bash
+dukascopy-go manifest verify --output ./data/xauusd-m1.csv --show-suspicious-gaps --suspicious-gap-limit 20
+```
+
 `stats` and `manifest verify --check-data-quality` now split gaps into two buckets:
 
-- `expected gaps` for likely market-closed periods such as weekend closures
+- `expected gaps` for likely market-closed periods such as weekend, maintenance, and common holiday closures
 - `suspicious gaps` for missing intervals that do not match the closure heuristic
+
+Gap classification is profile-aware:
+
+- `fx-24x5` for classic forex pairs such as `EURUSD`
+- `otc-24x5` for instruments with daily maintenance windows such as many metals and CFDs
+- `crypto-24x7` for symbols such as `BTCUSD`
+
+`stats` auto-detects from `--symbol` or the filename when possible, and you can override it with `--market-profile`.
 
 Repair a dataset from valid existing files:
 
