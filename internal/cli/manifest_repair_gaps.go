@@ -27,7 +27,7 @@ func redownloadManifestGaps(manifestPath string, manifest *checkpoint.Manifest, 
 	if err != nil {
 		return 0, err
 	}
-	if stats.GapCount == 0 {
+	if stats.SuspiciousGapCount == 0 {
 		return 0, nil
 	}
 	if stats.OutOfOrderRows > 0 || stats.DuplicateStamps > 0 {
@@ -144,7 +144,7 @@ func detectManifestGapPartIndexes(manifest checkpoint.Manifest, expectedInterval
 
 			if !previousTimestamp.IsZero() {
 				delta := timestamp.Sub(previousTimestamp)
-				if delta > expectedInterval {
+				if delta > expectedInterval && !csvout.IsExpectedMarketClosureGap(previousTimestamp, timestamp, expectedInterval) {
 					if previousPartIndex >= 0 {
 						indexes[previousPartIndex] = struct{}{}
 					}

@@ -197,6 +197,20 @@ func TestFormattingAndInferenceHelpers(t *testing.T) {
 	if got := estimateMissingIntervals(5*time.Minute, time.Minute); got != 4 {
 		t.Fatalf("unexpected missing interval count: %d", got)
 	}
+	if !IsExpectedMarketClosureGap(
+		time.Date(2024, 1, 5, 21, 59, 0, 0, time.UTC),
+		time.Date(2024, 1, 7, 22, 0, 0, 0, time.UTC),
+		time.Minute,
+	) {
+		t.Fatal("expected weekend closure gap to be classified as expected")
+	}
+	if IsExpectedMarketClosureGap(
+		time.Date(2024, 1, 2, 10, 0, 0, 0, time.UTC),
+		time.Date(2024, 1, 2, 10, 5, 0, 0, time.UTC),
+		time.Minute,
+	) {
+		t.Fatal("expected mid-session gap to stay suspicious")
+	}
 	if got := formatPrice(1.23456, 3); got != "1.235" {
 		t.Fatalf("unexpected formatted price: %q", got)
 	}
@@ -214,6 +228,36 @@ func TestFormattingAndInferenceHelpers(t *testing.T) {
 	}
 	if got := roundToScale(1.23456, -1); got != 1.23456 {
 		t.Fatalf("unexpected negative-scale round result: %f", got)
+	}
+}
+
+func TestInspectCSVClassifiesExpectedAndSuspiciousGaps(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "gaps.csv")
+	content := strings.Join([]string{
+		"timestamp,open",
+		"2024-01-05T21:57:00Z,1",
+		"2024-01-05T21:58:00Z,2",
+		"2024-01-05T21:59:00Z,3",
+		"2024-01-07T22:00:00Z,4",
+		"2024-01-07T22:01:00Z,5",
+		"2024-01-07T22:02:00Z,6",
+		"2024-01-07T22:07:00Z,7",
+		"",
+	}, "\n")
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("WriteFile returned error: %v", err)
+	}
+
+	stats, err := InspectCSV(path)
+	if err != nil {
+		t.Fatalf("InspectCSV returned error: %v", err)
+	}
+	if stats.ExpectedGapCount != 1 || stats.SuspiciousGapCount != 1 {
+		t.Fatalf("expected one expected and one suspicious gap, got %+v", stats)
+	}
+	if stats.ExpectedMissingIntervals == 0 || stats.SuspiciousMissingIntervals == 0 {
+		t.Fatalf("expected missing interval buckets to be populated, got %+v", stats)
 	}
 }
 

@@ -413,14 +413,20 @@ func TestLoadBidAskBarsAndManifestUtilityLogic(t *testing.T) {
 	}
 
 	issues, warnings := evaluateDataQuality(csvout.CSVStats{
-		DuplicateRows:    1,
-		DuplicateStamps:  2,
-		OutOfOrderRows:   3,
-		GapCount:         1,
-		MissingIntervals: 4,
-		LargestGap:       "5m0s",
+		DuplicateRows:              1,
+		DuplicateStamps:            2,
+		OutOfOrderRows:             3,
+		GapCount:                   2,
+		MissingIntervals:           8,
+		LargestGap:                 "5m0s",
+		ExpectedGapCount:           1,
+		ExpectedMissingIntervals:   4,
+		ExpectedLargestGap:         "5m0s",
+		SuspiciousGapCount:         1,
+		SuspiciousMissingIntervals: 4,
+		SuspiciousLargestGap:       "4m0s",
 	})
-	if len(issues) != 3 || len(warnings) != 1 {
+	if len(issues) != 3 || len(warnings) != 2 {
 		t.Fatalf("unexpected data quality evaluation: issues=%v warnings=%v", issues, warnings)
 	}
 }
@@ -449,6 +455,33 @@ func TestDetectManifestGapPartIndexes(t *testing.T) {
 	}
 	if len(indexes) != 1 || indexes[0] != 0 {
 		t.Fatalf("unexpected gap part indexes: %v", indexes)
+	}
+}
+
+func TestDetectManifestGapPartIndexesIgnoresExpectedWeekendClosure(t *testing.T) {
+	dir := t.TempDir()
+	partOne := filepath.Join(dir, "part-friday.csv")
+	partTwo := filepath.Join(dir, "part-sunday.csv")
+
+	if err := os.WriteFile(partOne, []byte("timestamp,open\n2024-01-05T21:59:00Z,1\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile returned error: %v", err)
+	}
+	if err := os.WriteFile(partTwo, []byte("timestamp,open\n2024-01-07T22:00:00Z,2\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile returned error: %v", err)
+	}
+
+	indexes, err := detectManifestGapPartIndexes(checkpoint.Manifest{
+		PartsDir: dir,
+		Parts: []checkpoint.ManifestPart{
+			{ID: "part-friday", File: filepath.Base(partOne)},
+			{ID: "part-sunday", File: filepath.Base(partTwo)},
+		},
+	}, time.Minute)
+	if err != nil {
+		t.Fatalf("detectManifestGapPartIndexes returned error: %v", err)
+	}
+	if len(indexes) != 0 {
+		t.Fatalf("expected weekend closure to be ignored, got %v", indexes)
 	}
 }
 

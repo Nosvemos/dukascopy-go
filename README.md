@@ -121,10 +121,10 @@ go run ./cmd/dukascopy-go --help
 | --- | --- |
 | `instruments` | Search Dukascopy instruments and print matches as text or JSON |
 | `download` | Download historical data and save it as CSV or Parquet |
-| `stats` | Inspect CSV, CSV.GZ, or Parquet datasets for counts, ranges, gaps, duplicates, and ordering |
+| `stats` | Inspect CSV, CSV.GZ, or Parquet datasets for counts, ranges, expected vs suspicious gaps, duplicates, and ordering |
 | `manifest inspect` | Print checkpoint manifest summaries and partition status |
-| `manifest verify` | Verify partition files and final outputs against manifest metadata |
-| `manifest repair` | Rebuild missing or invalid files from valid existing data, or re-download partition files that intersect detected gaps |
+| `manifest verify` | Verify partition files and final outputs against manifest metadata, and classify expected vs suspicious gaps |
+| `manifest repair` | Rebuild missing or invalid files from valid existing data, or re-download partition files that intersect suspicious gaps |
 | `manifest prune` | Remove obsolete temp files and orphan partition files safely |
 | `list-timeframes` | Print supported timeframe values |
 | `version` | Print embedded version, commit, and build date information |
@@ -204,13 +204,18 @@ Verify the finished output and include data quality checks:
 dukascopy-go manifest verify --output ./data/xauusd-m1.csv --check-data-quality
 ```
 
+`stats` and `manifest verify --check-data-quality` now split gaps into two buckets:
+
+- `expected gaps` for likely market-closed periods such as weekend closures
+- `suspicious gaps` for missing intervals that do not match the closure heuristic
+
 Repair a dataset from valid existing files:
 
 ```bash
 dukascopy-go manifest repair --output ./data/xauusd-m1.csv
 ```
 
-Re-download partition files that intersect detected timestamp gaps and rebuild the final output:
+Re-download partition files that intersect suspicious timestamp gaps and rebuild the final output:
 
 ```bash
 dukascopy-go manifest repair --output ./data/xauusd-m1.csv --redownload-gaps
@@ -354,7 +359,7 @@ mn1   month
 - `stats` and `manifest` commands auto-open a compact dashboard on interactive terminals
 - `--resume` appends only rows after the latest saved CSV timestamp
 - Partitioned downloads keep durable intermediate files for recovery and reuse
-- `stats` helps spot gaps, duplicates, unexpected intervals, and out-of-order rows
+- `stats` helps spot expected vs suspicious gaps, duplicates, unexpected intervals, and out-of-order rows
 
 ## Configuration
 

@@ -46,7 +46,7 @@ func runStats(args []string, stdout io.Writer) error {
 		printer.SetMetric("rows", formatCount(stats.Rows))
 		if stats.HasTimestamp {
 			printer.SetMetric("range", stats.FirstTimestamp.Format(time.RFC3339)+" -> "+stats.LastTimestamp.Format(time.RFC3339))
-			printer.SetMetric("gaps", formatCount(stats.GapCount))
+			printer.SetMetric("suspicious", formatCount(stats.SuspiciousGapCount))
 		}
 		printer.SetStatus("summary ready")
 		printer.Finish()
@@ -77,6 +77,12 @@ func runStats(args []string, stdout io.Writer) error {
 		fmt.Fprintf(stdout, "gap count:         %d\n", stats.GapCount)
 		fmt.Fprintf(stdout, "missing intervals: %d\n", stats.MissingIntervals)
 		fmt.Fprintf(stdout, "largest gap:       %s\n", defaultString(stats.LargestGap, "none"))
+		fmt.Fprintf(stdout, "expected gaps:     %d\n", stats.ExpectedGapCount)
+		fmt.Fprintf(stdout, "expected missing:  %d\n", stats.ExpectedMissingIntervals)
+		fmt.Fprintf(stdout, "expected largest:  %s\n", defaultString(stats.ExpectedLargestGap, "none"))
+		fmt.Fprintf(stdout, "suspicious gaps:   %d\n", stats.SuspiciousGapCount)
+		fmt.Fprintf(stdout, "suspicious miss:   %d\n", stats.SuspiciousMissingIntervals)
+		fmt.Fprintf(stdout, "suspicious large:  %s\n", defaultString(stats.SuspiciousLargestGap, "none"))
 	}
 	fmt.Fprintf(stdout, "duplicate rows:    %d\n", stats.DuplicateRows)
 	fmt.Fprintf(stdout, "duplicate stamps:  %d\n", stats.DuplicateStamps)

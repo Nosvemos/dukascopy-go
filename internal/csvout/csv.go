@@ -60,22 +60,34 @@ type FileAudit struct {
 }
 
 type CSVStats struct {
-	Path              string
-	Format            string
-	Compressed        bool
-	Columns           []string
-	Rows              int
-	FirstTimestamp    time.Time
-	LastTimestamp     time.Time
-	HasTimestamp      bool
-	DuplicateRows     int
-	DuplicateStamps   int
-	OutOfOrderRows    int
-	GapCount          int
-	MissingIntervals  int
-	ExpectedInterval  string
-	LargestGap        string
-	InferredTimeframe string
+	Path                       string
+	Format                     string
+	Compressed                 bool
+	Columns                    []string
+	Rows                       int
+	FirstTimestamp             time.Time
+	LastTimestamp              time.Time
+	HasTimestamp               bool
+	DuplicateRows              int
+	DuplicateStamps            int
+	OutOfOrderRows             int
+	GapCount                   int
+	MissingIntervals           int
+	ExpectedInterval           string
+	LargestGap                 string
+	ExpectedGapCount           int
+	ExpectedMissingIntervals   int
+	ExpectedLargestGap         string
+	SuspiciousGapCount         int
+	SuspiciousMissingIntervals int
+	SuspiciousLargestGap       string
+	InferredTimeframe          string
+}
+
+type gapObservation struct {
+	Previous time.Time
+	Current  time.Time
+	Interval time.Duration
 }
 
 func BarColumnsForProfile(profile Profile) []string {
@@ -583,6 +595,7 @@ func InspectCSV(path string) (CSVStats, error) {
 	seenRows := make(map[string]int)
 	seenTimestamps := make(map[string]int)
 	var intervals []time.Duration
+	var gapObservations []gapObservation
 	var previousTimestamp time.Time
 
 	for {
@@ -630,6 +643,11 @@ func InspectCSV(path string) (CSVStats, error) {
 			delta := timestamp.Sub(previousTimestamp)
 			if delta > 0 {
 				intervals = append(intervals, delta)
+				gapObservations = append(gapObservations, gapObservation{
+					Previous: previousTimestamp,
+					Current:  timestamp,
+					Interval: delta,
+				})
 			} else if delta < 0 {
 				stats.OutOfOrderRows++
 			}
@@ -641,20 +659,7 @@ func InspectCSV(path string) (CSVStats, error) {
 	stats.InferredTimeframe = inferTimeframe(intervals)
 	if expectedInterval > 0 {
 		stats.ExpectedInterval = expectedInterval.String()
-		var largestGap time.Duration
-		for _, interval := range intervals {
-			if interval <= expectedInterval {
-				continue
-			}
-			stats.GapCount++
-			stats.MissingIntervals += estimateMissingIntervals(interval, expectedInterval)
-			if interval > largestGap {
-				largestGap = interval
-			}
-		}
-		if largestGap > 0 {
-			stats.LargestGap = largestGap.String()
-		}
+		applyGapStats(&stats, gapObservations, expectedInterval)
 	}
 	return stats, nil
 }
@@ -1151,6 +1156,103 @@ func estimateMissingIntervals(interval time.Duration, expected time.Duration) in
 		return 1
 	}
 	return missing
+}
+
+func applyGapStats(stats *CSVStats, observations []gapObservation, expectedInterval time.Duration) {
+	if stats == nil || expectedInterval <= 0 {
+		return
+	}
+
+	var (
+		largestGap           time.Duration
+		largestExpectedGap   time.Duration
+		largestSuspiciousGap time.Duration
+	)
+
+	for _, observation := range observations {
+		if observation.Interval <= expectedInterval {
+			continue
+		}
+
+		missing := estimateMissingIntervals(observation.Interval, expectedInterval)
+		stats.GapCount++
+		stats.MissingIntervals += missing
+		if observation.Interval > largestGap {
+			largestGap = observation.Interval
+		}
+
+		if IsExpectedMarketClosureGap(observation.Previous, observation.Current, expectedInterval) {
+			stats.ExpectedGapCount++
+			stats.ExpectedMissingIntervals += missing
+			if observation.Interval > largestExpectedGap {
+				largestExpectedGap = observation.Interval
+			}
+			continue
+		}
+
+		stats.SuspiciousGapCount++
+		stats.SuspiciousMissingIntervals += missing
+		if observation.Interval > largestSuspiciousGap {
+			largestSuspiciousGap = observation.Interval
+		}
+	}
+
+	if largestGap > 0 {
+		stats.LargestGap = largestGap.String()
+	}
+	if largestExpectedGap > 0 {
+		stats.ExpectedLargestGap = largestExpectedGap.String()
+	}
+	if largestSuspiciousGap > 0 {
+		stats.SuspiciousLargestGap = largestSuspiciousGap.String()
+	}
+}
+
+func IsExpectedMarketClosureGap(previous time.Time, current time.Time, expectedInterval time.Duration) bool {
+	if expectedInterval <= 0 || !current.After(previous) || current.Sub(previous) <= expectedInterval {
+		return false
+	}
+
+	probe := previous.Add(expectedInterval).UTC()
+	for probe.Before(current) {
+		if !isLikelyOTCMarketClosed(probe) {
+			return false
+		}
+		next := nextLikelyOTCClosureBoundary(probe)
+		if !next.After(probe) {
+			return false
+		}
+		probe = next
+	}
+	return true
+}
+
+func isLikelyOTCMarketClosed(timestamp time.Time) bool {
+	timestamp = timestamp.UTC()
+	switch timestamp.Weekday() {
+	case time.Saturday:
+		return true
+	case time.Sunday:
+		return timestamp.Hour() < 22
+	case time.Friday:
+		return timestamp.Hour() >= 21
+	default:
+		return false
+	}
+}
+
+func nextLikelyOTCClosureBoundary(timestamp time.Time) time.Time {
+	timestamp = timestamp.UTC()
+	switch timestamp.Weekday() {
+	case time.Friday:
+		return time.Date(timestamp.Year(), timestamp.Month(), timestamp.Day()+1, 0, 0, 0, 0, time.UTC)
+	case time.Saturday:
+		return time.Date(timestamp.Year(), timestamp.Month(), timestamp.Day()+1, 0, 0, 0, 0, time.UTC)
+	case time.Sunday:
+		return time.Date(timestamp.Year(), timestamp.Month(), timestamp.Day(), 22, 0, 0, 0, time.UTC)
+	default:
+		return timestamp
+	}
 }
 
 func formatPrice(value float64, scale int) string {

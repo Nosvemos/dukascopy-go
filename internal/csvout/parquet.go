@@ -221,6 +221,7 @@ func inspectParquet(path string) (CSVStats, error) {
 	seenRows := make(map[string]int)
 	seenTimestamps := make(map[string]int)
 	var intervals []time.Duration
+	var gapObservations []gapObservation
 	var previousTimestamp time.Time
 
 	for {
@@ -270,6 +271,11 @@ func inspectParquet(path string) (CSVStats, error) {
 				delta := timestamp.Sub(previousTimestamp)
 				if delta > 0 {
 					intervals = append(intervals, delta)
+					gapObservations = append(gapObservations, gapObservation{
+						Previous: previousTimestamp,
+						Current:  timestamp,
+						Interval: delta,
+					})
 				} else if delta < 0 {
 					stats.OutOfOrderRows++
 				}
@@ -286,20 +292,7 @@ func inspectParquet(path string) (CSVStats, error) {
 	stats.InferredTimeframe = inferTimeframe(intervals)
 	if expectedInterval > 0 {
 		stats.ExpectedInterval = expectedInterval.String()
-		var largestGap time.Duration
-		for _, interval := range intervals {
-			if interval <= expectedInterval {
-				continue
-			}
-			stats.GapCount++
-			stats.MissingIntervals += estimateMissingIntervals(interval, expectedInterval)
-			if interval > largestGap {
-				largestGap = interval
-			}
-		}
-		if largestGap > 0 {
-			stats.LargestGap = largestGap.String()
-		}
+		applyGapStats(&stats, gapObservations, expectedInterval)
 	}
 
 	return stats, nil

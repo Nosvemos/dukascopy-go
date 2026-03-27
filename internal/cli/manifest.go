@@ -170,7 +170,7 @@ func runManifestVerify(args []string, stdout io.Writer) error {
 		outputStats = &stats
 		dataQualityIssues, dataQualityWarnings = evaluateDataQuality(stats)
 		if printer != nil {
-			printer.SetMetric("gaps", formatCount(stats.GapCount))
+			printer.SetMetric("suspicious", formatCount(stats.SuspiciousGapCount))
 			printer.SetMetric("duplicates", formatCount(stats.DuplicateRows+stats.DuplicateStamps))
 		}
 	}
@@ -233,13 +233,17 @@ func runManifestVerify(args []string, stdout io.Writer) error {
 	if outputStats != nil {
 		fmt.Fprintf(
 			stdout,
-			"quality inferred=%s duplicate_rows=%d duplicate_stamps=%d out_of_order=%d gaps=%d missing_intervals=%d\n",
+			"quality inferred=%s duplicate_rows=%d duplicate_stamps=%d out_of_order=%d gaps=%d missing_intervals=%d expected_gaps=%d expected_missing=%d suspicious_gaps=%d suspicious_missing=%d\n",
 			outputStats.InferredTimeframe,
 			outputStats.DuplicateRows,
 			outputStats.DuplicateStamps,
 			outputStats.OutOfOrderRows,
 			outputStats.GapCount,
 			outputStats.MissingIntervals,
+			outputStats.ExpectedGapCount,
+			outputStats.ExpectedMissingIntervals,
+			outputStats.SuspiciousGapCount,
+			outputStats.SuspiciousMissingIntervals,
 		)
 		for _, warning := range dataQualityWarnings {
 			fmt.Fprintf(stdout, "warning %-22s %s\n", "data-quality", warning)
@@ -694,12 +698,21 @@ func evaluateDataQuality(stats csvout.CSVStats) ([]string, []string) {
 	if stats.OutOfOrderRows > 0 {
 		issues = append(issues, fmt.Sprintf("out-of-order rows detected: %d", stats.OutOfOrderRows))
 	}
-	if stats.GapCount > 0 {
-		warning := fmt.Sprintf("gaps detected: %d gap(s), %d missing interval(s)", stats.GapCount, stats.MissingIntervals)
-		if strings.TrimSpace(stats.LargestGap) != "" {
-			warning += ", largest gap " + stats.LargestGap
+	if stats.ExpectedGapCount > 0 {
+		warning := fmt.Sprintf("expected gaps: %d gap(s), %d missing interval(s)", stats.ExpectedGapCount, stats.ExpectedMissingIntervals)
+		if strings.TrimSpace(stats.ExpectedLargestGap) != "" {
+			warning += ", largest gap " + stats.ExpectedLargestGap
 		}
 		warnings = append(warnings, warning)
+	}
+	if stats.SuspiciousGapCount > 0 {
+		warning := fmt.Sprintf("suspicious gaps: %d gap(s), %d missing interval(s)", stats.SuspiciousGapCount, stats.SuspiciousMissingIntervals)
+		if strings.TrimSpace(stats.SuspiciousLargestGap) != "" {
+			warning += ", largest gap " + stats.SuspiciousLargestGap
+		}
+		warnings = append(warnings, warning)
+	} else if stats.GapCount > 0 && stats.ExpectedGapCount == stats.GapCount {
+		warnings = append(warnings, "no suspicious gaps detected")
 	}
 	return issues, warnings
 }
