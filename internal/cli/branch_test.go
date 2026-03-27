@@ -122,7 +122,7 @@ func TestPartitionHelperBranches(t *testing.T) {
 	if got := cloneStrings([]string{"a", "b"}); len(got) != 2 || got[1] != "b" {
 		t.Fatalf("unexpected cloneStrings result: %v", got)
 	}
-	if err := executePartitionDownloads(context.Background(), nil, "", nil, nil, "", dukascopy.DownloadRequest{}, dukascopy.ResultKindBar, nil, nil, 1); err != nil {
+	if err := executePartitionDownloads(context.Background(), nil, "", nil, nil, "", dukascopy.DownloadRequest{}, dukascopy.ResultKindBar, nil, nil, 1, nil); err != nil {
 		t.Fatalf("expected empty pending partitions to succeed, got %v", err)
 	}
 

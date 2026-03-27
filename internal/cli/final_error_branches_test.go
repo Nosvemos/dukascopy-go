@@ -140,11 +140,11 @@ func TestPartitionAndDownloadAdditionalBranches(t *testing.T) {
 		Columns:    []string{"timestamp", "open"},
 		Partition:  partitionHour,
 		Parts: []checkpoint.ManifestPart{{
-			ID:    "20240102T000000Z_20240102T010000Z",
-			Start: request.From,
-			End:   request.To,
-			File:  "20240102T000000Z_20240102T010000Z.csv",
-			Status:"pending",
+			ID:     "20240102T000000Z_20240102T010000Z",
+			Start:  request.From,
+			End:    request.To,
+			File:   "20240102T000000Z_20240102T010000Z.csv",
+			Status: "pending",
 		}},
 	}
 	if err := checkpoint.Save(manifestPath, badManifest); err != nil {
@@ -178,11 +178,11 @@ func TestPartitionAndDownloadAdditionalBranches(t *testing.T) {
 		Columns:    []string{"timestamp", "open"},
 		Partition:  partitionHour,
 		Parts: []checkpoint.ManifestPart{{
-			ID:    "known",
-			Start: request.From,
-			End:   request.To,
-			File:  "known.csv",
-			Status:"pending",
+			ID:     "known",
+			Start:  request.From,
+			End:    request.To,
+			File:   "known.csv",
+			Status: "pending",
 		}},
 	}
 	if err := checkpoint.Save(manifestPath, manifest); err != nil {
@@ -197,7 +197,7 @@ func TestPartitionAndDownloadAdditionalBranches(t *testing.T) {
 			End:   request.To,
 			File:  "missing.csv",
 		},
-	}}, partsDir, request, dukascopy.ResultKindBar, []string{"timestamp", "open"}, nil, 2)
+	}}, partsDir, request, dukascopy.ResultKindBar, []string{"timestamp", "open"}, nil, 2, nil)
 	if err == nil {
 		t.Fatal("expected executePartitionDownloads missing-part error")
 	}

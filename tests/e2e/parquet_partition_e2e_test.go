@@ -25,7 +25,7 @@ func TestPartitionedDownloadCanAssembleParquetOutput(t *testing.T) {
 		"--partition", "auto",
 	)
 
-	if !strings.Contains(output, "wrote 6 bars") {
+	if !strings.Contains(output, "wrote 7 bars") {
 		t.Fatalf("unexpected partitioned parquet output: %s", output)
 	}
 	if _, err := os.Stat(outputPath); err != nil {

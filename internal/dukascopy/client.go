@@ -103,14 +103,16 @@ type DownloadResult struct {
 }
 
 type Client struct {
-	baseURL    *url.URL
-	httpClient *http.Client
-	maxRetries int
-	backoff    time.Duration
-	rateLimit  time.Duration
-	progress   ProgressFunc
-	rateMu     sync.Mutex
-	nextSlot   time.Time
+	baseURL     *url.URL
+	httpClient  *http.Client
+	maxRetries  int
+	backoff     time.Duration
+	rateLimit   time.Duration
+	progress    ProgressFunc
+	rateMu      sync.Mutex
+	nextSlot    time.Time
+	cacheMu     sync.RWMutex
+	instruments []Instrument
 }
 
 func NewClient(rawBaseURL string, timeout time.Duration) *Client {
@@ -159,6 +161,20 @@ func (c *Client) WithProgress(progress ProgressFunc) *Client {
 }
 
 func (c *Client) ListInstruments(ctx context.Context) ([]Instrument, error) {
+	c.cacheMu.RLock()
+	if len(c.instruments) > 0 {
+		cached := cloneInstruments(c.instruments)
+		c.cacheMu.RUnlock()
+		return cached, nil
+	}
+	c.cacheMu.RUnlock()
+
+	c.cacheMu.Lock()
+	defer c.cacheMu.Unlock()
+	if len(c.instruments) > 0 {
+		return cloneInstruments(c.instruments), nil
+	}
+
 	var payload instrumentsResponse
 	if err := c.getJSON(ctx, []string{"v1", "instruments"}, &payload); err != nil {
 		return nil, err
@@ -168,7 +184,8 @@ func (c *Client) ListInstruments(ctx context.Context) ([]Instrument, error) {
 		return payload.Instruments[i].Name < payload.Instruments[j].Name
 	})
 
-	return payload.Instruments, nil
+	c.instruments = cloneInstruments(payload.Instruments)
+	return cloneInstruments(c.instruments), nil
 }
 
 func (c *Client) Download(ctx context.Context, request DownloadRequest) (DownloadResult, error) {
@@ -393,7 +410,7 @@ func (c *Client) getJSON(ctx context.Context, segments []string, target any) err
 
 				body, _ := io.ReadAll(io.LimitReader(res.Body, 512))
 				lastErr = fmt.Errorf("dukascopy api %s returned %s: %s", requestURL.String(), res.Status, strings.TrimSpace(string(body)))
-				if !shouldRetryStatus(res.StatusCode) {
+				if !shouldRetryResponse(res.StatusCode, body) {
 					attempt = c.maxRetries
 				}
 			}()
@@ -434,6 +451,21 @@ func shouldRetryStatus(statusCode int) bool {
 	return statusCode == http.StatusTooManyRequests || statusCode >= 500
 }
 
+func shouldRetryResponse(statusCode int, body []byte) bool {
+	if shouldRetryStatus(statusCode) {
+		return true
+	}
+
+	payload := strings.ToLower(strings.TrimSpace(string(body)))
+	if payload == "" {
+		return false
+	}
+
+	return strings.Contains(payload, `"statuscode":500`) ||
+		strings.Contains(payload, `"error":"internal server error"`) ||
+		strings.Contains(payload, `"message":"failed to load historical`)
+}
+
 func (c *Client) waitForRateLimit(ctx context.Context) error {
 	if c.rateLimit <= 0 {
 		return nil
@@ -467,4 +499,14 @@ func (c *Client) emitProgress(event ProgressEvent) {
 		return
 	}
 	c.progress(event)
+}
+
+func cloneInstruments(instruments []Instrument) []Instrument {
+	if len(instruments) == 0 {
+		return nil
+	}
+
+	cloned := make([]Instrument, len(instruments))
+	copy(cloned, instruments)
+	return cloned
 }

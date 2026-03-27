@@ -67,7 +67,7 @@ func TestDownloadRetriesTransientFailures(t *testing.T) {
 		"--progress",
 	)
 
-	if !strings.Contains(output, "retry attempt 1/3") {
+	if !strings.Contains(output, "retry 1/3") {
 		t.Fatalf("expected retry progress in output, got: %s", output)
 	}
 	if !strings.Contains(output, "wrote 3 bars") {

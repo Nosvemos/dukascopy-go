@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -117,6 +118,60 @@ func TestEmitProgressAndOptionSetters(t *testing.T) {
 	client.emitProgress(ProgressEvent{Kind: "chunk"})
 	if !called {
 		t.Fatal("expected progress callback to be invoked")
+	}
+}
+
+func TestListInstrumentsCachesSuccessfulResponses(t *testing.T) {
+	var instrumentRequests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/instruments":
+			instrumentRequests.Add(1)
+			writeJSON(w, map[string]any{
+				"instruments": []map[string]any{
+					{"id": 1, "name": "XAU/USD", "code": "XAU-USD", "description": "Gold vs US Dollar", "priceScale": 3},
+				},
+			})
+		case "/v1/candles/minute/XAU-USD/BID/2024/1/2":
+			writeJSON(w, map[string]any{
+				"timestamp":  1704153600000,
+				"multiplier": 1.0,
+				"open":       100.0,
+				"high":       101.0,
+				"low":        99.0,
+				"close":      100.5,
+				"shift":      60000,
+				"times":      []int{0, 1},
+				"opens":      []float64{0, 1},
+				"highs":      []float64{0, 1},
+				"lows":       []float64{0, 1},
+				"closes":     []float64{0, 1},
+				"volumes":    []float64{0.001, 0.002},
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, time.Second)
+	ctx := context.Background()
+
+	for range 3 {
+		_, err := client.Download(ctx, DownloadRequest{
+			Symbol:      "xauusd",
+			Granularity: GranularityM1,
+			Side:        PriceSideBid,
+			From:        time.Date(2024, 1, 2, 0, 0, 0, 0, time.UTC),
+			To:          time.Date(2024, 1, 2, 0, 2, 0, 0, time.UTC),
+		})
+		if err != nil {
+			t.Fatalf("Download returned error: %v", err)
+		}
+	}
+
+	if got := instrumentRequests.Load(); got != 1 {
+		t.Fatalf("expected 1 instruments request, got %d", got)
 	}
 }
 

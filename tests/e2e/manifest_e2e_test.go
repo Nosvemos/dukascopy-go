@@ -32,7 +32,7 @@ func TestManifestInspectPrintsSummary(t *testing.T) {
 		"--output", outputPath,
 	)
 
-	if !strings.Contains(output, "Manifest") || !strings.Contains(output, "symbol:      xauusd") || !strings.Contains(output, "output rows: 6") {
+	if !strings.Contains(output, "Manifest") || !strings.Contains(output, "symbol:      xauusd") || !strings.Contains(output, "output rows: 7") {
 		t.Fatalf("unexpected inspect output: %s", output)
 	}
 	if !strings.Contains(output, "Parts") || !strings.Contains(output, "completed") {

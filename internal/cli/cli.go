@@ -19,14 +19,14 @@ import (
 )
 
 const (
-	defaultBaseURL = "https://jetta.dukascopy.com"
-	defaultTimeout = 30 * time.Second
-	colorReset     = "\033[0m"
-	colorBold      = "\033[1m"
-	colorRed       = "\033[31m"
-	colorGreen     = "\033[32m"
-	colorCyan      = "\033[36m"
-	colorYellow    = "\033[33m"
+	defaultBaseURL     = "https://jetta.dukascopy.com"
+	defaultHTTPTimeout = 30 * time.Second
+	colorReset         = "\033[0m"
+	colorBold          = "\033[1m"
+	colorRed           = "\033[31m"
+	colorGreen         = "\033[32m"
+	colorCyan          = "\033[36m"
+	colorYellow        = "\033[33m"
 )
 
 func Run(args []string, stdout io.Writer, stderr io.Writer) int {
@@ -111,9 +111,9 @@ examples:
   dukascopy-go download --symbol xauusd --timeframe m1 --from 2024-01-02T00:00:00Z --to 2024-01-02T06:00:00Z --output ./data/xauusd.parquet --full
   dukascopy-go download --symbol xauusd --timeframe m1 --from 2024-01-02T00:00:00Z --to 2024-01-02T01:00:00Z --output ./data/xauusd-custom.csv --custom-columns timestamp,bid_open,ask_open,volume
   dukascopy-go download --symbol xauusd --timeframe m1 --from 2024-01-02T00:00:00Z --to 2024-01-02T00:03:00Z --output - --simple
-  dukascopy-go download --symbol xauusd --timeframe m1 --from 2024-01-02T00:00:00Z --to 2024-01-02T06:00:00Z --output ./data/xauusd.csv --simple --resume --progress --retries 5
+  dukascopy-go download --symbol xauusd --timeframe m1 --from 2024-01-02T00:00:00Z --to 2024-01-02T06:00:00Z --output ./data/xauusd.csv --simple --resume --retries 5
   dukascopy-go download --symbol xauusd --timeframe m1 --from 2024-01-02T00:00:00Z --to 2024-01-02T06:00:00Z --output ./data/xauusd.csv --simple --rate-limit 150ms
-  dukascopy-go download --symbol xauusd --timeframe m1 --from 2024-01-01T00:00:00Z --to 2024-02-01T00:00:00Z --output ./data/xauusd.csv --simple --partition auto --parallelism 4 --progress
+  dukascopy-go download --symbol xauusd --timeframe m1 --from 2024-01-01T00:00:00Z --to 2024-02-01T00:00:00Z --output ./data/xauusd.csv --simple --partition auto --parallelism 4
 `)
 }
 
@@ -136,8 +136,8 @@ func runInstruments(args []string, stdout io.Writer) error {
 		return errors.New("--limit must be greater than 0")
 	}
 
-	client := dukascopy.NewClient(*baseURL, defaultTimeout)
-	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	client := dukascopy.NewClient(*baseURL, defaultHTTPTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), defaultHTTPTimeout)
 	defer cancel()
 
 	instruments, err := client.ListInstruments(ctx)
@@ -175,12 +175,13 @@ func runDownload(args []string, stdout io.Writer, stderr io.Writer) error {
 	fullOutput := fs.Bool("full", false, "write the full CSV column set with bid/ask columns")
 	customColumns := fs.String("custom-columns", "", "comma-separated CSV column list")
 	fromValue := fs.String("from", "", "inclusive RFC3339 start timestamp")
-	toValue := fs.String("to", "", "exclusive RFC3339 end timestamp")
+	toValue := fs.String("to", "", "inclusive RFC3339 end timestamp")
 	outputPath := fs.String("output", "", "target CSV path")
 	retries := fs.Int("retries", 3, "retry count for transient HTTP errors")
 	retryBackoff := fs.Duration("retry-backoff", 500*time.Millisecond, "base retry backoff duration such as 500ms or 2s")
 	rateLimit := fs.Duration("rate-limit", 0, "minimum delay between HTTP requests such as 100ms or 1s")
-	progress := fs.Bool("progress", false, "print progress updates to stderr")
+	progress := fs.Bool("progress", false, "force-enable the interactive progress dashboard")
+	noProgress := fs.Bool("no-progress", false, "disable the interactive progress dashboard")
 	resume := fs.Bool("resume", false, "append missing rows to an existing CSV when possible")
 	partition := fs.String("partition", "none", "partition mode: none, auto, hour, day, week, month, year")
 	parallelism := fs.Int("parallelism", 1, "partition worker count")
@@ -232,8 +233,8 @@ func runDownload(args []string, stdout io.Writer, stderr io.Writer) error {
 		return fmt.Errorf("--to must be RFC3339: %w", err)
 	}
 
-	if !from.Before(to) {
-		return errors.New("--from must be earlier than --to")
+	if to.Before(from) {
+		return errors.New("--to must be the same as or later than --from")
 	}
 	if *retries < 0 {
 		return errors.New("--retries must be 0 or greater")
@@ -286,7 +287,7 @@ func runDownload(args []string, stdout io.Writer, stderr io.Writer) error {
 		Granularity: normalizedTimeframe,
 		Side:        dukascopy.PriceSide(*side),
 		From:        from.UTC(),
-		To:          to.UTC(),
+		To:          inclusiveDownloadEnd(to.UTC()),
 	}
 
 	resultKind := dukascopy.ResultKindBar
@@ -323,14 +324,30 @@ func runDownload(args []string, stdout io.Writer, stderr io.Writer) error {
 		}
 	}
 
-	client := dukascopy.NewClient(*baseURL, defaultTimeout).
+	progressConfigured := flagWasSet(fs, "progress")
+	if !progressConfigured && activeConfig != nil && activeConfig.Download.Progress != nil {
+		progressConfigured = true
+	}
+	progressEnabled := *progress
+	if *noProgress {
+		progressEnabled = false
+	} else if !progressConfigured && !outputToStdout && isInteractiveTerminal(stderr) {
+		progressEnabled = true
+	}
+
+	client := dukascopy.NewClient(*baseURL, defaultHTTPTimeout).
 		WithRetries(*retries).
 		WithBackoff(*retryBackoff).
 		WithRateLimit(*rateLimit)
-	if *progress {
-		client = client.WithProgress(newProgressPrinter(stderr).Print)
+	progressWriter := stderr
+	if progressEnabled {
+		printer := newProgressPrinter(stderr)
+		printer.SetDownloadMeta(*symbol, string(normalizedTimeframe), string(request.Side), *outputPath, normalizedPartition, *parallelism)
+		progressWriter = printer
+		client = client.WithProgress(printer.Print)
+		defer printer.Finish()
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	ctx, cancel := newDownloadContext()
 	defer cancel()
 
 	if normalizedPartition != partitionNone {
@@ -338,7 +355,7 @@ func runDownload(args []string, stdout io.Writer, stderr io.Writer) error {
 		if manifestPath == "" {
 			manifestPath = checkpoint.DefaultManifestPath(*outputPath)
 		}
-		return runPartitionedDownload(ctx, client, stdout, stderr, *outputPath, manifestPath, request, resultKind, barColumns, tickColumns, normalizedPartition, *parallelism)
+		return runPartitionedDownload(ctx, client, stdout, progressWriter, *outputPath, manifestPath, request, resultKind, barColumns, tickColumns, normalizedPartition, *parallelism)
 	}
 
 	resumeState, dedupeRecord, err := prepareResume(*resume, *outputPath, resultKind, barColumns, tickColumns, &request)
@@ -427,6 +444,14 @@ func readBaseURL() string {
 		return value
 	}
 	return defaultBaseURL
+}
+
+func newDownloadContext() (context.Context, context.CancelFunc) {
+	return context.WithCancel(context.Background())
+}
+
+func inclusiveDownloadEnd(value time.Time) time.Time {
+	return value.UTC().Add(time.Nanosecond)
 }
 
 func colorize(code string) string {
@@ -557,6 +582,11 @@ func prepareResume(enabled bool, outputPath string, resultKind dukascopy.ResultK
 
 	var dedupeRecord []string
 	if state.HasRows && (request.From.Before(state.LastTime) || request.From.Equal(state.LastTime)) {
+		inclusiveTo := request.To.Add(-time.Nanosecond)
+		if !state.LastTime.Before(inclusiveTo) {
+			request.From = request.To
+			return &state, nil, nil
+		}
 		request.From = state.LastTime
 		dedupeRecord = state.LastRecord
 	}
@@ -625,38 +655,4 @@ func createResumeTempPath(outputPath string) (string, error) {
 		return "", err
 	}
 	return path, nil
-}
-
-type progressPrinter struct {
-	w io.Writer
-}
-
-func newProgressPrinter(w io.Writer) progressPrinter {
-	return progressPrinter{w: w}
-}
-
-func (p progressPrinter) Print(event dukascopy.ProgressEvent) {
-	switch event.Kind {
-	case "chunk":
-		fmt.Fprintf(
-			p.w,
-			"%sprogress%s [%s] %d/%d %s\n",
-			colorize(colorCyan),
-			colorize(colorReset),
-			event.Scope,
-			event.Current,
-			event.Total,
-			event.Detail,
-		)
-	case "retry":
-		fmt.Fprintf(
-			p.w,
-			"%sretry%s attempt %d/%d %s\n",
-			colorize(colorYellow),
-			colorize(colorReset),
-			event.Attempt,
-			event.MaxAttempt,
-			event.Detail,
-		)
-	}
 }

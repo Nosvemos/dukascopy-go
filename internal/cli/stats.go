@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"time"
 
 	"github.com/Nosvemos/dukascopy-go/internal/csvout"
 )
@@ -24,9 +25,32 @@ func runStats(args []string, stdout io.Writer) error {
 		return errors.New("--input is required")
 	}
 
+	var printer *operationPrinter
+	if !*jsonOutput && isInteractiveTerminal(stdout) {
+		printer = newOperationPrinter(stdout)
+		printer.SetCommand("stats", *inputPath)
+		printer.SetStatus("scanning dataset")
+		printer.SetPhase("inspect csv")
+		defer printer.Finish()
+	}
+
 	stats, err := csvout.InspectCSV(*inputPath)
 	if err != nil {
+		if printer != nil {
+			printer.SetStatus("failed")
+		}
 		return err
+	}
+	if printer != nil {
+		printer.SetMetric("format", stats.Format)
+		printer.SetMetric("rows", formatCount(stats.Rows))
+		if stats.HasTimestamp {
+			printer.SetMetric("range", stats.FirstTimestamp.Format(time.RFC3339)+" -> "+stats.LastTimestamp.Format(time.RFC3339))
+			printer.SetMetric("gaps", formatCount(stats.GapCount))
+		}
+		printer.SetStatus("summary ready")
+		printer.Finish()
+		printer = nil
 	}
 
 	if *jsonOutput {

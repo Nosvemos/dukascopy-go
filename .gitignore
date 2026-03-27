@@ -26,6 +26,7 @@ go.work.sum
 
 # local sample outputs
 tmp/
+data/
 
 # release artifacts
 dist/

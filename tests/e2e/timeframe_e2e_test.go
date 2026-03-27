@@ -46,7 +46,7 @@ func TestDownloadSupportsTimeframeAliasH1(t *testing.T) {
 		"--simple",
 	)
 
-	if !strings.Contains(output, "wrote 2 bars") {
+	if !strings.Contains(output, "wrote 3 bars") {
 		t.Fatalf("unexpected output: %s", output)
 	}
 

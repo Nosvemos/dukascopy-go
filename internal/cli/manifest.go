@@ -55,9 +55,28 @@ func runManifestInspect(args []string, stdout io.Writer) error {
 		return err
 	}
 
+	var printer *operationPrinter
+	if !*jsonOutput && isInteractiveTerminal(stdout) {
+		printer = newOperationPrinter(stdout)
+		printer.SetCommand("manifest inspect", path)
+		printer.SetStatus("loading manifest")
+		printer.SetPhase("checkpoint load")
+		defer printer.Finish()
+	}
+
 	manifest, err := checkpoint.Load(path)
 	if err != nil {
+		if printer != nil {
+			printer.SetStatus("failed")
+		}
 		return err
+	}
+	if printer != nil {
+		printer.SetMetric("parts", formatCount(len(manifest.Parts)))
+		printer.SetMetric("partition", defaultString(manifest.Partition, "-"))
+		printer.SetStatus("summary ready")
+		printer.Finish()
+		printer = nil
 	}
 
 	if *jsonOutput {
@@ -110,21 +129,50 @@ func runManifestVerify(args []string, stdout io.Writer) error {
 		return err
 	}
 
+	var printer *operationPrinter
+	if !*jsonOutput && isInteractiveTerminal(stdout) {
+		printer = newOperationPrinter(stdout)
+		printer.SetCommand("manifest verify", path)
+		printer.SetStatus("verifying manifest")
+		printer.SetPhase("hash and row audit")
+		defer printer.Finish()
+	}
+
 	report, err := checkpoint.VerifyManifest(path)
 	if err != nil {
+		if printer != nil {
+			printer.SetStatus("failed")
+		}
 		return err
+	}
+	if printer != nil {
+		printer.SetMetric("parts", fmt.Sprintf("%d total", len(report.Parts)))
+		if report.FinalOutput != nil {
+			printer.SetMetric("final", filepathBase(report.FinalOutput.Path))
+		}
 	}
 
 	var outputStats *csvout.CSVStats
 	var dataQualityIssues []string
 	var dataQualityWarnings []string
 	if *checkDataQuality && report.FinalOutput != nil && report.FinalOutput.Valid {
+		if printer != nil {
+			printer.SetStatus("scanning final output")
+			printer.SetPhase("data quality audit")
+		}
 		stats, err := csvout.InspectCSV(report.FinalOutput.Path)
 		if err != nil {
+			if printer != nil {
+				printer.SetStatus("failed")
+			}
 			return err
 		}
 		outputStats = &stats
 		dataQualityIssues, dataQualityWarnings = evaluateDataQuality(stats)
+		if printer != nil {
+			printer.SetMetric("gaps", formatCount(stats.GapCount))
+			printer.SetMetric("duplicates", formatCount(stats.DuplicateRows+stats.DuplicateStamps))
+		}
 	}
 
 	if *jsonOutput {
@@ -148,6 +196,15 @@ func runManifestVerify(args []string, stdout io.Writer) error {
 			return errors.New("manifest verification failed")
 		}
 		return nil
+	}
+	if printer != nil {
+		if !report.Valid || len(dataQualityIssues) > 0 {
+			printer.SetStatus("invalid")
+		} else {
+			printer.SetStatus("verified")
+		}
+		printer.Finish()
+		printer = nil
 	}
 
 	fmt.Fprintf(stdout, "%sVerify%s %s\n", colorize(colorCyan), colorize(colorReset), path)
@@ -206,6 +263,11 @@ func runManifestRepair(args []string, stdout io.Writer) error {
 
 	manifestPath := fs.String("manifest", "", "checkpoint manifest path")
 	outputPath := fs.String("output", "", "output CSV path used to derive <output>.manifest.json")
+	redownloadGaps := fs.Bool("redownload-gaps", false, "re-download partition files that intersect detected timestamp gaps")
+	baseURL := fs.String("base-url", readBaseURL(), "Dukascopy API base URL used when --redownload-gaps is enabled")
+	retries := fs.Int("retries", 3, "retry count for transient HTTP errors when --redownload-gaps is enabled")
+	retryBackoff := fs.Duration("retry-backoff", 500*time.Millisecond, "base retry backoff used when --redownload-gaps is enabled")
+	rateLimit := fs.Duration("rate-limit", 0, "minimum delay between HTTP requests when --redownload-gaps is enabled")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -215,13 +277,34 @@ func runManifestRepair(args []string, stdout io.Writer) error {
 		return err
 	}
 
+	var printer *operationPrinter
+	if isInteractiveTerminal(stdout) {
+		printer = newOperationPrinter(stdout)
+		printer.SetCommand("manifest repair", path)
+		printer.SetStatus("loading manifest")
+		printer.SetPhase("checkpoint load")
+		defer printer.Finish()
+	}
+
 	manifest, err := checkpoint.Load(path)
 	if err != nil {
+		if printer != nil {
+			printer.SetStatus("failed")
+		}
 		return err
+	}
+	if printer != nil {
+		printer.SetMetric("parts", formatCount(len(manifest.Parts)))
+		printer.SetMetric("partition", defaultString(manifest.Partition, "-"))
+		printer.SetStatus("verifying manifest")
+		printer.SetPhase("integrity scan")
 	}
 
 	report, err := checkpoint.VerifyManifest(path)
 	if err != nil {
+		if printer != nil {
+			printer.SetStatus("failed")
+		}
 		return err
 	}
 
@@ -229,6 +312,10 @@ func runManifestRepair(args []string, stdout io.Writer) error {
 	repairedOutput := false
 
 	if report.FinalOutput != nil && report.FinalOutput.Valid {
+		if printer != nil {
+			printer.SetStatus("repairing parts")
+			printer.SetPhase("extract from final output")
+		}
 		for _, partResult := range report.Parts {
 			if partResult.Valid {
 				continue
@@ -240,10 +327,16 @@ func runManifestRepair(args []string, stdout io.Writer) error {
 
 			partPath := filepath.Join(manifest.PartsDir, partMeta.File)
 			if err := csvout.ExtractCSVRange(manifest.OutputPath, partPath, partMeta.Start, partMeta.End); err != nil {
+				if printer != nil {
+					printer.SetStatus("failed")
+				}
 				return err
 			}
 			audit, err := csvout.AuditCSV(partPath)
 			if err != nil {
+				if printer != nil {
+					printer.SetStatus("failed")
+				}
 				return err
 			}
 
@@ -258,57 +351,107 @@ func runManifestRepair(args []string, stdout io.Writer) error {
 	}
 
 	if repairedParts > 0 {
+		if printer != nil {
+			printer.SetMetric("repaired", formatCount(repairedParts))
+			printer.SetStatus("saving manifest")
+			printer.SetPhase("checkpoint update")
+		}
 		if err := checkpoint.Save(path, manifest); err != nil {
+			if printer != nil {
+				printer.SetStatus("failed")
+			}
 			return err
 		}
 		report, err = checkpoint.VerifyManifest(path)
 		if err != nil {
+			if printer != nil {
+				printer.SetStatus("failed")
+			}
 			return err
 		}
 	}
 
 	if shouldRepairFinalOutput(report) {
-		partPaths := make([]string, 0, len(manifest.Parts))
-		for _, part := range manifest.Parts {
-			partPaths = append(partPaths, filepath.Join(manifest.PartsDir, part.File))
+		if printer != nil {
+			printer.SetStatus("rebuilding output")
+			printer.SetPhase("assemble final csv")
 		}
-
-		from, to, err := manifestRange(manifest)
-		if err != nil {
-			return err
-		}
-		if err := csvout.AssembleCSVFromParts(manifest.OutputPath, partPaths, from, to); err != nil {
-			return err
-		}
-		audit, err := csvout.AuditCSV(manifest.OutputPath)
-		if err != nil {
-			return err
-		}
-
-		manifest.Completed = true
-		manifest.FinalOutput = &checkpoint.ManifestOutput{
-			Rows:      audit.Rows,
-			Bytes:     audit.Bytes,
-			SHA256:    audit.SHA256,
-			UpdatedAt: time.Now().UTC(),
-		}
-		if err := checkpoint.Save(path, manifest); err != nil {
+		if err := rebuildManifestFinalOutput(path, &manifest); err != nil {
+			if printer != nil {
+				printer.SetStatus("failed")
+			}
 			return err
 		}
 		repairedOutput = true
 	}
 
+	redownloadedGapParts := 0
+	if *redownloadGaps {
+		logWriter := stdout
+		if printer != nil {
+			printer.SetStatus("re-downloading gaps")
+			printer.SetPhase("refresh intersecting partitions")
+			logWriter = printer
+		}
+		count, err := redownloadManifestGaps(path, &manifest, logWriter, gapRedownloadOptions{
+			BaseURL:      *baseURL,
+			Retries:      *retries,
+			RetryBackoff: *retryBackoff,
+			RateLimit:    *rateLimit,
+		})
+		if err != nil {
+			if printer != nil {
+				printer.SetStatus("failed")
+			}
+			return err
+		}
+		redownloadedGapParts = count
+		if count > 0 {
+			repairedOutput = true
+		}
+		if printer != nil {
+			printer.SetMetric("gap parts", formatCount(count))
+		}
+	}
+
+	if printer != nil {
+		printer.SetStatus("final verification")
+		printer.SetPhase("manifest re-check")
+	}
 	report, err = checkpoint.VerifyManifest(path)
 	if err != nil {
+		if printer != nil {
+			printer.SetStatus("failed")
+		}
 		return err
 	}
 
-	if repairedParts == 0 && !repairedOutput && report.Valid {
+	if repairedParts == 0 && redownloadedGapParts == 0 && !repairedOutput && report.Valid {
+		if printer != nil {
+			printer.SetStatus("nothing to do")
+			printer.Finish()
+			printer = nil
+		}
 		fmt.Fprintf(stdout, "%srepair%s nothing to do\n", colorize(colorGreen), colorize(colorReset))
 		return nil
 	}
+	if printer != nil {
+		printer.SetMetric("repaired", formatCount(repairedParts))
+		printer.SetMetric("gap parts", formatCount(redownloadedGapParts))
+		printer.SetMetric("rebuilt output", boolLabel(repairedOutput))
+		if !report.Valid {
+			printer.SetStatus("invalid")
+		} else {
+			printer.SetStatus("repair complete")
+		}
+		printer.Finish()
+		printer = nil
+	}
 
 	fmt.Fprintf(stdout, "%srepair%s repaired %d part(s)", colorize(colorGreen), colorize(colorReset), repairedParts)
+	if redownloadedGapParts > 0 {
+		fmt.Fprintf(stdout, ", re-downloaded %d gap part(s)", redownloadedGapParts)
+	}
 	if repairedOutput {
 		fmt.Fprint(stdout, " and rebuilt final output")
 	}
@@ -337,9 +480,26 @@ func runManifestPrune(args []string, stdout io.Writer) error {
 		return err
 	}
 
+	var printer *operationPrinter
+	if isInteractiveTerminal(stdout) {
+		printer = newOperationPrinter(stdout)
+		printer.SetCommand("manifest prune", path)
+		printer.SetStatus("loading manifest")
+		printer.SetPhase("checkpoint load")
+		defer printer.Finish()
+	}
+
 	manifest, err := checkpoint.Load(path)
 	if err != nil {
+		if printer != nil {
+			printer.SetStatus("failed")
+		}
 		return err
+	}
+	if printer != nil {
+		printer.SetMetric("parts", formatCount(len(manifest.Parts)))
+		printer.SetStatus("pruning files")
+		printer.SetPhase("scan parts and temp files")
 	}
 
 	removed := 0
@@ -365,6 +525,9 @@ func runManifestPrune(args []string, stdout io.Writer) error {
 			}
 
 			if err := os.Remove(filepath.Join(manifest.PartsDir, name)); err != nil && !os.IsNotExist(err) {
+				if printer != nil {
+					printer.SetStatus("failed")
+				}
 				return err
 			}
 			removed++
@@ -407,11 +570,20 @@ func runManifestPrune(args []string, stdout io.Writer) error {
 			name := entry.Name()
 			if shouldPruneTopLevelFile(name, manifestBase, outputBase) {
 				if err := os.Remove(filepath.Join(item.dir, name)); err != nil && !os.IsNotExist(err) {
+					if printer != nil {
+						printer.SetStatus("failed")
+					}
 					return err
 				}
 				removed++
 			}
 		}
+	}
+	if printer != nil {
+		printer.SetMetric("removed", formatCount(removed))
+		printer.SetStatus("prune complete")
+		printer.Finish()
+		printer = nil
 	}
 
 	fmt.Fprintf(stdout, "%sprune%s removed %d obsolete file(s)\n", colorize(colorGreen), colorize(colorReset), removed)
@@ -422,13 +594,14 @@ func printManifestUsage(w io.Writer) {
 	fmt.Fprint(w, `manifest commands:
   manifest inspect  Show a checkpoint manifest summary
   manifest prune    Remove obsolete temp files and orphan partition files
-  manifest repair   Repair part files or the final CSV from existing valid files
+  manifest repair   Repair part files, rebuild final output, or re-download gap partitions
   manifest verify   Audit part files and the final CSV against the manifest
 
 examples:
   dukascopy-go manifest inspect --output ./data/xauusd.csv
   dukascopy-go manifest prune --output ./data/xauusd.csv
   dukascopy-go manifest repair --output ./data/xauusd.csv
+  dukascopy-go manifest repair --output ./data/xauusd.csv --redownload-gaps
   dukascopy-go manifest verify --manifest ./data/xauusd.csv.manifest.json
   dukascopy-go manifest verify --output ./data/xauusd.csv --check-data-quality
 `)
@@ -463,6 +636,13 @@ func filepathBase(path string) string {
 		return path
 	}
 	return parts[len(parts)-1]
+}
+
+func boolLabel(value bool) string {
+	if value {
+		return "yes"
+	}
+	return "no"
 }
 
 func shouldRepairFinalOutput(report checkpoint.VerificationReport) bool {

@@ -123,7 +123,7 @@ func TestPartitionExecutionHelpers(t *testing.T) {
 		},
 	}
 	client := dukascopy.NewClient(server.URL, time.Second)
-	result := runPartitionJob(context.Background(), client, partsDir, item, request, dukascopy.ResultKindBar, []string{"timestamp", "open"}, nil)
+	result := runPartitionJob(context.Background(), client, partsDir, 1, item, request, dukascopy.ResultKindBar, []string{"timestamp", "open"}, nil)
 	if result.Err != nil || result.RowsWritten == 0 {
 		t.Fatalf("unexpected partition job result: %+v", result)
 	}
@@ -157,7 +157,7 @@ func TestPartitionExecutionHelpers(t *testing.T) {
 	}
 
 	pending := []partitionWorkItem{item}
-	if err := executePartitionDownloads(context.Background(), client, manifestPath, &manifest, pending, partsDir, request, dukascopy.ResultKindBar, []string{"timestamp", "open"}, nil, 2); err != nil {
+	if err := executePartitionDownloads(context.Background(), client, manifestPath, &manifest, pending, partsDir, request, dukascopy.ResultKindBar, []string{"timestamp", "open"}, nil, 2, nil); err != nil {
 		t.Fatalf("executePartitionDownloads returned error: %v", err)
 	}
 }
@@ -253,6 +253,15 @@ func TestLoadConfigAndInstrumentDefaults(t *testing.T) {
 	}
 	if *baseURL != "https://jetta.dukascopy.com" {
 		t.Fatalf("expected config base URL to apply, got %q", *baseURL)
+	}
+}
+
+func TestNewDownloadContextHasNoDeadline(t *testing.T) {
+	ctx, cancel := newDownloadContext()
+	defer cancel()
+
+	if _, ok := ctx.Deadline(); ok {
+		t.Fatal("expected download context to have no overall deadline")
 	}
 }
 

@@ -42,7 +42,7 @@ It supports flexible symbol input like `xauusd`, `eur/usd`, and `BTC-USD`, and w
 - Verify row counts and SHA-256 hashes before reusing partition files
 - Audit finished datasets with `stats`, `manifest inspect`, `manifest verify`, `manifest repair`, and `manifest prune`
 - Configure defaults with `--config` or `DUKASCOPY_CONFIG`
-- Built-in retry, backoff, rate limiting, and progress reporting
+- Built-in retry, backoff, rate limiting, and interactive terminal dashboards
 
 ## Installation
 
@@ -107,6 +107,8 @@ Inspect the finished dataset:
 dukascopy-go stats --input ./data/xauusd-january.csv
 ```
 
+When you run `stats` or `manifest` commands in a real terminal, `dukascopy-go` now opens the same compact interactive dashboard style used by downloads. JSON output stays plain text and non-interactive pipes still print normal line-based output.
+
 If you are working from a clone instead of an installed binary, use:
 
 ```bash
@@ -122,7 +124,7 @@ go run ./cmd/dukascopy-go --help
 | `stats` | Inspect CSV, CSV.GZ, or Parquet datasets for counts, ranges, gaps, duplicates, and ordering |
 | `manifest inspect` | Print checkpoint manifest summaries and partition status |
 | `manifest verify` | Verify partition files and final outputs against manifest metadata |
-| `manifest repair` | Rebuild missing or invalid files from valid existing data when possible |
+| `manifest repair` | Rebuild missing or invalid files from valid existing data, or re-download partition files that intersect detected gaps |
 | `manifest prune` | Remove obsolete temp files and orphan partition files safely |
 | `list-timeframes` | Print supported timeframe values |
 | `version` | Print embedded version, commit, and build date information |
@@ -206,6 +208,12 @@ Repair a dataset from valid existing files:
 
 ```bash
 dukascopy-go manifest repair --output ./data/xauusd-m1.csv
+```
+
+Re-download partition files that intersect detected timestamp gaps and rebuild the final output:
+
+```bash
+dukascopy-go manifest repair --output ./data/xauusd-m1.csv --redownload-gaps
 ```
 
 Clean orphan partition and temp files:
@@ -343,6 +351,7 @@ mn1   month
 - `--retries` and `--retry-backoff` handle transient `429` and `5xx` failures
 - `--rate-limit` adds a minimum delay between requests
 - `--progress` prints chunk and retry progress to `stderr`
+- `stats` and `manifest` commands auto-open a compact dashboard on interactive terminals
 - `--resume` appends only rows after the latest saved CSV timestamp
 - Partitioned downloads keep durable intermediate files for recovery and reuse
 - `stats` helps spot gaps, duplicates, unexpected intervals, and out-of-order rows

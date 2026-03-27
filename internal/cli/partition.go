@@ -40,6 +40,7 @@ type partitionWorkItem struct {
 
 type partitionWorkResult struct {
 	Item        partitionWorkItem
+	Worker      int
 	RowsWritten int
 	Audit       csvout.FileAudit
 	Err         error
@@ -159,6 +160,7 @@ func runPartitionedDownload(
 	partitionMode string,
 	parallelism int,
 ) error {
+	progress, _ := stderr.(*progressPrinter)
 	columns := barColumns
 	if resultKind == dukascopy.ResultKindTick {
 		columns = tickColumns
@@ -213,6 +215,9 @@ func runPartitionedDownload(
 
 	pending := make([]partitionWorkItem, 0, len(partitions))
 	manifestDirty := false
+	if progress != nil {
+		progress.SetStatus("scanning checkpoint")
+	}
 	for index, part := range partitions {
 		partState := checkpoint.FindPart(&manifest, part.ID)
 		if partState == nil {
@@ -224,7 +229,9 @@ func runPartitionedDownload(
 			if _, err := os.Stat(partPath); err == nil {
 				audit, auditErr := csvout.AuditCSV(partPath)
 				if auditErr == nil && partAuditMatches(*partState, audit) {
-					if stderr != nil {
+					if progress != nil {
+						progress.SetStatus(fmt.Sprintf("checkpoint reuse %d/%d", index+1, len(partitions)))
+					} else if stderr != nil {
 						fmt.Fprintf(stderr, "%scheckpoint%s [%d/%d] reuse %s\n", colorize(colorYellow), colorize(colorReset), index+1, len(partitions), part.ID)
 					}
 					if partState.SHA256 == "" || partState.Bytes == 0 {
@@ -237,7 +244,9 @@ func runPartitionedDownload(
 					continue
 				}
 
-				if stderr != nil {
+				if progress != nil {
+					progress.SetStatus(fmt.Sprintf("checkpoint mismatch %d/%d", index+1, len(partitions)))
+				} else if stderr != nil {
 					fmt.Fprintf(stderr, "%saudit%s [%d/%d] re-download %s\n", colorize(colorYellow), colorize(colorReset), index+1, len(partitions), part.ID)
 				}
 			}
@@ -269,37 +278,59 @@ func runPartitionedDownload(
 	if parallelism > len(pending) && len(pending) > 0 {
 		parallelism = len(pending)
 	}
+	if progress != nil {
+		completedParts, completedRows, completedBytes := partitionProgressMetrics(manifest)
+		progress.SetPartitionMetrics(len(partitions), completedParts, completedRows, completedBytes)
+		progress.SetStatus("downloading")
+	} else {
+		for _, item := range pending {
+			partState := checkpoint.FindPart(&manifest, item.Partition.ID)
+			if partState == nil {
+				return fmt.Errorf("partition %s is missing from checkpoint manifest", item.Partition.ID)
+			}
+			if stderr != nil {
+				fmt.Fprintf(
+					stderr,
+					"%spartition%s [%d/%d] %s -> %s\n",
+					colorize(colorCyan),
+					colorize(colorReset),
+					item.Index+1,
+					len(partitions),
+					item.Partition.Start.Format(time.RFC3339),
+					item.Partition.End.Format(time.RFC3339),
+				)
+			}
 
-	for _, item := range pending {
-		partState := checkpoint.FindPart(&manifest, item.Partition.ID)
-		if partState == nil {
-			return fmt.Errorf("partition %s is missing from checkpoint manifest", item.Partition.ID)
+			partState.Status = "running"
+			partState.Error = ""
+			partState.Rows = 0
+			partState.Bytes = 0
+			partState.SHA256 = ""
+			partState.UpdatedAt = time.Now().UTC()
+			if err := checkpoint.Save(manifestPath, manifest); err != nil {
+				return err
+			}
 		}
-		if stderr != nil {
-			fmt.Fprintf(
-				stderr,
-				"%spartition%s [%d/%d] %s -> %s\n",
-				colorize(colorCyan),
-				colorize(colorReset),
-				item.Index+1,
-				len(partitions),
-				item.Partition.Start.Format(time.RFC3339),
-				item.Partition.End.Format(time.RFC3339),
-			)
-		}
-
-		partState.Status = "running"
-		partState.Error = ""
-		partState.Rows = 0
-		partState.Bytes = 0
-		partState.SHA256 = ""
-		partState.UpdatedAt = time.Now().UTC()
-		if err := checkpoint.Save(manifestPath, manifest); err != nil {
-			return err
+	}
+	if progress != nil {
+		for _, item := range pending {
+			partState := checkpoint.FindPart(&manifest, item.Partition.ID)
+			if partState == nil {
+				return fmt.Errorf("partition %s is missing from checkpoint manifest", item.Partition.ID)
+			}
+			partState.Status = "running"
+			partState.Error = ""
+			partState.Rows = 0
+			partState.Bytes = 0
+			partState.SHA256 = ""
+			partState.UpdatedAt = time.Now().UTC()
+			if err := checkpoint.Save(manifestPath, manifest); err != nil {
+				return err
+			}
 		}
 	}
 
-	if err := executePartitionDownloads(ctx, client, manifestPath, &manifest, pending, partsDir, request, resultKind, barColumns, tickColumns, parallelism); err != nil {
+	if err := executePartitionDownloads(ctx, client, manifestPath, &manifest, pending, partsDir, request, resultKind, barColumns, tickColumns, parallelism, progress); err != nil {
 		return err
 	}
 
@@ -314,7 +345,9 @@ func runPartitionedDownload(
 	if manifest.Completed && manifest.FinalOutput != nil {
 		outputAudit, auditErr := csvout.AuditCSV(outputPath)
 		if auditErr == nil && outputAuditMatches(*manifest.FinalOutput, outputAudit) {
-			if stderr != nil {
+			if progress != nil {
+				progress.SetStatus("final output verified")
+			} else if stderr != nil {
 				fmt.Fprintf(stderr, "%scheckpoint%s final output verified %s\n", colorize(colorYellow), colorize(colorReset), outputPath)
 			}
 			label := "bars"
@@ -324,12 +357,16 @@ func runPartitionedDownload(
 			fmt.Fprintf(stdout, "%swrote%s %d %s to %s\n", colorize(colorGreen), colorize(colorReset), manifest.Summary.TotalRows, label, outputPath)
 			return nil
 		}
-		if stderr != nil {
+		if progress != nil {
+			progress.SetStatus("re-assembling output")
+		} else if stderr != nil {
 			fmt.Fprintf(stderr, "%saudit%s final output mismatch, re-assembling %s\n", colorize(colorYellow), colorize(colorReset), outputPath)
 		}
 	}
 
-	if stderr != nil {
+	if progress != nil {
+		progress.SetStatus(fmt.Sprintf("assembling %d files", len(partPaths)))
+	} else if stderr != nil {
 		fmt.Fprintf(stderr, "%sassemble%s %d partition files into %s\n", colorize(colorCyan), colorize(colorReset), len(partPaths), outputPath)
 	}
 	if err := csvout.AssembleCSVFromParts(outputPath, partPaths, request.From, request.To); err != nil {
@@ -350,6 +387,9 @@ func runPartitionedDownload(
 	}
 	if err := checkpoint.Save(manifestPath, manifest); err != nil {
 		return err
+	}
+	if progress != nil {
+		progress.SetStatus("completed")
 	}
 
 	label := "bars"
@@ -372,6 +412,7 @@ func executePartitionDownloads(
 	barColumns []string,
 	tickColumns []string,
 	parallelism int,
+	progress *progressPrinter,
 ) error {
 	if len(pending) == 0 {
 		return nil
@@ -379,7 +420,13 @@ func executePartitionDownloads(
 
 	if parallelism <= 1 || len(pending) == 1 {
 		for _, item := range pending {
-			result := runPartitionJob(ctx, client, partsDir, item, request, resultKind, barColumns, tickColumns)
+			if progress != nil {
+				progress.PartitionStarted(1, item.Partition)
+			}
+			result := runPartitionJob(ctx, client, partsDir, 1, item, request, resultKind, barColumns, tickColumns)
+			if progress != nil {
+				progress.PartitionFinished(result)
+			}
 			if err := applyPartitionResult(manifestPath, manifest, result); err != nil {
 				return err
 			}
@@ -398,13 +445,17 @@ func executePartitionDownloads(
 
 	var wg sync.WaitGroup
 	for workerIndex := 0; workerIndex < parallelism; workerIndex++ {
+		workerID := workerIndex + 1
 		wg.Add(1)
-		go func() {
+		go func(workerID int) {
 			defer wg.Done()
 			for item := range jobs {
-				results <- runPartitionJob(childCtx, client, partsDir, item, request, resultKind, barColumns, tickColumns)
+				if progress != nil {
+					progress.PartitionStarted(workerID, item.Partition)
+				}
+				results <- runPartitionJob(childCtx, client, partsDir, workerID, item, request, resultKind, barColumns, tickColumns)
 			}
-		}()
+		}(workerID)
 	}
 
 	go func() {
@@ -418,6 +469,9 @@ func executePartitionDownloads(
 
 	var firstErr error
 	for result := range results {
+		if progress != nil {
+			progress.PartitionFinished(result)
+		}
 		if err := applyPartitionResult(manifestPath, manifest, result); err != nil && firstErr == nil {
 			firstErr = err
 			cancel()
@@ -436,6 +490,7 @@ func runPartitionJob(
 	ctx context.Context,
 	client *dukascopy.Client,
 	partsDir string,
+	worker int,
 	item partitionWorkItem,
 	request dukascopy.DownloadRequest,
 	resultKind dukascopy.ResultKind,
@@ -450,21 +505,24 @@ func runPartitionJob(
 	rowsWritten, err := downloadPartitionToFile(ctx, client, partPath, partRequest, resultKind, barColumns, tickColumns)
 	if err != nil {
 		return partitionWorkResult{
-			Item: item,
-			Err:  err,
+			Item:   item,
+			Worker: worker,
+			Err:    err,
 		}
 	}
 
 	audit, err := csvout.AuditCSV(partPath)
 	if err != nil {
 		return partitionWorkResult{
-			Item: item,
-			Err:  err,
+			Item:   item,
+			Worker: worker,
+			Err:    err,
 		}
 	}
 	if audit.Rows != rowsWritten {
 		return partitionWorkResult{
-			Item: item,
+			Item:   item,
+			Worker: worker,
 			Err: fmt.Errorf(
 				"partition %s row audit mismatch: wrote %d rows but file contains %d",
 				item.Partition.ID,
@@ -476,6 +534,7 @@ func runPartitionJob(
 
 	return partitionWorkResult{
 		Item:        item,
+		Worker:      worker,
 		RowsWritten: rowsWritten,
 		Audit:       audit,
 	}
@@ -577,4 +636,19 @@ func outputAuditMatches(output checkpoint.ManifestOutput, audit csvout.FileAudit
 		return false
 	}
 	return true
+}
+
+func partitionProgressMetrics(manifest checkpoint.Manifest) (int, int, int64) {
+	completed := 0
+	rows := 0
+	var bytes int64
+	for _, part := range manifest.Parts {
+		if part.Status != "completed" {
+			continue
+		}
+		completed++
+		rows += part.Rows
+		bytes += part.Bytes
+	}
+	return completed, rows, bytes
 }

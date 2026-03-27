@@ -20,6 +20,15 @@ func TestShouldRetryStatus(t *testing.T) {
 	}
 }
 
+func TestShouldRetryResponseDetectsWrappedServerErrors(t *testing.T) {
+	if !shouldRetryResponse(http.StatusBadRequest, []byte(`{"error":"Internal server error","statusCode":500}`)) {
+		t.Fatal("expected wrapped server error body to be retryable")
+	}
+	if shouldRetryResponse(http.StatusBadRequest, []byte(`{"error":"Bad request","statusCode":400}`)) {
+		t.Fatal("expected plain bad request body to stay non-retryable")
+	}
+}
+
 func TestClientGetJSONRetriesTransientStatus(t *testing.T) {
 	attempts := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -43,6 +52,30 @@ func TestClientGetJSONRetriesTransientStatus(t *testing.T) {
 	}
 	if len(payload.Instruments) != 1 || payload.Instruments[0].Code != "XAU-USD" {
 		t.Fatalf("unexpected payload: %+v", payload)
+	}
+}
+
+func TestClientGetJSONRetriesWrappedServerErrorBody(t *testing.T) {
+	attempts := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts++
+		w.Header().Set("Content-Type", "application/json")
+		if attempts == 1 {
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"error":"Internal server error","message":"Failed to load historical ticks","statusCode":500}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"instruments":[{"id":1,"name":"XAU/USD","code":"XAU-USD","description":"Gold","priceScale":3}]}`))
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, time.Second).WithRetries(1).WithBackoff(time.Millisecond)
+	var payload instrumentsResponse
+	if err := client.getJSON(context.Background(), []string{"v1", "instruments"}, &payload); err != nil {
+		t.Fatalf("getJSON returned error: %v", err)
+	}
+	if attempts != 2 {
+		t.Fatalf("expected 2 attempts, got %d", attempts)
 	}
 }
 

@@ -32,7 +32,7 @@ func TestPartitionedDownloadCreatesManifestAndAssemblesFinalCSV(t *testing.T) {
 		"--checkpoint-manifest", manifestPath,
 	)
 
-	if !strings.Contains(output, "wrote 6 bars") {
+	if !strings.Contains(output, "wrote 7 bars") {
 		t.Fatalf("unexpected partitioned output: %s", output)
 	}
 
@@ -73,17 +73,21 @@ func TestPartitionedDownloadCreatesManifestAndAssemblesFinalCSV(t *testing.T) {
 	if !manifest.Completed {
 		t.Fatalf("expected manifest to be completed: %s", string(manifestData))
 	}
-	if len(manifest.Parts) != 2 {
-		t.Fatalf("expected 2 checkpoint parts, got %d", len(manifest.Parts))
+	if len(manifest.Parts) != 3 {
+		t.Fatalf("expected 3 checkpoint parts, got %d", len(manifest.Parts))
 	}
-	if manifest.FinalOutput.Rows != 6 || manifest.FinalOutput.SHA256 == "" {
+	if manifest.FinalOutput.Rows != 7 || manifest.FinalOutput.SHA256 == "" {
 		t.Fatalf("expected final output audit in manifest: %s", string(manifestData))
 	}
-	if manifest.Summary.TotalParts != 2 || manifest.Summary.CompletedParts != 2 || manifest.Summary.TotalRows != 6 || manifest.Summary.OutputRows != 6 {
+	if manifest.Summary.TotalParts != 3 || manifest.Summary.CompletedParts != 3 || manifest.Summary.TotalRows != 7 || manifest.Summary.OutputRows != 7 {
 		t.Fatalf("expected manifest summary to be populated: %s", string(manifestData))
 	}
-	for _, part := range manifest.Parts {
-		if part.Status != "completed" || part.Rows != 3 {
+	for index, part := range manifest.Parts {
+		expectedRows := 3
+		if index == 2 {
+			expectedRows = 1
+		}
+		if part.Status != "completed" || part.Rows != expectedRows {
 			t.Fatalf("unexpected part state: %s", string(manifestData))
 		}
 	}
@@ -201,6 +205,23 @@ func TestPartitionedDownloadResumesFromCheckpoint(t *testing.T) {
 			"volumes":    []float64{0.0014, 0.0012, 0.0010},
 		})
 	})
+	secondMux.HandleFunc("/v1/candles/minute/XAU-USD/BID/2024/1/4", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, map[string]any{
+			"timestamp":  1704326400000,
+			"multiplier": 1.0,
+			"open":       104.0,
+			"high":       105.0,
+			"low":        103.0,
+			"close":      104.5,
+			"shift":      60000,
+			"times":      []int{0, 1, 1},
+			"opens":      []float64{0, 0.5, 0.75},
+			"highs":      []float64{0, 0.25, 0.75},
+			"lows":       []float64{0, 0.5, 1.25},
+			"closes":     []float64{0, 0.25, 0.75},
+			"volumes":    []float64{0.0016, 0.0013, 0.0011},
+		})
+	})
 	secondServer := httptest.NewServer(secondMux)
 	defer secondServer.Close()
 
@@ -218,7 +239,7 @@ func TestPartitionedDownloadResumesFromCheckpoint(t *testing.T) {
 		"--checkpoint-manifest", manifestPath,
 	)
 
-	if !strings.Contains(output, "wrote 6 bars") {
+	if !strings.Contains(output, "wrote 7 bars") {
 		t.Fatalf("unexpected resumed output: %s", output)
 	}
 	if dayOneHealthyAttempts.Load() != 0 {

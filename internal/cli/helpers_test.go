@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -15,6 +16,7 @@ import (
 	"github.com/Nosvemos/dukascopy-go/internal/checkpoint"
 	"github.com/Nosvemos/dukascopy-go/internal/csvout"
 	"github.com/Nosvemos/dukascopy-go/internal/dukascopy"
+	"github.com/charmbracelet/lipgloss"
 )
 
 func TestRunAndPrintHelpers(t *testing.T) {
@@ -47,6 +49,9 @@ func TestRunAndPrintHelpers(t *testing.T) {
 
 	if got := maxInt(2, 5); got != 5 {
 		t.Fatalf("expected maxInt to return 5, got %d", got)
+	}
+	if got := inclusiveDownloadEnd(time.Date(2024, 1, 2, 0, 0, 0, 0, time.UTC)); !got.Equal(time.Date(2024, 1, 2, 0, 0, 0, 1, time.UTC)) {
+		t.Fatalf("unexpected inclusiveDownloadEnd result: %s", got)
 	}
 }
 
@@ -143,10 +148,12 @@ func TestProgressAndManifestHelpers(t *testing.T) {
 
 	var buffer bytes.Buffer
 	printer := newProgressPrinter(&buffer)
+	printer.SetDownloadMeta("xauusd", "m1", "BID", "./data/xauusd.csv", "day", 4)
 	printer.Print(dukascopy.ProgressEvent{Kind: "chunk", Scope: "minute", Current: 1, Total: 2, Detail: "2024-01-02"})
 	printer.Print(dukascopy.ProgressEvent{Kind: "retry", Attempt: 1, MaxAttempt: 3, Detail: "http://example.test"})
+	printer.Finish()
 	output := buffer.String()
-	if !strings.Contains(output, "progress") || !strings.Contains(output, "retry") {
+	if !strings.Contains(output, "DUKASCOPY-GO") || !strings.Contains(output, "downloading") || !strings.Contains(output, "retry 1/3") || !strings.Contains(output, "2024-01-02") || !strings.Contains(output, "50%") || !strings.Contains(output, "xauusd") || !strings.Contains(output, "./data/xauusd.csv") {
 		t.Fatalf("unexpected progress output: %s", output)
 	}
 
@@ -181,6 +188,93 @@ func TestProgressAndManifestHelpers(t *testing.T) {
 	if _, _, err := manifestRange(checkpoint.Manifest{}); err == nil {
 		t.Fatal("expected empty manifest range error")
 	}
+}
+
+func TestProgressViewFitsTerminalBounds(t *testing.T) {
+	for _, noColor := range []bool{true, false} {
+		model := newProgressTUIModel(noColor)
+		model.statusText = "downloading"
+		model.symbol = "xauusd"
+		model.timeframe = "m1"
+		model.side = "BID"
+		model.outputPath = "./data/xauusd-2018-2026-m1-full.csv"
+		model.partitionMode = "day"
+		model.parallelism = 4
+		model.partitionTotal = 365
+		model.partitionCompleted = 12
+		model.partitionDetail = "2024-01-02 -> 2024-01-03"
+		model.chunkScope = "minute"
+		model.chunkCurrent = 1
+		model.chunkTotal = 2
+		model.chunkDetail = "2024-01-02"
+		model.lastRetry = "1/3  http://example.test/very/long/path"
+		model.logs = []string{
+			"checkpoint reuse 1/365",
+			"retry 1/3  http://example.test/very/long/path",
+		}
+		model.completedRows = 123456
+		model.completedBytes = 987654321
+
+		for _, width := range []int{40, 48, 56, 72, 84} {
+			for _, height := range []int{5, 8, 12, 18} {
+				model.width = width
+				model.height = height
+				view := stripANSITestSequences(model.View())
+				lines := strings.Split(view, "\n")
+				if len(lines) > maxInt(height-1, 3) {
+					t.Fatalf("expected compact line count at height=%d, got %d", height, len(lines))
+				}
+				for _, line := range lines {
+					if lipgloss.Width(line) > width-1 {
+						t.Fatalf("expected compact line width, got %d columns at width=%d in %q", lipgloss.Width(line), width, line)
+					}
+				}
+			}
+		}
+	}
+}
+
+func TestOperationViewFitsTerminalBounds(t *testing.T) {
+	for _, noColor := range []bool{true, false} {
+		model := newOperationTUIModel(noColor)
+		model.command = "manifest repair"
+		model.target = "./data/xauusd-2018-2026-m1-full.csv.manifest.json"
+		model.statusText = "re-downloading gaps"
+		model.phaseText = "refresh intersecting partitions"
+		model.metrics = []operationMetric{
+			{Label: "parts", Value: "2922"},
+			{Label: "gap parts", Value: "14"},
+			{Label: "rebuilt output", Value: "yes"},
+		}
+		model.logs = []string{
+			"verifying manifest",
+			"repair re-download gap part 20180101",
+			"final verification",
+		}
+
+		for _, width := range []int{40, 48, 56, 72, 84} {
+			for _, height := range []int{5, 8, 12, 18} {
+				model.width = width
+				model.height = height
+				view := stripANSITestSequences(model.View())
+				lines := strings.Split(view, "\n")
+				if len(lines) > maxInt(height-1, 3) {
+					t.Fatalf("expected compact operation line count at height=%d, got %d", height, len(lines))
+				}
+				for _, line := range lines {
+					if lipgloss.Width(line) > width-1 {
+						t.Fatalf("expected compact operation line width, got %d columns at width=%d in %q", lipgloss.Width(line), width, line)
+					}
+				}
+			}
+		}
+	}
+}
+
+var ansiTestPattern = regexp.MustCompile(`\x1b\[[0-9;?]*[ -/]*[@-~]`)
+
+func stripANSITestSequences(value string) string {
+	return ansiTestPattern.ReplaceAllString(value, "")
 }
 
 func TestRunStatsManifestAndInstruments(t *testing.T) {
@@ -328,6 +422,33 @@ func TestLoadBidAskBarsAndManifestUtilityLogic(t *testing.T) {
 	})
 	if len(issues) != 3 || len(warnings) != 1 {
 		t.Fatalf("unexpected data quality evaluation: issues=%v warnings=%v", issues, warnings)
+	}
+}
+
+func TestDetectManifestGapPartIndexes(t *testing.T) {
+	dir := t.TempDir()
+	partOne := filepath.Join(dir, "part-1.csv")
+	partTwo := filepath.Join(dir, "part-2.csv")
+
+	if err := os.WriteFile(partOne, []byte("timestamp,open\n2024-01-02T00:00:00Z,1\n2024-01-02T00:02:00Z,2\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile returned error: %v", err)
+	}
+	if err := os.WriteFile(partTwo, []byte("timestamp,open\n2024-01-02T00:03:00Z,3\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile returned error: %v", err)
+	}
+
+	indexes, err := detectManifestGapPartIndexes(checkpoint.Manifest{
+		PartsDir: dir,
+		Parts: []checkpoint.ManifestPart{
+			{ID: "part-1", File: filepath.Base(partOne)},
+			{ID: "part-2", File: filepath.Base(partTwo)},
+		},
+	}, time.Minute)
+	if err != nil {
+		t.Fatalf("detectManifestGapPartIndexes returned error: %v", err)
+	}
+	if len(indexes) != 1 || indexes[0] != 0 {
+		t.Fatalf("unexpected gap part indexes: %v", indexes)
 	}
 }
 

@@ -50,7 +50,7 @@ func TestPartitionedDownloadReassemblesTamperedFinalOutput(t *testing.T) {
 		"--partition", "auto",
 		"--checkpoint-manifest", manifestPath,
 	)
-	if !strings.Contains(output, "wrote 6 bars") {
+	if !strings.Contains(output, "wrote 7 bars") {
 		t.Fatalf("unexpected output: %s", output)
 	}
 
