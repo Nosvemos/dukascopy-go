@@ -79,6 +79,31 @@ func TestEnvironmentAndFormattingHelpers(t *testing.T) {
 	}
 }
 
+func TestLiveUpperInclusive(t *testing.T) {
+	base := time.Date(2024, 1, 3, 14, 37, 45, 0, time.UTC)
+	testCases := []struct {
+		granularity dukascopy.Granularity
+		want        time.Time
+	}{
+		{granularity: dukascopy.GranularityM1, want: time.Date(2024, 1, 3, 14, 36, 0, 0, time.UTC)},
+		{granularity: dukascopy.GranularityM5, want: time.Date(2024, 1, 3, 14, 30, 0, 0, time.UTC)},
+		{granularity: dukascopy.GranularityH1, want: time.Date(2024, 1, 3, 13, 0, 0, 0, time.UTC)},
+		{granularity: dukascopy.GranularityD1, want: time.Date(2024, 1, 2, 0, 0, 0, 0, time.UTC)},
+		{granularity: dukascopy.GranularityW1, want: time.Date(2023, 12, 25, 0, 0, 0, 0, time.UTC)},
+		{granularity: dukascopy.GranularityMN1, want: time.Date(2023, 12, 1, 0, 0, 0, 0, time.UTC)},
+	}
+
+	for _, testCase := range testCases {
+		got, err := liveUpperInclusive(testCase.granularity, base)
+		if err != nil {
+			t.Fatalf("liveUpperInclusive(%s) returned error: %v", testCase.granularity, err)
+		}
+		if !got.Equal(testCase.want) {
+			t.Fatalf("liveUpperInclusive(%s) = %s, want %s", testCase.granularity, got, testCase.want)
+		}
+	}
+}
+
 func TestPrepareResumeAndWriteHelpers(t *testing.T) {
 	dir := t.TempDir()
 	outputPath := filepath.Join(dir, "bars.csv")

@@ -206,6 +206,13 @@ func WriteBarsToWriter(w io.Writer, instrument dukascopy.Instrument, columns []s
 	return writeBarsCSV(csvWriter, instrument, columns, primaryBars, bidBars, askBars)
 }
 
+func WriteBarsRowsToWriter(w io.Writer, instrument dukascopy.Instrument, columns []string, primaryBars []dukascopy.Bar, bidBars []dukascopy.Bar, askBars []dukascopy.Bar) error {
+	csvWriter := csvWriterFactory(w)
+	defer csvWriter.Flush()
+
+	return writeBarsCSVRows(csvWriter, instrument, columns, primaryBars, bidBars, askBars, false)
+}
+
 func WriteTicks(outputPath string, instrument dukascopy.Instrument, columns []string, ticks []dukascopy.Tick) error {
 	if isParquetPath(outputPath) {
 		return writeTicksParquet(outputPath, instrument, columns, ticks)
@@ -230,9 +237,22 @@ func WriteTicksToWriter(w io.Writer, instrument dukascopy.Instrument, columns []
 	return writeTicksCSV(csvWriter, instrument, columns, ticks)
 }
 
+func WriteTicksRowsToWriter(w io.Writer, instrument dukascopy.Instrument, columns []string, ticks []dukascopy.Tick) error {
+	csvWriter := csvWriterFactory(w)
+	defer csvWriter.Flush()
+
+	return writeTicksCSVRows(csvWriter, instrument, columns, ticks, false)
+}
+
 func writeBarsCSV(csvWriter csvRecordWriter, instrument dukascopy.Instrument, columns []string, primaryBars []dukascopy.Bar, bidBars []dukascopy.Bar, askBars []dukascopy.Bar) error {
-	if err := csvWriter.Write(columns); err != nil {
-		return err
+	return writeBarsCSVRows(csvWriter, instrument, columns, primaryBars, bidBars, askBars, true)
+}
+
+func writeBarsCSVRows(csvWriter csvRecordWriter, instrument dukascopy.Instrument, columns []string, primaryBars []dukascopy.Bar, bidBars []dukascopy.Bar, askBars []dukascopy.Bar, includeHeader bool) error {
+	if includeHeader {
+		if err := csvWriter.Write(columns); err != nil {
+			return err
+		}
 	}
 
 	if BarColumnsNeedBidAsk(columns) {
@@ -276,8 +296,14 @@ func writeBarsCSV(csvWriter csvRecordWriter, instrument dukascopy.Instrument, co
 }
 
 func writeTicksCSV(csvWriter csvRecordWriter, instrument dukascopy.Instrument, columns []string, ticks []dukascopy.Tick) error {
-	if err := csvWriter.Write(columns); err != nil {
-		return err
+	return writeTicksCSVRows(csvWriter, instrument, columns, ticks, true)
+}
+
+func writeTicksCSVRows(csvWriter csvRecordWriter, instrument dukascopy.Instrument, columns []string, ticks []dukascopy.Tick, includeHeader bool) error {
+	if includeHeader {
+		if err := csvWriter.Write(columns); err != nil {
+			return err
+		}
 	}
 
 	for _, tick := range ticks {
@@ -341,11 +367,10 @@ func AssembleCSVFromParts(outputPath string, partPaths []string, from time.Time,
 		return err
 	}
 
-	target, err := os.Create(tempPath)
+	_, csvWriter, closeWriter, err := createCSVWriter(tempPath)
 	if err != nil {
 		return err
 	}
-	csvWriter := csvWriterFactory(target)
 	headerWritten := false
 	var header []string
 	timestampIndex := -1
@@ -355,7 +380,7 @@ func AssembleCSVFromParts(outputPath string, partPaths []string, from time.Time,
 	for _, partPath := range partPaths {
 		file, err := os.Open(partPath)
 		if err != nil {
-			target.Close()
+			closeWriter()
 			return err
 		}
 
@@ -366,7 +391,7 @@ func AssembleCSVFromParts(outputPath string, partPaths []string, from time.Time,
 			if errors.Is(err, io.EOF) {
 				continue
 			}
-			target.Close()
+			closeWriter()
 			return err
 		}
 
@@ -375,18 +400,18 @@ func AssembleCSVFromParts(outputPath string, partPaths []string, from time.Time,
 			timestampIndex = indexOfColumn(header, "timestamp")
 			if timestampIndex < 0 {
 				file.Close()
-				target.Close()
+				closeWriter()
 				return fmt.Errorf("partition file %s does not contain a timestamp column", partPath)
 			}
 			if err := csvWriter.Write(header); err != nil {
 				file.Close()
-				target.Close()
+				closeWriter()
 				return err
 			}
 			headerWritten = true
 		} else if !HeadersMatch(header, partHeader) {
 			file.Close()
-			target.Close()
+			closeWriter()
 			return fmt.Errorf("partition file %s header does not match the assembled CSV header", partPath)
 		}
 
@@ -397,7 +422,7 @@ func AssembleCSVFromParts(outputPath string, partPaths []string, from time.Time,
 			}
 			if readErr != nil {
 				file.Close()
-				target.Close()
+				closeWriter()
 				return readErr
 			}
 			if len(record) == 0 {
@@ -405,14 +430,14 @@ func AssembleCSVFromParts(outputPath string, partPaths []string, from time.Time,
 			}
 			if timestampIndex >= len(record) {
 				file.Close()
-				target.Close()
+				closeWriter()
 				return fmt.Errorf("partition file %s contains a malformed row", partPath)
 			}
 
 			timestamp, err := time.Parse(timestampLayout, record[timestampIndex])
 			if err != nil {
 				file.Close()
-				target.Close()
+				closeWriter()
 				return fmt.Errorf("parse partition timestamp %q: %w", record[timestampIndex], err)
 			}
 			timestamp = timestamp.UTC()
@@ -424,7 +449,7 @@ func AssembleCSVFromParts(outputPath string, partPaths []string, from time.Time,
 			if currentTimestamp == lastTimestamp {
 				if !recordsEqual(record, lastRecord) {
 					file.Close()
-					target.Close()
+					closeWriter()
 					return fmt.Errorf("conflicting duplicate timestamp %s while assembling %s", currentTimestamp, outputPath)
 				}
 				continue
@@ -432,7 +457,7 @@ func AssembleCSVFromParts(outputPath string, partPaths []string, from time.Time,
 
 			if err := csvWriter.Write(record); err != nil {
 				file.Close()
-				target.Close()
+				closeWriter()
 				return err
 			}
 			lastTimestamp = currentTimestamp
@@ -444,10 +469,10 @@ func AssembleCSVFromParts(outputPath string, partPaths []string, from time.Time,
 
 	csvWriter.Flush()
 	if err := csvWriter.Error(); err != nil {
-		target.Close()
+		closeWriter()
 		return err
 	}
-	if err := target.Close(); err != nil {
+	if err := closeWriter(); err != nil {
 		return err
 	}
 
@@ -536,6 +561,75 @@ func ExtractCSVRange(sourcePath string, outputPath string, from time.Time, to ti
 	}
 
 	return replaceFile(tempPath, outputPath)
+}
+
+func StreamCSVRowsAfter(path string, w io.Writer, after time.Time, includeHeader bool) (int, time.Time, error) {
+	if isParquetPath(path) {
+		return 0, time.Time{}, fmt.Errorf("streaming parquet rows to writer is not supported")
+	}
+
+	_, csvReader, closeReader, err := openCSVReader(path)
+	if err != nil {
+		return 0, time.Time{}, err
+	}
+	defer closeReader()
+
+	header, err := csvReader.Read()
+	if err != nil {
+		return 0, time.Time{}, err
+	}
+
+	timestampIndex := indexOfColumn(header, "timestamp")
+	if timestampIndex < 0 {
+		return 0, time.Time{}, fmt.Errorf("source CSV %s does not contain a timestamp column", path)
+	}
+
+	csvWriter := csvWriterFactory(w)
+	defer csvWriter.Flush()
+
+	if includeHeader {
+		if err := csvWriter.Write(header); err != nil {
+			return 0, time.Time{}, err
+		}
+	}
+
+	rows := 0
+	lastTimestamp := after
+	for {
+		record, readErr := csvReader.Read()
+		if errors.Is(readErr, io.EOF) {
+			break
+		}
+		if readErr != nil {
+			return 0, time.Time{}, readErr
+		}
+		if len(record) == 0 {
+			continue
+		}
+		if timestampIndex >= len(record) {
+			return 0, time.Time{}, fmt.Errorf("source CSV %s contains a malformed row", path)
+		}
+
+		timestamp, err := time.Parse(timestampLayout, record[timestampIndex])
+		if err != nil {
+			return 0, time.Time{}, fmt.Errorf("parse source CSV timestamp %q: %w", record[timestampIndex], err)
+		}
+		timestamp = timestamp.UTC()
+		if !after.IsZero() && (!timestamp.After(after)) {
+			continue
+		}
+
+		if err := csvWriter.Write(record); err != nil {
+			return 0, time.Time{}, err
+		}
+		rows++
+		lastTimestamp = timestamp
+	}
+
+	if err := csvWriter.Error(); err != nil {
+		return 0, time.Time{}, err
+	}
+	return rows, lastTimestamp, nil
 }
 
 func AuditCSV(path string) (FileAudit, error) {
@@ -707,13 +801,12 @@ func ColumnsContainTimestamp(columns []string) bool {
 }
 
 func InspectExistingCSV(outputPath string) (ResumeState, error) {
-	file, err := os.Open(outputPath)
+	_, reader, closeReader, err := openCSVReader(outputPath)
 	if err != nil {
 		return ResumeState{}, err
 	}
-	defer file.Close()
+	defer closeReader()
 
-	reader := csvReaderFactory(file)
 	header, err := reader.Read()
 	if errors.Is(err, io.EOF) {
 		return ResumeState{Exists: true}, nil
@@ -778,13 +871,12 @@ func HeadersMatch(expected []string, actual []string) bool {
 }
 
 func MergeResumeCSV(existingPath string, tempPath string, duplicateTail []string) (int, error) {
-	file, err := os.Open(tempPath)
+	_, reader, closeReader, err := openCSVReader(tempPath)
 	if err != nil {
 		return 0, err
 	}
-	defer file.Close()
+	defer closeReader()
 
-	reader := csvReaderFactory(file)
 	if _, err := reader.Read(); err != nil {
 		if errors.Is(err, io.EOF) {
 			return 0, nil
@@ -792,14 +884,11 @@ func MergeResumeCSV(existingPath string, tempPath string, duplicateTail []string
 		return 0, err
 	}
 
-	target, err := os.OpenFile(existingPath, os.O_APPEND|os.O_WRONLY, 0)
+	_, writer, closeWriter, err := openAppendCSVWriter(existingPath)
 	if err != nil {
 		return 0, err
 	}
-	defer target.Close()
-
-	writer := csvWriterFactory(target)
-	defer writer.Flush()
+	defer closeWriter()
 
 	foundDuplicateTail := duplicateTail == nil
 	foundAnyRows := false
@@ -840,6 +929,43 @@ func MergeResumeCSV(existingPath string, tempPath string, duplicateTail []string
 	}
 
 	return appended, writer.Error()
+}
+
+func openAppendCSVWriter(path string) (*os.File, csvRecordWriter, func() error, error) {
+	file, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
+	if isGzipPath(path) {
+		gzipWriter := gzip.NewWriter(file)
+		writer := csvWriterFactory(gzipWriter)
+		closeWriter := func() error {
+			writer.Flush()
+			if err := writer.Error(); err != nil {
+				gzipWriter.Close()
+				file.Close()
+				return err
+			}
+			if err := gzipWriter.Close(); err != nil {
+				file.Close()
+				return err
+			}
+			return file.Close()
+		}
+		return file, writer, closeWriter, nil
+	}
+
+	writer := csvWriterFactory(file)
+	closeWriter := func() error {
+		writer.Flush()
+		if err := writer.Error(); err != nil {
+			file.Close()
+			return err
+		}
+		return file.Close()
+	}
+	return file, writer, closeWriter, nil
 }
 
 type combinedBarRow struct {

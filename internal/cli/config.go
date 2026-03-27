@@ -26,6 +26,8 @@ type downloadDefaultsConfig struct {
 	Simple             *bool  `json:"simple"`
 	Full               *bool  `json:"full"`
 	CustomColumns      string `json:"custom_columns"`
+	Live               *bool  `json:"live"`
+	PollInterval       string `json:"poll_interval"`
 	Retries            *int   `json:"retries"`
 	RetryBackoff       string `json:"retry_backoff"`
 	RateLimit          string `json:"rate_limit"`
@@ -131,6 +133,8 @@ func applyDownloadConfigDefaults(
 	simpleOutput *bool,
 	fullOutput *bool,
 	customColumns *string,
+	live *bool,
+	pollInterval *time.Duration,
 	retries *int,
 	retryBackoff *time.Duration,
 	rateLimit *time.Duration,
@@ -160,6 +164,16 @@ func applyDownloadConfigDefaults(
 	}
 	if !flagWasSet(fs, "custom-columns") && strings.TrimSpace(config.CustomColumns) != "" {
 		*customColumns = strings.TrimSpace(config.CustomColumns)
+	}
+	if !flagWasSet(fs, "live") && config.Live != nil {
+		*live = *config.Live
+	}
+	if !flagWasSet(fs, "poll-interval") && strings.TrimSpace(config.PollInterval) != "" {
+		value, err := time.ParseDuration(strings.TrimSpace(config.PollInterval))
+		if err != nil {
+			return fmt.Errorf("parse config download.poll_interval: %w", err)
+		}
+		*pollInterval = value
 	}
 	if !flagWasSet(fs, "retries") && config.Retries != nil {
 		*retries = *config.Retries
@@ -208,6 +222,8 @@ func configExample() string {
   "download": {
     "timeframe": "m1",
     "simple": true,
+    "live": false,
+    "poll_interval": "5s",
     "retries": 5,
     "retry_backoff": "750ms",
     "rate_limit": "150ms",

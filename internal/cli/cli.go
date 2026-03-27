@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
 	"time"
@@ -112,6 +113,7 @@ examples:
   dukascopy-go download --symbol xauusd --timeframe m1 --from 2024-01-02T00:00:00Z --to 2024-01-02T01:00:00Z --output ./data/xauusd-custom.csv --custom-columns timestamp,bid_open,ask_open,volume
   dukascopy-go download --symbol xauusd --timeframe m1 --from 2024-01-02T00:00:00Z --to 2024-01-02T00:03:00Z --output - --simple
   dukascopy-go download --symbol xauusd --timeframe m1 --from 2024-01-02T00:00:00Z --to 2024-01-02T06:00:00Z --output ./data/xauusd.csv --simple --resume --retries 5
+  dukascopy-go download --symbol xauusd --timeframe m1 --from 2024-01-02T00:00:00Z --output ./data/xauusd-live.csv --simple --live --poll-interval 5s
   dukascopy-go download --symbol xauusd --timeframe m1 --from 2024-01-02T00:00:00Z --to 2024-01-02T06:00:00Z --output ./data/xauusd.csv --simple --rate-limit 150ms
   dukascopy-go download --symbol xauusd --timeframe m1 --from 2024-01-01T00:00:00Z --to 2024-02-01T00:00:00Z --output ./data/xauusd.csv --simple --partition auto --parallelism 4
 `)
@@ -177,6 +179,8 @@ func runDownload(args []string, stdout io.Writer, stderr io.Writer) error {
 	fromValue := fs.String("from", "", "inclusive RFC3339 start timestamp")
 	toValue := fs.String("to", "", "inclusive RFC3339 end timestamp")
 	outputPath := fs.String("output", "", "target CSV path")
+	live := fs.Bool("live", false, "keep polling and append newly completed rows until interrupted")
+	pollInterval := fs.Duration("poll-interval", 5*time.Second, "delay between live polling cycles such as 5s or 1m")
 	retries := fs.Int("retries", 3, "retry count for transient HTTP errors")
 	retryBackoff := fs.Duration("retry-backoff", 500*time.Millisecond, "base retry backoff duration such as 500ms or 2s")
 	rateLimit := fs.Duration("rate-limit", 0, "minimum delay between HTTP requests such as 100ms or 1s")
@@ -197,6 +201,8 @@ func runDownload(args []string, stdout io.Writer, stderr io.Writer) error {
 		simpleOutput,
 		fullOutput,
 		customColumns,
+		live,
+		pollInterval,
 		retries,
 		retryBackoff,
 		rateLimit,
@@ -216,11 +222,14 @@ func runDownload(args []string, stdout io.Writer, stderr io.Writer) error {
 	if strings.TrimSpace(*fromValue) == "" {
 		return errors.New("--from is required")
 	}
-	if strings.TrimSpace(*toValue) == "" {
+	if !*live && strings.TrimSpace(*toValue) == "" {
 		return errors.New("--to is required")
 	}
 	if strings.TrimSpace(*outputPath) == "" {
 		return errors.New("--output is required")
+	}
+	if *live && strings.TrimSpace(*toValue) != "" {
+		return errors.New("--to cannot be combined with --live")
 	}
 
 	from, err := time.Parse(time.RFC3339, *fromValue)
@@ -228,13 +237,19 @@ func runDownload(args []string, stdout io.Writer, stderr io.Writer) error {
 		return fmt.Errorf("--from must be RFC3339: %w", err)
 	}
 
-	to, err := time.Parse(time.RFC3339, *toValue)
-	if err != nil {
-		return fmt.Errorf("--to must be RFC3339: %w", err)
+	to := from
+	if !*live {
+		to, err = time.Parse(time.RFC3339, *toValue)
+		if err != nil {
+			return fmt.Errorf("--to must be RFC3339: %w", err)
+		}
 	}
 
-	if to.Before(from) {
+	if !*live && to.Before(from) {
 		return errors.New("--to must be the same as or later than --from")
+	}
+	if *pollInterval <= 0 {
+		return errors.New("--poll-interval must be greater than 0")
 	}
 	if *retries < 0 {
 		return errors.New("--retries must be 0 or greater")
@@ -260,7 +275,7 @@ func runDownload(args []string, stdout io.Writer, stderr io.Writer) error {
 		timeframeValue = strings.TrimSpace(*granularity)
 	}
 
-	normalizedTimeframe := dukascopy.Granularity(timeframeValue)
+	normalizedTimeframe := dukascopy.NormalizeGranularity(dukascopy.Granularity(timeframeValue))
 	profile := csvout.ProfileSimple
 	if *fullOutput {
 		profile = csvout.ProfileFull
@@ -306,17 +321,26 @@ func runDownload(args []string, stdout io.Writer, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
+	if *live && strings.HasSuffix(strings.ToLower(strings.TrimSpace(*outputPath)), ".parquet") && normalizedPartition == partitionNone {
+		normalizedPartition, err = normalizePartition(partitionAuto, normalizedTimeframe)
+		if err != nil {
+			return err
+		}
+	}
 	outputToStdout := strings.TrimSpace(*outputPath) == "-"
 	if outputToStdout {
 		if *resume {
 			return errors.New("--resume cannot be combined with --output -")
 		}
-		if normalizedPartition != partitionNone {
+		if normalizedPartition != partitionNone && !*live {
 			return errors.New("--partition cannot be combined with --output -")
 		}
 	}
 	if *parallelism > 1 && normalizedPartition == partitionNone {
 		return errors.New("--parallelism greater than 1 requires --partition")
+	}
+	if err := validateLiveOptions(*live, *outputPath, normalizedPartition, *checkpointManifest, barColumns, tickColumns, resultKind); err != nil {
+		return err
 	}
 	if csvout.ColumnsContainTimestamp(barColumns) || csvout.ColumnsContainTimestamp(tickColumns) {
 		if strings.HasSuffix(strings.ToLower(strings.TrimSpace(*outputPath)), ".parquet") && *resume {
@@ -350,6 +374,22 @@ func runDownload(args []string, stdout io.Writer, stderr io.Writer) error {
 	ctx, cancel := newDownloadContext()
 	defer cancel()
 
+	if *live {
+		manifestPath := strings.TrimSpace(*checkpointManifest)
+		if normalizedPartition != partitionNone && manifestPath == "" {
+			if outputToStdout {
+				manifestPath = defaultLiveStdoutManifestPath(*symbol, normalizedTimeframe)
+			} else {
+				manifestPath = checkpoint.DefaultManifestPath(*outputPath)
+			}
+		}
+		storageOutputPath := *outputPath
+		if outputToStdout && normalizedPartition != partitionNone {
+			storageOutputPath = defaultLiveStdoutCachePath(manifestPath)
+		}
+		return runLiveDownload(ctx, client, stdout, progressWriter, *outputPath, storageOutputPath, manifestPath, request, resultKind, barColumns, tickColumns, normalizedPartition, *parallelism, *pollInterval)
+	}
+
 	if normalizedPartition != partitionNone {
 		manifestPath := strings.TrimSpace(*checkpointManifest)
 		if manifestPath == "" {
@@ -367,48 +407,19 @@ func runDownload(args []string, stdout io.Writer, stderr io.Writer) error {
 		return nil
 	}
 
-	result, err := client.Download(ctx, request)
+	appended, err := runSingleDownload(ctx, client, stdout, *outputPath, outputToStdout, resumeState, dedupeRecord, request, resultKind, barColumns, tickColumns)
 	if err != nil {
 		return err
 	}
-
-	if result.Kind == dukascopy.ResultKindTick {
-		if outputToStdout {
-			return csvout.WriteTicksToWriter(stdout, result.Instrument, tickColumns, result.Ticks)
-		}
-		appended, err := writeTickOutput(*outputPath, resumeState, dedupeRecord, result.Instrument, tickColumns, result.Ticks)
-		if err != nil {
-			return err
-		}
-		fmt.Fprintf(stdout, "%swrote%s %d ticks to %s\n", colorize(colorGreen), colorize(colorReset), appended, *outputPath)
-		return nil
-	}
-
-	if csvout.BarColumnsNeedBidAsk(barColumns) {
-		instrument, bidBars, askBars, err := loadBidAskBars(ctx, client, request)
-		if err != nil {
-			return err
-		}
-		if outputToStdout {
-			return csvout.WriteBarsToWriter(stdout, instrument, barColumns, nil, bidBars, askBars)
-		}
-		appended, err := writeBarOutput(*outputPath, resumeState, dedupeRecord, instrument, barColumns, nil, bidBars, askBars)
-		if err != nil {
-			return err
-		}
-		fmt.Fprintf(stdout, "%swrote%s %d bars to %s\n", colorize(colorGreen), colorize(colorReset), appended, *outputPath)
-		return nil
-	}
-
 	if outputToStdout {
-		return csvout.WriteBarsToWriter(stdout, result.Instrument, barColumns, result.Bars, nil, nil)
-	}
-	appended, err := writeBarOutput(*outputPath, resumeState, dedupeRecord, result.Instrument, barColumns, result.Bars, nil, nil)
-	if err != nil {
-		return err
+		return nil
 	}
 
-	fmt.Fprintf(stdout, "%swrote%s %d bars to %s\n", colorize(colorGreen), colorize(colorReset), appended, *outputPath)
+	label := "bars"
+	if resultKind == dukascopy.ResultKindTick {
+		label = "ticks"
+	}
+	fmt.Fprintf(stdout, "%swrote%s %d %s to %s\n", colorize(colorGreen), colorize(colorReset), appended, label, *outputPath)
 	return nil
 }
 
@@ -447,7 +458,49 @@ func readBaseURL() string {
 }
 
 func newDownloadContext() (context.Context, context.CancelFunc) {
-	return context.WithCancel(context.Background())
+	return signal.NotifyContext(context.Background(), os.Interrupt)
+}
+
+func runSingleDownload(
+	ctx context.Context,
+	client *dukascopy.Client,
+	stdout io.Writer,
+	outputPath string,
+	outputToStdout bool,
+	resumeState *csvout.ResumeState,
+	dedupeRecord []string,
+	request dukascopy.DownloadRequest,
+	resultKind dukascopy.ResultKind,
+	barColumns []string,
+	tickColumns []string,
+) (int, error) {
+	result, err := client.Download(ctx, request)
+	if err != nil {
+		return 0, err
+	}
+
+	if result.Kind == dukascopy.ResultKindTick {
+		if outputToStdout {
+			return len(result.Ticks), csvout.WriteTicksToWriter(stdout, result.Instrument, tickColumns, result.Ticks)
+		}
+		return writeTickOutput(outputPath, resumeState, dedupeRecord, result.Instrument, tickColumns, result.Ticks)
+	}
+
+	if csvout.BarColumnsNeedBidAsk(barColumns) {
+		instrument, bidBars, askBars, err := loadBidAskBars(ctx, client, request)
+		if err != nil {
+			return 0, err
+		}
+		if outputToStdout {
+			return len(bidBars), csvout.WriteBarsToWriter(stdout, instrument, barColumns, nil, bidBars, askBars)
+		}
+		return writeBarOutput(outputPath, resumeState, dedupeRecord, instrument, barColumns, nil, bidBars, askBars)
+	}
+
+	if outputToStdout {
+		return len(result.Bars), csvout.WriteBarsToWriter(stdout, result.Instrument, barColumns, result.Bars, nil, nil)
+	}
+	return writeBarOutput(outputPath, resumeState, dedupeRecord, result.Instrument, barColumns, result.Bars, nil, nil)
 }
 
 func inclusiveDownloadEnd(value time.Time) time.Time {

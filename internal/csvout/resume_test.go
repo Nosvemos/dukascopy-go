@@ -58,6 +58,47 @@ func TestMergeResumeCSVAppendsOnlyMissingRows(t *testing.T) {
 	}
 }
 
+func TestInspectExistingCSVAndMergeResumeCSVWithGzip(t *testing.T) {
+	dir := t.TempDir()
+	existingPath := filepath.Join(dir, "existing.csv.gz")
+	tempPath := filepath.Join(dir, "temp.csv.gz")
+
+	writeGzipCSVFixture(t, existingPath, [][]string{
+		{"timestamp", "open"},
+		{"2024-01-02T00:00:00Z", "100.0"},
+		{"2024-01-02T00:01:00Z", "101.0"},
+	})
+	writeGzipCSVFixture(t, tempPath, [][]string{
+		{"timestamp", "open"},
+		{"2024-01-02T00:01:00Z", "101.0"},
+		{"2024-01-02T00:02:00Z", "102.0"},
+	})
+
+	state, err := InspectExistingCSV(existingPath)
+	if err != nil {
+		t.Fatalf("InspectExistingCSV() gzip error = %v", err)
+	}
+	if !state.Exists || !state.HasRows {
+		t.Fatalf("InspectExistingCSV() gzip = %+v, want existing rows", state)
+	}
+
+	appended, err := MergeResumeCSV(existingPath, tempPath, []string{"2024-01-02T00:01:00Z", "101.0"})
+	if err != nil {
+		t.Fatalf("MergeResumeCSV() gzip error = %v", err)
+	}
+	if appended != 1 {
+		t.Fatalf("MergeResumeCSV() gzip appended = %d, want 1", appended)
+	}
+
+	state, err = InspectExistingCSV(existingPath)
+	if err != nil {
+		t.Fatalf("InspectExistingCSV() gzip after merge error = %v", err)
+	}
+	if got := state.LastTime.UTC().Format(timestampLayout); got != "2024-01-02T00:02:00Z" {
+		t.Fatalf("gzip LastTime = %s, want 2024-01-02T00:02:00Z", got)
+	}
+}
+
 func TestAuditCSVReturnsStableRowCountAndHash(t *testing.T) {
 	outputPath := filepath.Join(t.TempDir(), "audit.csv")
 	content := "timestamp,open\n2024-01-02T00:00:00Z,100.0\n2024-01-02T00:01:00Z,101.0\n"
@@ -77,5 +118,22 @@ func TestAuditCSVReturnsStableRowCountAndHash(t *testing.T) {
 	}
 	if audit.SHA256 == "" {
 		t.Fatal("AuditCSV().SHA256 is empty")
+	}
+}
+
+func writeGzipCSVFixture(t *testing.T, path string, records [][]string) {
+	t.Helper()
+
+	_, writer, closeWriter, err := createCSVWriter(path)
+	if err != nil {
+		t.Fatalf("createCSVWriter() error = %v", err)
+	}
+	for _, record := range records {
+		if err := writer.Write(record); err != nil {
+			t.Fatalf("writer.Write() error = %v", err)
+		}
+	}
+	if err := closeWriter(); err != nil {
+		t.Fatalf("closeWriter() error = %v", err)
 	}
 }

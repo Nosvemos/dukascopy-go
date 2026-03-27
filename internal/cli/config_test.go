@@ -56,6 +56,8 @@ func TestApplyDownloadConfigDefaults(t *testing.T) {
 			Simple:             boolPtr(true),
 			Full:               boolPtr(false),
 			CustomColumns:      "timestamp,mid_close",
+			Live:               boolPtr(true),
+			PollInterval:       "7s",
 			Retries:            intPtr(7),
 			RetryBackoff:       "750ms",
 			RateLimit:          "150ms",
@@ -73,6 +75,8 @@ func TestApplyDownloadConfigDefaults(t *testing.T) {
 	simpleOutput := fs.Bool("simple", false, "")
 	fullOutput := fs.Bool("full", true, "")
 	customColumns := fs.String("custom-columns", "", "")
+	live := fs.Bool("live", false, "")
+	pollInterval := fs.Duration("poll-interval", time.Second, "")
 	retries := fs.Int("retries", 1, "")
 	retryBackoff := fs.Duration("retry-backoff", time.Second, "")
 	rateLimit := fs.Duration("rate-limit", time.Second, "")
@@ -94,6 +98,8 @@ func TestApplyDownloadConfigDefaults(t *testing.T) {
 		simpleOutput,
 		fullOutput,
 		customColumns,
+		live,
+		pollInterval,
 		retries,
 		retryBackoff,
 		rateLimit,
@@ -122,6 +128,12 @@ func TestApplyDownloadConfigDefaults(t *testing.T) {
 	}
 	if *customColumns != "timestamp,mid_close" {
 		t.Fatalf("unexpected custom columns: %q", *customColumns)
+	}
+	if !*live {
+		t.Fatal("expected live default to be applied")
+	}
+	if *pollInterval != 7*time.Second {
+		t.Fatalf("unexpected poll interval: %s", *pollInterval)
 	}
 	if *retries != 9 {
 		t.Fatalf("expected explicit retries to be preserved, got %d", *retries)
@@ -170,6 +182,8 @@ func TestApplyDownloadConfigDefaultsRejectsInvalidDuration(t *testing.T) {
 	simpleOutput := fs.Bool("simple", false, "")
 	fullOutput := fs.Bool("full", false, "")
 	customColumns := fs.String("custom-columns", "", "")
+	live := fs.Bool("live", false, "")
+	pollInterval := fs.Duration("poll-interval", time.Second, "")
 	retries := fs.Int("retries", 1, "")
 	retryBackoff := fs.Duration("retry-backoff", time.Second, "")
 	rateLimit := fs.Duration("rate-limit", time.Second, "")
@@ -187,6 +201,8 @@ func TestApplyDownloadConfigDefaultsRejectsInvalidDuration(t *testing.T) {
 		simpleOutput,
 		fullOutput,
 		customColumns,
+		live,
+		pollInterval,
 		retries,
 		retryBackoff,
 		rateLimit,

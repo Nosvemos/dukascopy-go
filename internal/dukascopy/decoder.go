@@ -136,6 +136,10 @@ func normalizeGranularity(value Granularity) Granularity {
 	}
 }
 
+func NormalizeGranularity(value Granularity) Granularity {
+	return normalizeGranularity(value)
+}
+
 func normalizeSide(side PriceSide) (PriceSide, error) {
 	switch strings.ToUpper(strings.TrimSpace(string(side))) {
 	case "BID":

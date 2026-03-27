@@ -36,6 +36,7 @@ It supports flexible symbol input like `xauusd`, `eur/usd`, and `BTC-USD`, and w
 - Use compact, full, or custom column layouts with `--simple`, `--full`, and `--custom-columns`
 - Stream CSV directly to `stdout` with `--output -`
 - Resume interrupted CSV downloads without duplicating the final saved row
+- Keep CSV or CSV.GZ outputs continuously updated with `--live`
 - Split long ranges into durable partitions with `--partition`
 - Run partition workers in parallel with `--parallelism`
 - Reassemble final outputs from completed partition files after interruptions
@@ -99,6 +100,19 @@ dukascopy-go download \
   --partition auto \
   --parallelism 4 \
   --progress
+```
+
+Keep a 1-minute CSV updated in live mode:
+
+```bash
+dukascopy-go download \
+  --symbol xauusd \
+  --timeframe m1 \
+  --from 2024-01-02T00:00:00Z \
+  --output ./data/xauusd-live.csv \
+  --simple \
+  --live \
+  --poll-interval 5s
 ```
 
 Inspect the finished dataset:
@@ -203,6 +217,84 @@ dukascopy-go download \
   --simple \
   --resume
 ```
+
+Keep appending newly completed rows to a plain CSV until you stop the process:
+
+```bash
+dukascopy-go download \
+  --symbol xauusd \
+  --timeframe m1 \
+  --from 2024-01-02T00:00:00Z \
+  --output ./data/xauusd-live.csv \
+  --simple \
+  --live \
+  --poll-interval 5s
+```
+
+Keep a partitioned live download with a custom checkpoint manifest and compressed final output:
+
+```bash
+dukascopy-go download \
+  --symbol xauusd \
+  --timeframe h1 \
+  --from 2024-01-01T00:00:00Z \
+  --output ./data/xauusd-live.csv.gz \
+  --simple \
+  --live \
+  --partition auto \
+  --checkpoint-manifest ./data/xauusd-live.manifest.json \
+  --poll-interval 10s
+```
+
+Stream live CSV rows directly to stdout:
+
+```bash
+dukascopy-go download \
+  --symbol xauusd \
+  --timeframe m1 \
+  --from 2024-01-02T00:00:00Z \
+  --output - \
+  --simple \
+  --live \
+  --poll-interval 5s
+```
+
+Stream live CSV rows to stdout while keeping checkpointed partition files on disk:
+
+```bash
+dukascopy-go download \
+  --symbol xauusd \
+  --timeframe h1 \
+  --from 2024-01-01T00:00:00Z \
+  --output - \
+  --simple \
+  --live \
+  --partition auto \
+  --checkpoint-manifest ./data/xauusd-live-stream.manifest.json \
+  --poll-interval 10s
+```
+
+Use live parquet output without specifying a partition mode:
+
+```bash
+dukascopy-go download \
+  --symbol xauusd \
+  --timeframe m1 \
+  --from 2024-01-02T00:00:00Z \
+  --output ./data/xauusd-live.parquet \
+  --simple \
+  --live \
+  --poll-interval 5s
+```
+
+`--live` notes:
+
+- it appends only newly completed intervals in non-partitioned file mode
+- with `--partition`, or with parquet output, it keeps extending the checkpoint manifest and rebuilds the final output from partition files
+- it supports `.csv`, `.csv.gz`, `.parquet`, and `--output -`
+- parquet live output auto-enables `--partition auto` when you do not pass a partition mode yourself
+- `--output -` stays as pure CSV stream; with partition/checkpoint enabled it uses a checkpoint-backed cache file internally so restarted processes keep streaming only new rows
+- it cannot be combined with `--to`
 
 Verify a manifest without downloading anything:
 

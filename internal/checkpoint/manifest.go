@@ -40,6 +40,7 @@ type Manifest struct {
 	UpdatedAt   time.Time       `json:"updated_at"`
 	Completed   bool            `json:"completed"`
 	FinalOutput *ManifestOutput `json:"final_output,omitempty"`
+	LiveStream  *LiveStream     `json:"live_stream,omitempty"`
 	Summary     ManifestSummary `json:"summary"`
 	Parts       []ManifestPart  `json:"parts"`
 }
@@ -62,6 +63,12 @@ type ManifestOutput struct {
 	Bytes     int64     `json:"bytes"`
 	SHA256    string    `json:"sha256"`
 	UpdatedAt time.Time `json:"updated_at"`
+}
+
+type LiveStream struct {
+	Rows          int       `json:"rows"`
+	LastTimestamp time.Time `json:"last_timestamp,omitempty"`
+	UpdatedAt     time.Time `json:"updated_at"`
 }
 
 type ManifestSummary struct {
