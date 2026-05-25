@@ -17,6 +17,8 @@ import (
 	"github.com/Nosvemos/dukascopy-go/internal/checkpoint"
 	"github.com/Nosvemos/dukascopy-go/internal/csvout"
 	"github.com/Nosvemos/dukascopy-go/internal/dukascopy"
+
+	_ "time/tzdata"
 )
 
 const (
@@ -191,6 +193,12 @@ func runDownload(args []string, stdout io.Writer, stderr io.Writer) error {
 	parallelism := fs.Int("parallelism", 1, "partition worker count")
 	checkpointManifest := fs.String("checkpoint-manifest", "", "optional checkpoint manifest path for partitioned downloads")
 	baseURL := fs.String("base-url", readBaseURL(), "Dukascopy API base URL")
+	timezone := fs.String("timezone", "UTC", "target output timezone location (e.g. Europe/London, EET, EST)")
+	timestampFormat := fs.String("timestamp-format", "", "custom timestamp layout format")
+	csvDelimiter := fs.String("csv-delimiter", ",", "custom CSV separator character")
+	noHeader := fs.Bool("no-header", false, "suppress header row in output CSV files")
+	preset := fs.String("preset", "", "backtest output preset profile (mt4, mt5, backtrader, ninjatrader)")
+
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -215,6 +223,80 @@ func runDownload(args []string, stdout io.Writer, stderr io.Writer) error {
 	); err != nil {
 		return err
 	}
+
+	if *preset != "" {
+		switch strings.ToLower(strings.TrimSpace(*preset)) {
+		case "mt4":
+			*noHeader = true
+			if *timestampFormat == "" {
+				*timestampFormat = "2006.01.02 15:04"
+			}
+			*simpleOutput = true
+		case "mt5":
+			*noHeader = true
+			if *timestampFormat == "" {
+				*timestampFormat = "2006.01.02 15:04:05"
+			}
+			*simpleOutput = true
+		case "backtrader":
+			if *timestampFormat == "" {
+				*timestampFormat = "2006-01-02 15:04:05"
+			}
+			*simpleOutput = true
+		case "ninjatrader":
+			*noHeader = true
+			*csvDelimiter = ";"
+			if *timestampFormat == "" {
+				*timestampFormat = "20060102 150405"
+			}
+			*simpleOutput = true
+		default:
+			return fmt.Errorf("unknown preset %q (supported: mt4, mt5, backtrader, ninjatrader)", *preset)
+		}
+	}
+
+	var loc *time.Location
+	if strings.ToLower(strings.TrimSpace(*timezone)) == "eet" {
+		var err error
+		loc, err = time.LoadLocation("Europe/Athens")
+		if err != nil {
+			loc = time.FixedZone("EET", 2*60*60)
+		}
+	} else if strings.ToLower(strings.TrimSpace(*timezone)) == "est" {
+		var err error
+		loc, err = time.LoadLocation("America/New_York")
+		if err != nil {
+			loc = time.FixedZone("EST", -5*60*60)
+		}
+	} else if strings.TrimSpace(*timezone) != "" && strings.ToUpper(strings.TrimSpace(*timezone)) != "UTC" {
+		var err error
+		loc, err = time.LoadLocation(strings.TrimSpace(*timezone))
+		if err != nil {
+			return fmt.Errorf("invalid timezone %q: %w", *timezone, err)
+		}
+	} else {
+		loc = time.UTC
+	}
+
+	csvout.OutputLocation = loc
+
+	if *timestampFormat != "" {
+		csvout.OutputTimestampFormat = *timestampFormat
+	} else {
+		csvout.OutputTimestampFormat = time.RFC3339Nano
+	}
+
+	if *csvDelimiter != "" {
+		runes := []rune(*csvDelimiter)
+		if len(runes) != 1 {
+			return fmt.Errorf("--csv-delimiter must be a single character, got %q", *csvDelimiter)
+		}
+		csvout.CSVDelimiter = runes[0]
+	} else {
+		csvout.CSVDelimiter = ','
+	}
+
+	csvout.HideCSVHeader = *noHeader
 
 	if strings.TrimSpace(*symbol) == "" {
 		return errors.New("--symbol is required")

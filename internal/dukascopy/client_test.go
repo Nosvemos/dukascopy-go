@@ -91,3 +91,48 @@ func TestWaitForRateLimitHonorsContextCancellation(t *testing.T) {
 		t.Fatal("expected context cancellation error")
 	}
 }
+
+func TestIsCryptoSymbol(t *testing.T) {
+	testCases := []struct {
+		input string
+		want  bool
+	}{
+		{input: "BTCUSD", want: true},
+		{input: "btc/usd", want: true},
+		{input: "ETH-USD", want: true},
+		{input: "EURUSD", want: false},
+		{input: "GBP-USD", want: false},
+		{input: "XAUUSD", want: false},
+		{input: "", want: false},
+	}
+	for _, tc := range testCases {
+		if got := IsCryptoSymbol(tc.input); got != tc.want {
+			t.Errorf("IsCryptoSymbol(%q) = %v, want %v", tc.input, got, tc.want)
+		}
+	}
+}
+
+func TestIsMarketClosed(t *testing.T) {
+	if IsMarketClosed("BTCUSD", time.Date(2026, 5, 23, 12, 0, 0, 0, time.UTC)) {
+		t.Fatal("expected crypto to be always open")
+	}
+
+	testCases := []struct {
+		time time.Time
+		want bool
+	}{
+		{time: time.Date(2026, 5, 22, 21, 59, 0, 0, time.UTC), want: false},
+		{time: time.Date(2026, 5, 22, 22, 0, 0, 0, time.UTC), want: true},
+		{time: time.Date(2026, 5, 23, 12, 0, 0, 0, time.UTC), want: true},
+		{time: time.Date(2026, 5, 24, 21, 59, 0, 0, time.UTC), want: true},
+		{time: time.Date(2026, 5, 24, 22, 0, 0, 0, time.UTC), want: false},
+		{time: time.Date(2026, 5, 25, 10, 0, 0, 0, time.UTC), want: false},
+	}
+
+	for _, tc := range testCases {
+		if got := IsMarketClosed("EURUSD", tc.time); got != tc.want {
+			t.Errorf("IsMarketClosed(EURUSD, %s) = %v, want %v", tc.time.Format(time.RFC3339), got, tc.want)
+		}
+	}
+}
+

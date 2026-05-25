@@ -557,7 +557,19 @@ Inspect version metadata in any built binary:
 dukascopy-go --version
 ```
 
+## Roadmap
+
+We are continuously working on transforming `dukascopy-go` into the most complete, blazing-fast, and evrensel historical and live market data tool on GitHub. Here is our upcoming open-source feature pipeline:
+
+* **Market Calendar Skipping (Weekend Skip):** Smart client-side detection to skip weekends and holidays at the request level, boosting downloads by **30-40%** and preventing sun-side rate limiting.
+* **Universal Timezone Conversion:** A `--timezone` parameter to dynamically shift raw UTC values into your target timezone (including DST transitions) during export.
+* **Universal Platform Presets:** Standardized schemas and formatting presets (`--preset mt4`, `--preset mt5`, `--preset backtrader`, `--preset ninjatrader`) with customized delimiters and datetime styles.
+* **Proxy Pool & Rotation Manager:** Support SOCKS5/HTTP proxy files (`--proxy-file`) to rotate requests, bypass IP bans, and successfully query years of tick data.
+* **Local Catalog Caching:** Storing the jetta enstruments catalog locally (`~/.dukascopy/instruments_cache.json`) for 24 hours to reduce startup times to zero.
+* **Duplicate & Out-of-Order Line Pruner:** In-place repair of existing files with a dedicated utility: `dukascopy-go manifest clean-duplicates`.
+
 ## Development
+
 
 Run all tests:
 

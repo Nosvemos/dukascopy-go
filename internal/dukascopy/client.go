@@ -275,6 +275,9 @@ func (c *Client) downloadMinuteBars(ctx context.Context, instrument Instrument, 
 	var all []Bar
 	days := make([]time.Time, 0)
 	for current := midnightUTC(from); current.Before(to); current = current.AddDate(0, 0, 1) {
+		if !IsCryptoSymbol(instrument.Code) && current.UTC().Weekday() == time.Saturday {
+			continue
+		}
 		days = append(days, current)
 	}
 
@@ -359,6 +362,9 @@ func (c *Client) downloadTicks(ctx context.Context, instrument Instrument, from 
 	var all []Tick
 	hours := make([]time.Time, 0)
 	for current := hourStartUTC(from); current.Before(to); current = current.Add(time.Hour) {
+		if IsMarketClosed(instrument.Code, current) {
+			continue
+		}
 		hours = append(hours, current)
 	}
 
@@ -510,3 +516,42 @@ func cloneInstruments(instruments []Instrument) []Instrument {
 	copy(cloned, instruments)
 	return cloned
 }
+
+func IsCryptoSymbol(symbol string) bool {
+	symbol = strings.ToUpper(strings.TrimSpace(symbol))
+	replacer := strings.NewReplacer("/", "", "-", "", "_", "", " ", "", ".", "")
+	symbol = replacer.Replace(symbol)
+	if symbol == "" {
+		return false
+	}
+	cryptoPrefixes := []string{
+		"BTC", "ETH", "LTC", "XRP", "BCH", "ADA", "DOT", "SOL", "DOGE", "XLM", "LINK", "AVAX", "USDT",
+	}
+	for _, prefix := range cryptoPrefixes {
+		if strings.HasPrefix(symbol, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+func IsMarketClosed(symbol string, t time.Time) bool {
+	if IsCryptoSymbol(symbol) {
+		return false
+	}
+	t = t.UTC()
+	weekday := t.Weekday()
+	hour := t.Hour()
+
+	if weekday == time.Friday {
+		return hour >= 22
+	}
+	if weekday == time.Saturday {
+		return true
+	}
+	if weekday == time.Sunday {
+		return hour < 22
+	}
+	return false
+}
+

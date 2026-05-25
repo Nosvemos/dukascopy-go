@@ -42,8 +42,34 @@ type csvRecordReader interface {
 	Read() ([]string, error)
 }
 
-var csvWriterFactory = func(w io.Writer) csvRecordWriter { return csv.NewWriter(w) }
-var csvReaderFactory = func(r io.Reader) csvRecordReader { return csv.NewReader(r) }
+var OutputLocation *time.Location = time.UTC
+var OutputTimestampFormat string = time.RFC3339Nano
+var CSVDelimiter rune = ','
+var HideCSVHeader bool = false
+
+func formatTime(t time.Time) string {
+	loc := OutputLocation
+	if loc == nil {
+		loc = time.UTC
+	}
+	layout := OutputTimestampFormat
+	if layout == "" {
+		layout = time.RFC3339Nano
+	}
+	return t.In(loc).Format(layout)
+}
+
+var csvWriterFactory = func(w io.Writer) csvRecordWriter {
+	writer := csv.NewWriter(w)
+	writer.Comma = CSVDelimiter
+	return writer
+}
+
+var csvReaderFactory = func(r io.Reader) csvRecordReader {
+	reader := csv.NewReader(r)
+	reader.Comma = CSVDelimiter
+	return reader
+}
 
 type ResumeState struct {
 	Exists     bool
@@ -249,7 +275,7 @@ func writeBarsCSV(csvWriter csvRecordWriter, instrument dukascopy.Instrument, co
 }
 
 func writeBarsCSVRows(csvWriter csvRecordWriter, instrument dukascopy.Instrument, columns []string, primaryBars []dukascopy.Bar, bidBars []dukascopy.Bar, askBars []dukascopy.Bar, includeHeader bool) error {
-	if includeHeader {
+	if includeHeader && !HideCSVHeader {
 		if err := csvWriter.Write(columns); err != nil {
 			return err
 		}
@@ -300,7 +326,7 @@ func writeTicksCSV(csvWriter csvRecordWriter, instrument dukascopy.Instrument, c
 }
 
 func writeTicksCSVRows(csvWriter csvRecordWriter, instrument dukascopy.Instrument, columns []string, ticks []dukascopy.Tick, includeHeader bool) error {
-	if includeHeader {
+	if includeHeader && !HideCSVHeader {
 		if err := csvWriter.Write(columns); err != nil {
 			return err
 		}
@@ -403,10 +429,12 @@ func AssembleCSVFromParts(outputPath string, partPaths []string, from time.Time,
 				closeWriter()
 				return fmt.Errorf("partition file %s does not contain a timestamp column", partPath)
 			}
-			if err := csvWriter.Write(header); err != nil {
-				file.Close()
-				closeWriter()
-				return err
+			if !HideCSVHeader {
+				if err := csvWriter.Write(header); err != nil {
+					file.Close()
+					closeWriter()
+					return err
+				}
 			}
 			headerWritten = true
 		} else if !HeadersMatch(header, partHeader) {
@@ -513,9 +541,11 @@ func ExtractCSVRange(sourcePath string, outputPath string, from time.Time, to ti
 		return err
 	}
 
-	if err := csvWriter.Write(header); err != nil {
-		closeWriter()
-		return err
+	if !HideCSVHeader {
+		if err := csvWriter.Write(header); err != nil {
+			closeWriter()
+			return err
+		}
 	}
 
 	for {
@@ -587,7 +617,7 @@ func StreamCSVRowsAfter(path string, w io.Writer, after time.Time, includeHeader
 	csvWriter := csvWriterFactory(w)
 	defer csvWriter.Flush()
 
-	if includeHeader {
+	if includeHeader && !HideCSVHeader {
 		if err := csvWriter.Write(header); err != nil {
 			return 0, time.Time{}, err
 		}
@@ -997,7 +1027,7 @@ func combineBarRows(bidBars []dukascopy.Bar, askBars []dukascopy.Bar) ([]combine
 func formatPrimaryBarColumn(column string, scale int, bar dukascopy.Bar) (string, error) {
 	switch column {
 	case "timestamp":
-		return bar.Time.UTC().Format(timestampLayout), nil
+		return formatTime(bar.Time), nil
 	case "open":
 		return formatPrice(bar.Open, scale), nil
 	case "high":
@@ -1033,7 +1063,7 @@ func formatBarColumn(column string, scale int, bid dukascopy.Bar, ask dukascopy.
 
 	switch column {
 	case "timestamp":
-		return bid.Time.UTC().Format(timestampLayout), nil
+		return formatTime(bid.Time), nil
 	case "open":
 		return formatMidPrice(midpoint(roundedBidOpen, roundedAskOpen), scale), nil
 	case "high":
@@ -1078,7 +1108,7 @@ func formatBarColumn(column string, scale int, bid dukascopy.Bar, ask dukascopy.
 func formatTickColumn(column string, scale int, tick dukascopy.Tick) (string, error) {
 	switch column {
 	case "timestamp":
-		return tick.Time.UTC().Format(timestampLayout), nil
+		return formatTime(tick.Time), nil
 	case "bid":
 		return formatPrice(tick.Bid, scale), nil
 	case "ask":

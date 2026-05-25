@@ -30,3 +30,7 @@ data/
 
 # release artifacts
 dist/
+
+# documentation
+docs/
+
