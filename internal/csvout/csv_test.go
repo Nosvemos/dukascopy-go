@@ -3,6 +3,7 @@ package csvout
 import (
 	"testing"
 	"time"
+	"path/filepath"
 
 	"github.com/Nosvemos/dukascopy-go/internal/dukascopy"
 )
@@ -89,4 +90,49 @@ func TestCustomDelimiterAndHeaderSuppression(t *testing.T) {
 		t.Errorf("expected open price 1.08500, got %s", mockWriter.records[0][1])
 	}
 }
+
+func TestCleanDuplicates(t *testing.T) {
+	tempPath := filepath.Join(t.TempDir(), "test-cleanup.csv")
+	instrument := dukascopy.Instrument{Code: "EURUSD", PriceScale: 5}
+	columns := []string{"timestamp", "open"}
+
+	bars := []dukascopy.Bar{
+		{Time: time.Date(2026, 5, 25, 12, 0, 0, 0, time.UTC), Open: 1.0850},
+		{Time: time.Date(2026, 5, 25, 11, 0, 0, 0, time.UTC), Open: 1.0840},
+		{Time: time.Date(2026, 5, 25, 12, 0, 0, 0, time.UTC), Open: 1.0850},
+	}
+
+	err := WriteBars(tempPath, instrument, columns, bars, nil, nil)
+	if err != nil {
+		t.Fatalf("failed to write test CSV: %v", err)
+	}
+
+	cleanedCount, err := CleanDuplicates(tempPath)
+	if err != nil {
+		t.Fatalf("CleanDuplicates failed: %v", err)
+	}
+
+	if cleanedCount != 1 {
+		t.Errorf("expected 1 duplicate removed, got %d", cleanedCount)
+	}
+
+	stats, err := InspectCSV(tempPath)
+	if err != nil {
+		t.Fatalf("InspectCSV failed: %v", err)
+	}
+
+	if stats.Rows != 2 {
+		t.Errorf("expected 2 rows after cleanup, got %d", stats.Rows)
+	}
+
+	if stats.DuplicateRows != 0 || stats.DuplicateStamps != 0 || stats.OutOfOrderRows != 0 {
+		t.Errorf("unexpected anomalies remaining: duplicate_rows=%d duplicate_stamps=%d out_of_order=%d",
+			stats.DuplicateRows, stats.DuplicateStamps, stats.OutOfOrderRows)
+	}
+
+	if !stats.FirstTimestamp.Equal(time.Date(2026, 5, 25, 11, 0, 0, 0, time.UTC)) {
+		t.Errorf("expected first timestamp to be 11:00, got %s", stats.FirstTimestamp)
+	}
+}
+
 

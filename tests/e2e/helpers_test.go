@@ -34,7 +34,7 @@ func runCLI(t *testing.T, baseURL string, args ...string) string {
 
 	cmd := exec.Command(builtCLI, args...)
 	cmd.Dir = repoRoot()
-	cmd.Env = append(os.Environ(), "DUKASCOPY_API_BASE_URL="+baseURL, "NO_COLOR=1")
+	cmd.Env = append(os.Environ(), "DUKASCOPY_API_BASE_URL="+baseURL, "NO_COLOR=1", "DUKASCOPY_TEST_ENV=true")
 
 	output, err := cmd.CombinedOutput()
 	if err != nil {
@@ -49,7 +49,7 @@ func runCLIExpectError(t *testing.T, baseURL string, args ...string) string {
 
 	cmd := exec.Command(builtCLI, args...)
 	cmd.Dir = repoRoot()
-	cmd.Env = append(os.Environ(), "DUKASCOPY_API_BASE_URL="+baseURL, "NO_COLOR=1")
+	cmd.Env = append(os.Environ(), "DUKASCOPY_API_BASE_URL="+baseURL, "NO_COLOR=1", "DUKASCOPY_TEST_ENV=true")
 
 	output, err := cmd.CombinedOutput()
 	if err == nil {

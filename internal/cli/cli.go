@@ -198,6 +198,7 @@ func runDownload(args []string, stdout io.Writer, stderr io.Writer) error {
 	csvDelimiter := fs.String("csv-delimiter", ",", "custom CSV separator character")
 	noHeader := fs.Bool("no-header", false, "suppress header row in output CSV files")
 	preset := fs.String("preset", "", "backtest output preset profile (mt4, mt5, backtrader, ninjatrader)")
+	proxyFile := fs.String("proxy-file", "", "optional proxy list file path (HTTP/SOCKS5)")
 
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -445,6 +446,13 @@ func runDownload(args []string, stdout io.Writer, stderr io.Writer) error {
 		WithRetries(*retries).
 		WithBackoff(*retryBackoff).
 		WithRateLimit(*rateLimit)
+
+	if *proxyFile != "" {
+		if err := client.LoadProxies(*proxyFile); err != nil {
+			return fmt.Errorf("failed to load proxy file %s: %w", *proxyFile, err)
+		}
+	}
+
 	progressWriter := stderr
 	if progressEnabled {
 		printer := newProgressPrinter(stderr)

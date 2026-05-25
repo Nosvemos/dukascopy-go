@@ -106,3 +106,58 @@ func TestManifestParseAndBoundaryBranches(t *testing.T) {
 		t.Fatal("expected buildPartitions unsupported mode error")
 	}
 }
+
+func TestCleanDuplicatesCli(t *testing.T) {
+	t.Setenv("NO_COLOR", "1")
+	dir := t.TempDir()
+
+	// 1. Check bad flag returns error
+	if err := runManifestCleanDuplicates([]string{"--bad-flag"}, &bytes.Buffer{}); err == nil {
+		t.Fatal("expected parse error with bad flag")
+	}
+
+	// 2. Check no target file returns error
+	if err := runManifestCleanDuplicates([]string{}, &bytes.Buffer{}); err == nil {
+		t.Fatal("expected validation error with no flags")
+	}
+
+	// 3. Create a clean dataset and verify it reports no duplicates
+	cleanCSV := filepath.Join(dir, "clean.csv")
+	csvData := "timestamp,open,high,low,close,volume\n2024-01-01T00:00:00Z,1.0,1.1,0.9,1.0,10.0\n2024-01-01T00:01:00Z,1.0,1.1,0.9,1.0,10.0\n"
+	if err := os.WriteFile(cleanCSV, []byte(csvData), 0o644); err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+
+	var out bytes.Buffer
+	if err := runManifestCleanDuplicates([]string{"--output", cleanCSV}, &out); err != nil {
+		t.Fatalf("runManifestCleanDuplicates clean failed: %v", err)
+	}
+	if !strings.Contains(out.String(), "no duplicate or out-of-order rows detected") {
+		t.Errorf("unexpected clean CLI output: %s", out.String())
+	}
+
+	// 4. Create a messy dataset with duplicates and verify it cleans them
+	messyCSV := filepath.Join(dir, "messy.csv")
+	messyData := "timestamp,open,high,low,close,volume\n2024-01-01T00:01:00Z,1.0,1.1,0.9,1.0,10.0\n2024-01-01T00:00:00Z,1.0,1.1,0.9,1.0,10.0\n2024-01-01T00:00:00Z,1.0,1.1,0.9,1.0,10.0\n"
+	if err := os.WriteFile(messyCSV, []byte(messyData), 0o644); err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+
+	out.Reset()
+	if err := runManifestCleanDuplicates([]string{"--output", messyCSV}, &out); err != nil {
+		t.Fatalf("runManifestCleanDuplicates messy failed: %v", err)
+	}
+	if !strings.Contains(out.String(), "removing duplicates") || !strings.Contains(out.String(), "successfully removed 1 duplicate/anomaly rows") {
+		t.Errorf("unexpected messy CLI output: %s", out.String())
+	}
+
+	// 5. Test routing from main runManifest entrypoint
+	out.Reset()
+	if err := runManifest([]string{"clean-duplicates", "--output", cleanCSV}, &out); err != nil {
+		t.Fatalf("runManifest clean-duplicates routing failed: %v", err)
+	}
+	if !strings.Contains(out.String(), "no duplicate or out-of-order rows detected") {
+		t.Errorf("unexpected routed CLI output: %s", out.String())
+	}
+}
+

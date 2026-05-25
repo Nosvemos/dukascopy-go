@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"sort"
 
 	"github.com/Nosvemos/dukascopy-go/internal/dukascopy"
 )
@@ -1900,3 +1901,109 @@ func roundToScale(value float64, scale int) float64 {
 	factor := math.Pow10(scale)
 	return math.Round(value*factor) / factor
 }
+
+func CleanDuplicates(path string) (int, error) {
+	if isParquetPath(path) {
+		return cleanParquetDuplicates(path)
+	}
+
+	_, reader, closeReader, err := openCSVReader(path)
+	if err != nil {
+		return 0, err
+	}
+
+	header, err := reader.Read()
+	if err != nil {
+		closeReader()
+		return 0, err
+	}
+
+	timestampIndex := indexOfColumn(header, "timestamp")
+	if timestampIndex < 0 {
+		closeReader()
+		return 0, fmt.Errorf("CSV does not contain a timestamp column")
+	}
+
+	type rowRecord struct {
+		timestamp time.Time
+		record    []string
+	}
+
+	var records []rowRecord
+	seenTimestamps := make(map[string]bool)
+	duplicatesCount := 0
+
+	for {
+		record, readErr := reader.Read()
+		if errors.Is(readErr, io.EOF) {
+			break
+		}
+		if readErr != nil {
+			closeReader()
+			return 0, readErr
+		}
+		if len(record) == 0 {
+			continue
+		}
+
+		t, err := time.Parse(timestampLayout, record[timestampIndex])
+		if err != nil {
+			closeReader()
+			return 0, fmt.Errorf("failed to parse timestamp %q: %w", record[timestampIndex], err)
+		}
+		t = t.UTC()
+
+		stampKey := t.Format(timestampLayout)
+		if seenTimestamps[stampKey] {
+			duplicatesCount++
+			continue
+		}
+		seenTimestamps[stampKey] = true
+		records = append(records, rowRecord{timestamp: t, record: record})
+	}
+	closeReader()
+
+	// Sort records chronologically to fix out-of-order rows
+	sort.SliceStable(records, func(i, j int) bool {
+		return records[i].timestamp.Before(records[j].timestamp)
+	})
+
+	tempPath, err := createAtomicTempPath(path)
+	if err != nil {
+		return 0, err
+	}
+	defer os.Remove(tempPath)
+
+	_, csvWriter, closeWriter, err := createCSVWriter(tempPath)
+	if err != nil {
+		return 0, err
+	}
+
+	if err := csvWriter.Write(header); err != nil {
+		closeWriter()
+		return 0, err
+	}
+
+	for _, rec := range records {
+		if err := csvWriter.Write(rec.record); err != nil {
+			closeWriter()
+			return 0, err
+		}
+	}
+
+	csvWriter.Flush()
+	if err := csvWriter.Error(); err != nil {
+		closeWriter()
+		return 0, err
+	}
+	if err := closeWriter(); err != nil {
+		return 0, err
+	}
+
+	if err := replaceFile(tempPath, path); err != nil {
+		return 0, err
+	}
+
+	return duplicatesCount, nil
+}
+

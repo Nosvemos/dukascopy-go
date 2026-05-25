@@ -73,6 +73,7 @@ type progressTUIModel struct {
 	throughputStartedAt time.Time
 	throughputBaseParts int
 	throughputBaseRows  int
+	throughputBaseBytes int64
 	spinner             spinner.Model
 	statusText          string
 	partitionTotal      int
@@ -355,6 +356,7 @@ func (m *progressTUIModel) startThroughputWindow() {
 	m.throughputStartedAt = time.Now()
 	m.throughputBaseParts = m.partitionCompleted
 	m.throughputBaseRows = m.completedRows
+	m.throughputBaseBytes = m.completedBytes
 }
 
 func (m *progressTUIModel) pushLog(line string) {
@@ -405,12 +407,14 @@ func (m progressTUIModel) chunkSummary() string {
 }
 
 func (m progressTUIModel) speedText() string {
-	elapsed, rowDelta, partDelta := m.throughputSnapshot()
+	elapsed, rowDelta, partDelta, byteDelta := m.throughputSnapshot()
 	if elapsed <= 0 {
 		return ""
 	}
 
 	switch {
+	case byteDelta > 0:
+		return fmt.Sprintf("%s/s (%.0f rows/s)", formatByteCount(byteDelta), float64(rowDelta)/elapsed.Seconds())
 	case rowDelta > 0:
 		return fmt.Sprintf("%.0f rows/s", float64(rowDelta)/elapsed.Seconds())
 	case partDelta > 0:
@@ -421,7 +425,7 @@ func (m progressTUIModel) speedText() string {
 }
 
 func (m progressTUIModel) etaText() string {
-	elapsed, _, partDelta := m.throughputSnapshot()
+	elapsed, _, partDelta, _ := m.throughputSnapshot()
 	if elapsed <= 0 {
 		return ""
 	}
@@ -449,15 +453,15 @@ func (m progressTUIModel) etaText() string {
 	}
 }
 
-func (m progressTUIModel) throughputSnapshot() (time.Duration, int, int) {
+func (m progressTUIModel) throughputSnapshot() (time.Duration, int, int, int64) {
 	if m.throughputStartedAt.IsZero() {
-		return 0, 0, 0
+		return 0, 0, 0, 0
 	}
 	elapsed := time.Since(m.throughputStartedAt)
 	if elapsed <= 0 {
-		return 0, 0, 0
+		return 0, 0, 0, 0
 	}
-	return elapsed, m.completedRows - m.throughputBaseRows, m.partitionCompleted - m.throughputBaseParts
+	return elapsed, m.completedRows - m.throughputBaseRows, m.partitionCompleted - m.throughputBaseParts, m.completedBytes - m.throughputBaseBytes
 }
 
 func (m progressTUIModel) workerLines() []string {

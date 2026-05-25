@@ -81,3 +81,64 @@ func TestParquetRemainingBranches(t *testing.T) {
 		t.Fatal("expected parquetTimestampFromRow default parse branch to fail for invalid value")
 	}
 }
+
+func TestCleanParquetDuplicates(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "duplicates.parquet")
+
+	columns := []string{"timestamp", "mid_close"}
+	records := []map[string]any{
+		{"timestamp": "2024-01-02T00:01:00Z", "mid_close": 101.0},
+		{"timestamp": "2024-01-02T00:00:00Z", "mid_close": 100.0},
+		{"timestamp": "2024-01-02T00:00:00Z", "mid_close": 100.5}, // duplicate
+		{"timestamp": "2024-01-02T00:02:00Z", "mid_close": 102.0},
+	}
+
+	if err := writeParquetRecords(path, columns, records); err != nil {
+		t.Fatalf("writeParquetRecords failed: %v", err)
+	}
+
+	dupCount, err := cleanParquetDuplicates(path)
+	if err != nil {
+		t.Fatalf("cleanParquetDuplicates failed: %v", err)
+	}
+
+	if dupCount != 1 {
+		t.Errorf("expected 1 duplicate, got %d", dupCount)
+	}
+
+	file, pf, closeFile, err := openParquetFile(path)
+	if err != nil {
+		t.Fatalf("openParquetFile failed: %v", err)
+	}
+	defer closeFile()
+
+	reader := parquetReaderFactory(file, pf.Schema())
+	defer reader.Close()
+
+	rows := make([]map[string]any, 10)
+	for i := range rows {
+		rows[i] = make(map[string]any)
+	}
+	count, err := reader.Read(rows)
+	if err != nil && err != os.ErrNotExist { // EOF or nil error is fine
+		// read returns EOF when finished or when nothing more to read, so we handle it gracefully
+	}
+
+	if count != 3 {
+		t.Fatalf("expected 3 rows after cleaning, got %d", count)
+	}
+
+	t0, _ := parquetTimestampFromRow(rows[0])
+	t1, _ := parquetTimestampFromRow(rows[1])
+	t2, _ := parquetTimestampFromRow(rows[2])
+
+	expected0 := time.Date(2024, 1, 2, 0, 0, 0, 0, time.UTC)
+	expected1 := time.Date(2024, 1, 2, 0, 1, 0, 0, time.UTC)
+	expected2 := time.Date(2024, 1, 2, 0, 2, 0, 0, time.UTC)
+
+	if !t0.Equal(expected0) || !t1.Equal(expected1) || !t2.Equal(expected2) {
+		t.Errorf("unexpected row order: %v, %v, %v", t0, t1, t2)
+	}
+}
+

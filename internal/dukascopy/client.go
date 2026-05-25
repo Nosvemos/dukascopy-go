@@ -12,6 +12,10 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"bufio"
+	"os"
+	"path/filepath"
+	"flag"
 )
 
 type Granularity string
@@ -113,6 +117,7 @@ type Client struct {
 	nextSlot    time.Time
 	cacheMu     sync.RWMutex
 	instruments []Instrument
+	proxyPool   *ProxyPool
 }
 
 func NewClient(rawBaseURL string, timeout time.Duration) *Client {
@@ -121,11 +126,18 @@ func NewClient(rawBaseURL string, timeout time.Duration) *Client {
 		panic(err)
 	}
 
+	pool := &ProxyPool{}
+	transport := &http.Transport{
+		Proxy: pool.GetNextProxy,
+	}
+
 	return &Client{
 		baseURL: parsed,
 		httpClient: &http.Client{
-			Timeout: timeout,
+			Timeout:   timeout,
+			Transport: transport,
 		},
+		proxyPool:  pool,
 		maxRetries: 3,
 		backoff:    500 * time.Millisecond,
 	}
@@ -175,6 +187,11 @@ func (c *Client) ListInstruments(ctx context.Context) ([]Instrument, error) {
 		return cloneInstruments(c.instruments), nil
 	}
 
+	if cached, ok := loadLocalCache(); ok && len(cached) > 0 {
+		c.instruments = cloneInstruments(cached)
+		return cloneInstruments(c.instruments), nil
+	}
+
 	var payload instrumentsResponse
 	if err := c.getJSON(ctx, []string{"v1", "instruments"}, &payload); err != nil {
 		return nil, err
@@ -185,7 +202,13 @@ func (c *Client) ListInstruments(ctx context.Context) ([]Instrument, error) {
 	})
 
 	c.instruments = cloneInstruments(payload.Instruments)
+	go saveLocalCache(c.instruments)
+
 	return cloneInstruments(c.instruments), nil
+}
+
+func (c *Client) LoadProxies(path string) error {
+	return c.proxyPool.LoadFromFile(path)
 }
 
 func (c *Client) Download(ctx context.Context, request DownloadRequest) (DownloadResult, error) {
@@ -554,4 +577,123 @@ func IsMarketClosed(symbol string, t time.Time) bool {
 	}
 	return false
 }
+
+type ProxyPool struct {
+	mu      sync.Mutex
+	proxies []*url.URL
+	current int
+}
+
+func (p *ProxyPool) LoadFromFile(path string) error {
+	file, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	p.proxies = nil
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		if !strings.Contains(line, "://") {
+			line = "http://" + line
+		}
+		u, err := url.Parse(line)
+		if err == nil {
+			p.proxies = append(p.proxies, u)
+		}
+	}
+	return scanner.Err()
+}
+
+func (p *ProxyPool) GetNextProxy(req *http.Request) (*url.URL, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	if len(p.proxies) == 0 {
+		return nil, nil
+	}
+	u := p.proxies[p.current]
+	p.current = (p.current + 1) % len(p.proxies)
+	return u, nil
+}
+
+var localCacheFilePath string = ""
+
+type localCachePayload struct {
+	Timestamp   time.Time    `json:"timestamp"`
+	Instruments []Instrument `json:"instruments"`
+}
+
+func getLocalCachePath() string {
+	if localCacheFilePath != "" {
+		return localCacheFilePath
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	dir := filepath.Join(home, ".dukascopy")
+	_ = os.MkdirAll(dir, 0o755)
+	return filepath.Join(dir, "instruments_cache.json")
+}
+
+func loadLocalCache() ([]Instrument, bool) {
+	if localCacheFilePath == "" && (flag.Lookup("test.v") != nil || os.Getenv("DUKASCOPY_TEST_ENV") == "true") {
+		return nil, false
+	}
+	path := getLocalCachePath()
+	if path == "" {
+		return nil, false
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil, false
+	}
+	if time.Since(info.ModTime()) > 24*time.Hour {
+		return nil, false
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, false
+	}
+	defer file.Close()
+
+	var payload localCachePayload
+	if err := json.NewDecoder(file).Decode(&payload); err != nil {
+		return nil, false
+	}
+	if time.Since(payload.Timestamp) > 24*time.Hour {
+		return nil, false
+	}
+	return payload.Instruments, true
+}
+
+func saveLocalCache(instruments []Instrument) {
+	if localCacheFilePath == "" && (flag.Lookup("test.v") != nil || os.Getenv("DUKASCOPY_TEST_ENV") == "true") {
+		return
+	}
+	path := getLocalCachePath()
+	if path == "" {
+		return
+	}
+	file, err := os.Create(path)
+	if err != nil {
+		return
+	}
+	defer file.Close()
+
+	payload := localCachePayload{
+		Timestamp:   time.Now().UTC(),
+		Instruments: instruments,
+	}
+	_ = json.NewEncoder(file).Encode(payload)
+}
+
 

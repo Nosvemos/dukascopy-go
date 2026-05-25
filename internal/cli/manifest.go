@@ -30,6 +30,8 @@ func runManifest(args []string, stdout io.Writer) error {
 		return runManifestRepair(args[1:], stdout)
 	case "verify":
 		return runManifestVerify(args[1:], stdout)
+	case "clean-duplicates":
+		return runManifestCleanDuplicates(args[1:], stdout)
 	case "help", "-h", "--help":
 		printManifestUsage(stdout)
 		return nil
@@ -619,10 +621,11 @@ func runManifestPrune(args []string, stdout io.Writer) error {
 
 func printManifestUsage(w io.Writer) {
 	fmt.Fprint(w, `manifest commands:
-  manifest inspect  Show a checkpoint manifest summary
-  manifest prune    Remove obsolete temp files and orphan partition files
-  manifest repair   Repair part files, rebuild final output, or re-download gap partitions
-  manifest verify   Audit part files and the final CSV against the manifest
+  manifest inspect          Show a checkpoint manifest summary
+  manifest prune            Remove obsolete temp files and orphan partition files
+  manifest repair           Repair part files, rebuild final output, or re-download gap partitions
+  manifest verify           Audit part files and the final CSV against the manifest
+  manifest clean-duplicates Clean duplicate rows and sort chronologically
 
 examples:
   dukascopy-go manifest inspect --output ./data/xauusd.csv
@@ -631,6 +634,7 @@ examples:
   dukascopy-go manifest repair --output ./data/xauusd.csv --redownload-gaps
   dukascopy-go manifest verify --manifest ./data/xauusd.csv.manifest.json
   dukascopy-go manifest verify --output ./data/xauusd.csv --check-data-quality
+  dukascopy-go manifest clean-duplicates --output ./data/xauusd.csv
 `)
 }
 
@@ -739,3 +743,46 @@ func evaluateDataQuality(stats csvout.CSVStats) ([]string, []string) {
 	}
 	return issues, warnings
 }
+
+func runManifestCleanDuplicates(args []string, stdout io.Writer) error {
+	fs := flag.NewFlagSet("manifest clean-duplicates", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+
+	manifestPath := fs.String("manifest", "", "checkpoint manifest path")
+	outputPath := fs.String("output", "", "output CSV/Parquet path to clean")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	targetPath := strings.TrimSpace(*outputPath)
+	if targetPath == "" && strings.TrimSpace(*manifestPath) != "" {
+		manifest, err := checkpoint.Load(strings.TrimSpace(*manifestPath))
+		if err == nil {
+			targetPath = manifest.OutputPath
+		}
+	}
+	if targetPath == "" {
+		return errors.New("either --output or a valid --manifest is required to clean duplicates")
+	}
+
+	stats, err := csvout.InspectCSV(targetPath)
+	if err != nil {
+		return err
+	}
+
+	if stats.DuplicateRows == 0 && stats.DuplicateStamps == 0 && stats.OutOfOrderRows == 0 {
+		fmt.Fprintf(stdout, "%sclean%s no duplicate or out-of-order rows detected in %s\n", colorize(colorGreen), colorize(colorReset), targetPath)
+		return nil
+	}
+
+	fmt.Fprintf(stdout, "%sclean%s removing duplicates and re-ordering rows for %s...\n", colorize(colorCyan), colorize(colorReset), targetPath)
+
+	cleanedCount, err := csvout.CleanDuplicates(targetPath)
+	if err != nil {
+		return err
+	}
+
+	fmt.Fprintf(stdout, "%sclean%s successfully removed %d duplicate/anomaly rows in %s\n", colorize(colorGreen), colorize(colorReset), cleanedCount, targetPath)
+	return nil
+}
+

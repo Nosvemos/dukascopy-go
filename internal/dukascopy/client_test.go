@@ -6,6 +6,8 @@ import (
 	"net/http/httptest"
 	"testing"
 	"time"
+	"os"
+	"path/filepath"
 )
 
 func TestShouldRetryStatus(t *testing.T) {
@@ -135,4 +137,58 @@ func TestIsMarketClosed(t *testing.T) {
 		}
 	}
 }
+
+func TestProxyPool(t *testing.T) {
+	tempFile := filepath.Join(t.TempDir(), "proxies.txt")
+	content := "# This is a comment\n127.0.0.1:8080\nsocks5://127.0.0.1:1080\n"
+	err := os.WriteFile(tempFile, []byte(content), 0o644)
+	if err != nil {
+		t.Fatalf("failed to write mock proxy file: %v", err)
+	}
+
+	pool := &ProxyPool{}
+	if err := pool.LoadFromFile(tempFile); err != nil {
+		t.Fatalf("LoadFromFile failed: %v", err)
+	}
+
+	req, _ := http.NewRequest("GET", "https://example.com", nil)
+	
+	// First proxy: 127.0.0.1:8080 (inferred http://)
+	u1, err := pool.GetNextProxy(req)
+	if err != nil || u1 == nil || u1.Host != "127.0.0.1:8080" || u1.Scheme != "http" {
+		t.Fatalf("unexpected first proxy: %v, err: %v", u1, err)
+	}
+
+	// Second proxy: socks5://127.0.0.1:1080
+	u2, err := pool.GetNextProxy(req)
+	if err != nil || u2 == nil || u2.Host != "127.0.0.1:1080" || u2.Scheme != "socks5" {
+		t.Fatalf("unexpected second proxy: %v, err: %v", u2, err)
+	}
+
+	// Rotates back to the first proxy
+	u3, err := pool.GetNextProxy(req)
+	if err != nil || u3 == nil || u3.Host != "127.0.0.1:8080" || u3.Scheme != "http" {
+		t.Fatalf("unexpected rotated third proxy: %v, err: %v", u3, err)
+	}
+}
+
+func TestLocalCache(t *testing.T) {
+	origPath := localCacheFilePath
+	localCacheFilePath = filepath.Join(t.TempDir(), "test_cache.json")
+	defer func() {
+		localCacheFilePath = origPath
+	}()
+
+	instruments := []Instrument{
+		{ID: 1, Name: "EUR/USD", Code: "EURUSD", Description: "Euro vs US Dollar", PriceScale: 5},
+	}
+
+	saveLocalCache(instruments)
+
+	cached, ok := loadLocalCache()
+	if !ok || len(cached) != 1 || cached[0].Code != "EURUSD" {
+		t.Fatalf("failed to load fresh cached instruments: %+v, ok: %t", cached, ok)
+	}
+}
+
 

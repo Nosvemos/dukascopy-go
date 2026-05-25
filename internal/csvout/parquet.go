@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"sort"
 
 	parquet "github.com/parquet-go/parquet-go"
 
@@ -795,3 +796,92 @@ func parquetTimestampFromRow(row map[string]any) (time.Time, bool) {
 func isParquetPath(path string) bool {
 	return strings.HasSuffix(strings.ToLower(strings.TrimSpace(path)), ".parquet")
 }
+
+func cleanParquetDuplicates(path string) (int, error) {
+	file, parquetFile, closeFile, err := openParquetFile(path)
+	if err != nil {
+		return 0, err
+	}
+
+	columns := parquetColumns(parquetFile)
+	timestampIndex := indexOfColumn(columns, "timestamp")
+	if timestampIndex < 0 {
+		closeFile()
+		return 0, fmt.Errorf("parquet does not contain a timestamp column")
+	}
+
+	reader := parquetReaderFactory(file, parquetFile.Schema())
+
+	type parquetRowRecord struct {
+		timestamp time.Time
+		row       map[string]any
+	}
+
+	var records []parquetRowRecord
+	seenTimestamps := make(map[string]bool)
+	duplicatesCount := 0
+
+	for {
+		rows := make([]map[string]any, 256)
+		for index := range rows {
+			rows[index] = make(map[string]any, len(columns))
+		}
+
+		count, err := reader.Read(rows)
+		if err != nil && !errors.Is(err, io.EOF) {
+			reader.Close()
+			closeFile()
+			return 0, err
+		}
+
+		for _, row := range rows[:count] {
+			timestamp, ok := parquetTimestampFromRow(row)
+			if !ok {
+				continue
+			}
+			timestamp = timestamp.UTC()
+			stampKey := timestamp.Format(timestampLayout)
+			if seenTimestamps[stampKey] {
+				duplicatesCount++
+				continue
+			}
+			seenTimestamps[stampKey] = true
+			records = append(records, parquetRowRecord{timestamp: timestamp, row: row})
+		}
+
+		if errors.Is(err, io.EOF) {
+			break
+		}
+	}
+
+	reader.Close()
+	closeFile()
+
+	// Sort chronologically
+	sort.SliceStable(records, func(i, j int) bool {
+		return records[i].timestamp.Before(records[j].timestamp)
+	})
+
+	// Write back atomically
+	tempPath, err := createAtomicTempPath(path)
+	if err != nil {
+		return 0, err
+	}
+	defer os.Remove(tempPath)
+
+	plainRecords := make([]map[string]any, len(records))
+	for i, rec := range records {
+		plainRecords[i] = rec.row
+	}
+
+	if err := writeParquetRecords(tempPath, columns, plainRecords); err != nil {
+		return 0, err
+	}
+
+	if err := replaceFile(tempPath, path); err != nil {
+		return 0, err
+	}
+
+	return duplicatesCount, nil
+}
+
