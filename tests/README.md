@@ -1,18 +1,36 @@
 # Tests
 
-This repository uses two test layers:
+`dukascopy-go` uses two test layers.
 
-- `tests/e2e`
-  End-to-end CLI flows that build and execute the real `dukascopy-go` binary against mock services.
+## Unit tests
 
-- `internal/.../*_test.go`
-  White-box unit tests that stay next to the package they validate.
+Located next to each package (`internal/.../*_test.go`). They test unexported helpers directly and run with:
 
-Why unit tests are not fully moved under `tests/units`:
+```bash
+go test ./internal/...
+```
 
-Go allows package-local tests to access unexported helpers only when those tests live in the same package directory. A full move of all unit tests under `tests/units` would force those tests to become black-box tests, which would reduce internal coverage and remove direct validation of private helpers.
+Unit tests stay colocated with their packages so they can access private functions without forcing a black-box interface. Moving them under `tests/units/` would require exporting those helpers, which reduces coverage quality.
 
-Because of that, the current layout is:
+## End-to-end tests
 
-- centralized E2E tests under `tests/e2e`
-- unit tests colocated with their packages for maximum coverage and fast feedback
+Located in `tests/e2e/`. They build and invoke the real `dukascopy-go` binary against lightweight mock HTTP servers.
+
+```bash
+go test ./tests/e2e -v
+```
+
+## Run everything
+
+```bash
+go test ./...
+```
+
+## Coverage
+
+```bash
+go test ./... -coverprofile=coverage.out
+go tool cover -html=coverage.out
+```
+
+Target: **≥ 95% statement coverage** across all packages.
