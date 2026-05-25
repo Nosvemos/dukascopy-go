@@ -1,6 +1,8 @@
 <div align="center">
   <h1>dukascopy-go 🚀</h1>
   <p><b>The fastest, zero-dependency tool to download historical and real-time Dukascopy market data.</b></p>
+
+  <img width="800" height="210" alt="download" src="https://github.com/user-attachments/assets/f240008c-5e87-4139-bddb-20b55ac15743" />
   
   <p>
     <a href="https://github.com/Nosvemos/dukascopy-go/actions/workflows/ci.yml"><img src="https://github.com/Nosvemos/dukascopy-go/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
