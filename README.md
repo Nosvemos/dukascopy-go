@@ -154,6 +154,8 @@ go run ./cmd/dukascopy-go --help
 | --- | --- |
 | `instruments` | Search Dukascopy instruments and print matches as text or JSON |
 | `download` | Download historical data and save it as CSV or Parquet |
+| `live` | Stream real-time ticks or bars to stdout in JSONL/CSV and broadcast over a local WebSocket server |
+| `db-load` | Ingest a local CSV or Parquet file directly into ClickHouse or InfluxDB with zero driver dependencies |
 | `stats` | Inspect CSV, CSV.GZ, or Parquet datasets for counts, ranges, profile-aware expected vs suspicious gaps, duplicates, and ordering |
 | `manifest inspect` | Print checkpoint manifest summaries and partition status |
 | `manifest verify` | Verify partition files and final outputs against manifest metadata, and classify expected vs suspicious gaps |
@@ -663,6 +665,123 @@ with InfluxDBClient(url="http://localhost:8086", token="my-token", org="my-org")
     )
 ```
 
+## Real-Time Streaming (`live`)
+
+`dukascopy-go live` streams real-time tick or bar data directly to your terminal and optionally starts a local WebSocket broadcast server for programmatic clients.
+
+Stream the latest EUR/USD ticks to stdout:
+
+```bash
+dukascopy-go live \
+  --symbol eurusd \
+  --timeframe tick \
+  --format jsonl \
+  --poll-interval 1s
+```
+
+Stream XAU/USD 1-minute bars and broadcast them over WebSocket to all connected clients:
+
+```bash
+dukascopy-go live \
+  --symbol xauusd \
+  --timeframe m1 \
+  --format jsonl \
+  --port 8080 \
+  --poll-interval 30s
+```
+
+Connect any WebSocket client to `ws://localhost:8080/stream` and receive every new bar as a JSON message.
+
+Health check the server and query active client count:
+
+```bash
+curl http://localhost:8080/health
+```
+
+Output format options:
+
+- `jsonl` (default): one JSON object per line (tick or bar)
+- `csv`: comma-separated rows with a header on the first line
+- `json`: alias for `jsonl`
+
+`live` flags:
+
+| Flag | Default | Purpose |
+| --- | --- | --- |
+| `--symbol` | required | instrument to stream |
+| `--timeframe` | `tick` | `tick`, `m1`, `m3`, …, `d1` |
+| `--side` | `bid` | `bid` or `ask` (for bar streaming) |
+| `--format` | `jsonl` | `jsonl`, `csv`, or `json` |
+| `--port` | `0` (off) | start WebSocket server on this port |
+| `--poll-interval` | `1s` | frequency of requests to Dukascopy API |
+| `--output` | `-` | optional file path to append output |
+| `--base-url` | `https://jetta.dukascopy.com` | override Dukascopy API URL |
+
+---
+
+## Direct Database Loading (`db-load`)
+
+`dukascopy-go db-load` ingests a local CSV or Parquet file directly into ClickHouse or InfluxDB using their native HTTP APIs — **zero driver dependencies, zero external libraries**.
+
+### ClickHouse Ingestion
+
+ClickHouse accepts Parquet and CSV via HTTP POST at millions of rows per second:
+
+```bash
+# Ingest a Parquet file
+dukascopy-go db-load \
+  --input ./data/eurusd_m1.parquet \
+  --db clickhouse \
+  --url http://localhost:8123 \
+  --table eurusd_m1
+
+# Ingest a CSV file with credentials
+dukascopy-go db-load \
+  --input ./data/eurusd_m1.csv \
+  --db clickhouse \
+  --url http://localhost:8123 \
+  --table eurusd_m1 \
+  --user admin \
+  --password secret
+```
+
+The file is streamed directly via HTTP POST. No temporary copies, no driver overhead.
+
+### InfluxDB Ingestion
+
+`db-load` parses the CSV and converts it to Line Protocol, then sends gzip-compressed batches to the `/api/v2/write` endpoint:
+
+```bash
+dukascopy-go db-load \
+  --input ./data/eurusd_m1.csv \
+  --db influxdb \
+  --url http://localhost:8086 \
+  --table eurusd \
+  --token MY_INFLUXDB_TOKEN \
+  --org my-org \
+  --bucket market-data \
+  --symbol eurusd
+```
+
+`db-load` flags:
+
+| Flag | Required | Purpose |
+| --- | --- | --- |
+| `--input` | yes | path to local `.csv`, `.csv.gz`, or `.parquet` file |
+| `--db` | yes | `clickhouse` or `influxdb` |
+| `--url` | yes | database HTTP URL |
+| `--table` | yes | target table name (ClickHouse) or measurement name (InfluxDB) |
+| `--user` | no | ClickHouse username (default: `default`) |
+| `--password` | no | ClickHouse password |
+| `--token` | InfluxDB | InfluxDB API token |
+| `--org` | InfluxDB | InfluxDB organization |
+| `--bucket` | InfluxDB | InfluxDB bucket |
+| `--symbol` | no | symbol tag to embed in InfluxDB rows |
+| `--batch` | no | rows per HTTP batch (default: 10000 CH / 5000 InfluxDB) |
+| `--timeout` | no | HTTP request timeout per batch (default: `120s`) |
+
+> **InfluxDB note:** Only CSV input is supported for InfluxDB. For Parquet, first convert with `dukascopy-go download --output file.csv`.
+
 ## Roadmap
 
 We are continuously working on transforming `dukascopy-go` into the most complete, blazing-fast, and universal historical and live market data engineering tool on GitHub. Here is our next-generation feature pipeline:
@@ -674,8 +793,8 @@ We are continuously working on transforming `dukascopy-go` into the most complet
 - [x] **Duplicate & Out-of-Order Line Pruner:** Utilities to cleanly parse and deduplicate CSV/Parquet files in-place: `manifest clean-duplicates`.
 - [x] **Dual-Engine Downloader (.bi5 LZMA):** Native Go decompresses and parses custom binary LZMA streams directly from Dukascopy's central data feeds.
 - [x] **Multi-Language SDK Bindings (Python/C/C++):** Offer pre-built CGO shared libraries and Python wrappers (`pip install dukascopy-go`) to attract quantitative finance researchers.
-- [ ] **Real-Time WebSockets Pipeline (`live --stream`):** Connect directly to Dukascopy's real-time WebSockets feed and pipe tick-by-tick quotes to stdout or streaming platforms (like Kafka/ClickHouse) instantly.
-- [ ] **Direct Database Loading (ClickHouse/InfluxDB):** Build native integration command pipes to directly ingest tick and candle datasets into open-source time-series databases.
+- [x] **Real-Time WebSockets Pipeline (`live`):** Connect directly to Dukascopy's public API and stream tick-by-tick quotes to stdout (JSONL/CSV) and broadcast live over a local WebSocket server (`ws://localhost:<port>/stream`).
+- [x] **Direct Database Loading (ClickHouse/InfluxDB):** Native zero-driver HTTP command pipes to directly ingest tick and candle datasets into open-source time-series databases (`db-load`).
 
 ## Development
 
