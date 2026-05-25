@@ -14,7 +14,13 @@ import (
 
 func runSync(args []string, stdout io.Writer, stderr io.Writer) error {
 	fs := flag.NewFlagSet("sync", flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
+	fs.SetOutput(stdout)
+	fs.Usage = func() {
+		fmt.Fprintf(stdout, "%ssync:%s Sync an existing dataset file up to the present moment\n\n", colorize(colorCyan), colorize(colorReset))
+		fmt.Fprint(stdout, "Usage:\n  dukascopy-go sync [options]\n\nOptions:\n")
+		fs.PrintDefaults()
+		fmt.Fprint(stdout, "\nExamples:\n  dukascopy-go sync --symbol eurusd --output ./eurusd_m1.csv\n  dukascopy-go sync --symbol eurusd,gbpusd --output ./data/\n  dukascopy-go sync --symbol eurusd --from 2024-01-01 --output ./eurusd_m1.csv\n")
+	}
 
 	symbol := fs.String("symbol", "", "instrument symbol such as xauusd or eur/usd")
 	outputPath := fs.String("output", "", "target CSV path")

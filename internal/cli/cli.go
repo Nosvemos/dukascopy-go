@@ -51,42 +51,63 @@ func Run(args []string, stdout io.Writer, stderr io.Writer) int {
 		return 0
 	case "instruments":
 		if err := runInstruments(args[1:], stdout); err != nil {
+			if errors.Is(err, flag.ErrHelp) {
+				return 0
+			}
 			fmt.Fprintf(stderr, "%serror:%s %v\n", colorize(colorRed), colorize(colorReset), err)
 			return 1
 		}
 		return 0
 	case "stats":
 		if err := runStats(args[1:], stdout); err != nil {
+			if errors.Is(err, flag.ErrHelp) {
+				return 0
+			}
 			fmt.Fprintf(stderr, "%serror:%s %v\n", colorize(colorRed), colorize(colorReset), err)
 			return 1
 		}
 		return 0
 	case "manifest":
 		if err := runManifest(args[1:], stdout); err != nil {
+			if errors.Is(err, flag.ErrHelp) {
+				return 0
+			}
 			fmt.Fprintf(stderr, "%serror:%s %v\n", colorize(colorRed), colorize(colorReset), err)
 			return 1
 		}
 		return 0
 	case "download":
 		if err := runDownload(args[1:], stdout, stderr); err != nil {
+			if errors.Is(err, flag.ErrHelp) {
+				return 0
+			}
 			fmt.Fprintf(stderr, "%serror:%s %v\n", colorize(colorRed), colorize(colorReset), err)
 			return 1
 		}
 		return 0
 	case "sync":
 		if err := runSync(args[1:], stdout, stderr); err != nil {
+			if errors.Is(err, flag.ErrHelp) {
+				return 0
+			}
 			fmt.Fprintf(stderr, "%serror:%s %v\n", colorize(colorRed), colorize(colorReset), err)
 			return 1
 		}
 		return 0
 	case "live":
 		if err := runLiveStream(args[1:], stdout, stderr); err != nil {
+			if errors.Is(err, flag.ErrHelp) {
+				return 0
+			}
 			fmt.Fprintf(stderr, "%serror:%s %v\n", colorize(colorRed), colorize(colorReset), err)
 			return 1
 		}
 		return 0
 	case "db-load":
 		if err := runDBLoad(args[1:], stdout, stderr); err != nil {
+			if errors.Is(err, flag.ErrHelp) {
+				return 0
+			}
 			fmt.Fprintf(stderr, "%serror:%s %v\n", colorize(colorRed), colorize(colorReset), err)
 			return 1
 		}
@@ -103,10 +124,16 @@ func Run(args []string, stdout io.Writer, stderr io.Writer) int {
 
 func runInstruments(args []string, stdout io.Writer) error {
 	fs := flag.NewFlagSet("instruments", flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
+	fs.SetOutput(stdout)
+	fs.Usage = func() {
+		fmt.Fprintf(stdout, "%sinstruments:%s Search offline/online Dukascopy instruments catalog\n\n", colorize(colorCyan), colorize(colorReset))
+		fmt.Fprint(stdout, "Usage:\n  dukascopy-go instruments [options]\n\nOptions:\n")
+		fs.PrintDefaults()
+		fmt.Fprint(stdout, "\nExamples:\n  dukascopy-go instruments\n  dukascopy-go instruments --query eur/usd\n  dukascopy-go instruments --query try --limit -1\n  dukascopy-go instruments --query gold --update\n")
+	}
 
 	query := fs.String("query", "", "instrument search text such as xauusd or eur/usd")
-	limit := fs.Int("limit", 20, "maximum number of rows to print")
+	limit := fs.Int("limit", 20, "maximum number of rows to print (set to -1 for unlimited)")
 	jsonOutput := fs.Bool("json", false, "print matching instruments as JSON")
 	baseURL := fs.String("base-url", readBaseURL(), "Dukascopy API base URL")
 	update := fs.Bool("update", false, "force update the local instruments cache from online catalog")
@@ -114,8 +141,8 @@ func runInstruments(args []string, stdout io.Writer) error {
 		return err
 	}
 	applyInstrumentConfigDefaults(fs, limit, baseURL)
-	if *limit <= 0 {
-		return errors.New("--limit must be greater than 0")
+	if *limit <= 0 && *limit != -1 {
+		return errors.New("--limit must be greater than 0 (or set to -1 for unlimited)")
 	}
 
 	client := dukascopy.NewClient(*baseURL, defaultHTTPTimeout).WithForceUpdate(*update)
@@ -127,7 +154,13 @@ func runInstruments(args []string, stdout io.Writer) error {
 		return err
 	}
 
-	matches := dukascopy.FilterInstruments(instruments, *query, *limit)
+	limitVal := *limit
+	if limitVal == -1 {
+		limitVal = 99999
+	}
+
+	allMatches := dukascopy.FilterInstruments(instruments, *query, 99999)
+	matches := dukascopy.FilterInstruments(instruments, *query, limitVal)
 	if len(matches) == 0 {
 		return fmt.Errorf("no instruments found for %q", *query)
 	}
@@ -142,6 +175,10 @@ func runInstruments(args []string, stdout io.Writer) error {
 	}
 
 	printInstrumentTable(stdout, matches)
+
+	if *limit > 0 && len(allMatches) > *limit {
+		fmt.Fprintf(stdout, "\n%sShowing %d of %d matching instruments. Use --limit -1 to show all.%s\n", colorize(colorYellow), *limit, len(allMatches), colorize(colorReset))
+	}
 	return nil
 }
 

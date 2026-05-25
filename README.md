@@ -1,6 +1,8 @@
 <div align="center">
   <h1>dukascopy-go 🚀</h1>
   <p><b>The fastest, zero-dependency tool to download historical and real-time Dukascopy market data.</b></p>
+
+  <img width="800" height="210" alt="download" src="https://github.com/user-attachments/assets/f240008c-5e87-4139-bddb-20b55ac15743" />
   
   <p>
     <a href="https://github.com/Nosvemos/dukascopy-go/actions/workflows/ci.yml"><img src="https://github.com/Nosvemos/dukascopy-go/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
@@ -19,16 +21,16 @@ Compared to Node.js or Python alternatives (like `dukascopy-node`), `dukascopy-g
 
 | Feature | `dukascopy-go` | Node.js Alternatives |
 |---|---|---|
-| **Speed** | 🚀 Native Go (Dual-engine: JSON + LZMA, ~100x Faster) | 🐢 Slower V8/Node.js execution |
-| **Parities (Assets)**| 🌍 **170+ Offline Fallback database** + online merging | ⚠️ Requires full online resolution |
+| **Speed** | 🚀 Native Go + 64KB Sequential Buffering (~100x Faster) | 🐢 Slower V8/Node.js execution |
+| **Parities (Assets)**| 🌍 **170+ Offline Fallback database** + Online Catalog Hot-Reloading | ⚠️ Requires full online resolution |
+| **Multi-Symbol** | ✅ Comma-separated list with automatic path formatting | ❌ Single symbol only |
 | **Dependencies** | ✨ Zero (Standalone single binary) | 📦 Requires Node.js, NPM, and modules |
+| **Delta Sync** | ✅ In-place sync to append missing slices | ❌ Restarts from scratch |
+| **Gap Filling** | ✅ Quant-grade forward-filling during market open hours | ❌ Messer gap data left as-is |
+| **Throttling** | ✅ AIMD Token-Bucket Adaptive Throttling (handles 429) | ❌ Standard fixed rate limits |
 | **Resumability** | ✅ Automatic manifest checkpoints & auto-resume | ❌ Often restarts from scratch |
-| **Date Clamping** | ✅ Smart future dates auto-clamping & history skips | ❌ Throws fatal errors and discards data |
-| **Persistent CLI**| ✅ Updates inline; keeps loading stats in scrollback | ❌ TUI alt-screen clears logs on exit |
-| **Parallel Workers** | ✅ Built-in partitioning & concurrent downloading | ❌ Usually single-threaded |
-| **Direct DB Load** | 🔥 Streams directly to ClickHouse / InfluxDB | ❌ Requires manual insertion scripts |
 | **Real-time Stream**| ✅ Native WebSocket & Stdout (JSONL/CSV) | ⚠️ Node.js API only |
-| **SDK Support** | ✅ CLI, Go, CGO, Python wrapper | ⚠️ Node.js only |
+| **SDK Support** | ✅ Public importable `pkg/`, Go library, Python wrapper | ⚠️ Node.js only |
 | **Deduplication** | ✅ In-place atomic duplicate/gap repair | ❌ Often requires Pandas/external tools |
 
 ---
@@ -59,41 +61,31 @@ Don't want to learn CLI flags? Just run the binary without arguments to launch t
 ```bash
 dukascopy-go
 ```
-*Use your arrow keys to select instruments, timeframes, and formats interactively.*
 
 ### 🔍 Find Instruments (170+ Supported!)
-Search for a specific instrument, or list them all. Works completely offline:
+Search for a specific instrument, or list them all. Supports live catalog hot-reloading:
 ```bash
 # Search for Turkish Lira crosses
 dukascopy-go instruments --query try
 
-# Search for Tesla stock CFD
-dukascopy-go instruments --query tsla
-
-# Lists all 170+ available instruments (Forex, Metals, Cryptos, Indices, Commodities, Stock CFDs)
+# Lists all available instruments (showing up to 20 by default)
 dukascopy-go instruments
+
+# Force hot-reload instruments cache online and show ALL 170+ parities
+dukascopy-go instruments --limit 0 --update
 ```
 
 ### 📉 Download Historical Data
-Download 1-minute gold bars to CSV using a **flexible duration** (`--last 30d`) or exact dates (`YYYY-MM-DD`):
+Download 1-minute gold bars to CSV using a **flexible duration** (`--last 30d`) or exact dates:
 ```bash
 # Download the last 30 days of 1-minute data
-dukascopy-go download \
-  --symbol xauusd \
-  --timeframe m1 \
-  --last 30d \
-  --output ./data/xauusd-m1.csv
+dukascopy-go download --symbol xauusd --timeframe m1 --last 30d --output ./data/xauusd-m1.csv
 
-# Or specify exact dates
-dukascopy-go download \
-  --symbol xauusd \
-  --timeframe m1 \
-  --from 2024-01-01 \
-  --to 2024-01-02 \
-  --output ./data/xauusd-m1.csv
+# Multi-symbol batch downloading to directory
+dukascopy-go download --symbol EUR/USD,GBP/USD,BTC/USD --timeframe d1 --last 1y --output ./data/
 ```
 
-**Need a massive dataset?** Use parallel downloading and Parquet (or JSONL) output:
+**Need a massive dataset?** Use parallel downloading and Parquet output:
 ```bash
 dukascopy-go download \
   --symbol xauusd \
@@ -107,16 +99,29 @@ dukascopy-go download \
 
 ---
 
-## 🛡️ Robust Architecture
+## 💎 Elite Quant Enhancements
 
-`dukascopy-go` is built with enterprise-grade data engineering in mind:
+### 🔄 In-Place Smart Delta Sync (`sync`)
+Keep your downloaded historical files completely up to date in-place with zero duplicate or out-of-order records:
+```bash
+dukascopy-go sync --symbol EUR/USD --output ./data/eur_usd.csv
+```
+The sync command inspects the target file, extracts the last written timestamp, and automatically queries the missing slices up to the present moment, appending them in-place safely.
 
-- **Smart Date Clamping**: If you request future dates (e.g. `--to 2028-01-01`), the CLI automatically clamps it to the present moment to prevent redundant network queries.
-- **Graceful History Skips**: If you request dates before available history, the loop gracefully skips empty chunk responses (`isNoDataError`) and writes all successfully downloaded data, rather than crashing and discarding progress.
-- **Context-aware Resumability**: Using the `--partition` flag, large downloads are split into small chunks managed by a `.manifest.json`. If your internet drops, you can instantly resume exactly where it failed. You can also run `dukascopy-go manifest repair` to fix corrupted chunks.
-- **Durable TUI Scrollback**: Bubble Tea alternate screen clearing is disabled for downloads. When a download completes, the beautiful progress dashboard and download speed stats remain written inline in your terminal scrollback.
-- **In-place Deduplication**: Market data can be messy. The pruner automatically detects and eliminates duplicate records or out-of-order ticks, guaranteeing chronological integrity.
-- **Proxy Rotation**: Bypassing strict IP rate-limits is easy. Provide a `--proxy-file` containing HTTP/SOCKS5 proxies, and the engine will round-robin through them.
+### 📊 Quant-Grade Gap Filling (`--fill-gaps`)
+Unexpected liquidity gaps can corrupt backtesting results. Enable smart forward-filling to keep timeframe intervals uniform:
+```bash
+dukascopy-go download --symbol EUR/USD --timeframe m1 --last 7d --output ./data/eur_usd.csv --fill-gaps forward
+```
+- **Forward-Fill Loop**: Missing bars are forward-filled with the previous Close price and Volume `0`.
+- **Weekend Filter**: Weekends and holiday closures are automatically detected and skipped to avoid injecting synthetic bars during expected market closures.
+
+### 🛡️ Token-Bucket Adaptive Throttling
+We designed a highly resilient AIMD-based (Additive Increase / Multiplicative Decrease) rate limiting system that self-corrects based on response status codes:
+- **Instant Backoff**: If hit with `429 Too Many Requests`, the adaptive rate limit instantly doubles (up to `5s`) to completely clear connection queues.
+- **Slow Recovery**: On successful requests, it slowly decreases the delay by `10ms` per response back to your defined base rate limit.
+
+---
 
 ## 🐹 Go Library SDK (Public `pkg/`)
 
@@ -175,59 +180,38 @@ print(bars)
 ---
 
 ## 🤝 Contributing
-Contributions, issues and feature requests are welcome! Feel free to check the [issues page](https://github.com/Nosvemos/dukascopy-go/issues).
 
-<div align="center">
-  <i>Built for traders, researchers, and quants.</i>
-</div>
+Contributions are what make the open source community such an amazing place to learn, inspire, and create. Any contributions you make are **greatly appreciated**.
 
----
-
-## ⚙️ Configuration
-
-Store defaults in a JSON file and pass it with `--config` or `DUKASCOPY_CONFIG`:
-
-```json
-{
-  "base_url": "https://jetta.dukascopy.com",
-  "download": {
-    "timeframe": "m1",
-    "simple": true,
-    "retries": 5,
-    "rate_limit": "150ms",
-    "partition": "auto",
-    "parallelism": 4
-  }
-}
-```
-
-```bash
-dukascopy-go --config ./dukascopy.json download --symbol eurusd --from 2024-01-01T00:00:00Z --output ./data/eurusd.csv
-
-# or export once
-export DUKASCOPY_CONFIG=./dukascopy.json
-```
-
-Override the API base URL with an environment variable:
-
-```bash
-export DUKASCOPY_API_BASE_URL=https://jetta.dukascopy.com
-```
+1. Fork the Project
+2. Create your Feature Branch (`git checkout -b feature/AmazingFeature`)
+3. Commit your Changes (`git commit -m 'Add some AmazingFeature'`)
+4. Push to the Branch (`git push origin feature/AmazingFeature`)
+5. Open a Pull Request
 
 ---
 
-## 🛠 Development
+## 🛠️ Development
 
-```bash
-# Run all tests
-go test ./...
+If you want to build and test the project locally, follow these steps:
 
-# Run only e2e tests
-go test ./tests/e2e -v
-
-# Build the binary locally
-go build -o dukascopy-go ./cmd/dukascopy-go
-```
+1. Clone the repository:
+   ```bash
+   git clone https://github.com/Nosvemos/dukascopy-go.git
+   cd dukascopy-go
+   ```
+2. Install dependencies:
+   ```bash
+   go mod download
+   ```
+3. Run tests:
+   ```bash
+   go test ./...
+   ```
+4. Build the binary:
+   ```bash
+   go build -o dukascopy-go ./cmd/dukascopy-go
+   ```
 
 ---
 

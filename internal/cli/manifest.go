@@ -43,7 +43,11 @@ func runManifest(args []string, stdout io.Writer) error {
 
 func runManifestInspect(args []string, stdout io.Writer) error {
 	fs := flag.NewFlagSet("manifest inspect", flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
+	fs.SetOutput(stdout)
+	fs.Usage = func() {
+		fmt.Fprintf(stdout, "%smanifest inspect:%s Show checkpoint manifest summary\n\nUsage:\n  dukascopy-go manifest inspect [options]\n\nOptions:\n", colorize(colorCyan), colorize(colorReset))
+		fs.PrintDefaults()
+	}
 
 	manifestPath := fs.String("manifest", "", "checkpoint manifest path")
 	outputPath := fs.String("output", "", "output CSV path used to derive <output>.manifest.json")
@@ -116,7 +120,11 @@ func runManifestInspect(args []string, stdout io.Writer) error {
 
 func runManifestVerify(args []string, stdout io.Writer) error {
 	fs := flag.NewFlagSet("manifest verify", flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
+	fs.SetOutput(stdout)
+	fs.Usage = func() {
+		fmt.Fprintf(stdout, "%smanifest verify:%s Audit part files and final CSV against the manifest\n\nUsage:\n  dukascopy-go manifest verify [options]\n\nOptions:\n", colorize(colorCyan), colorize(colorReset))
+		fs.PrintDefaults()
+	}
 
 	manifestPath := fs.String("manifest", "", "checkpoint manifest path")
 	outputPath := fs.String("output", "", "output CSV path used to derive <output>.manifest.json")
@@ -288,7 +296,11 @@ func runManifestVerify(args []string, stdout io.Writer) error {
 
 func runManifestRepair(args []string, stdout io.Writer) error {
 	fs := flag.NewFlagSet("manifest repair", flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
+	fs.SetOutput(stdout)
+	fs.Usage = func() {
+		fmt.Fprintf(stdout, "%smanifest repair:%s Repair part files, rebuild final output, or re-download gaps\n\nUsage:\n  dukascopy-go manifest repair [options]\n\nOptions:\n", colorize(colorCyan), colorize(colorReset))
+		fs.PrintDefaults()
+	}
 
 	manifestPath := fs.String("manifest", "", "checkpoint manifest path")
 	outputPath := fs.String("output", "", "output CSV path used to derive <output>.manifest.json")
@@ -496,7 +508,11 @@ func runManifestRepair(args []string, stdout io.Writer) error {
 
 func runManifestPrune(args []string, stdout io.Writer) error {
 	fs := flag.NewFlagSet("manifest prune", flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
+	fs.SetOutput(stdout)
+	fs.Usage = func() {
+		fmt.Fprintf(stdout, "%smanifest prune:%s Remove obsolete temp files and orphan partition files\n\nUsage:\n  dukascopy-go manifest prune [options]\n\nOptions:\n", colorize(colorCyan), colorize(colorReset))
+		fs.PrintDefaults()
+	}
 
 	manifestPath := fs.String("manifest", "", "checkpoint manifest path")
 	outputPath := fs.String("output", "", "output CSV path used to derive <output>.manifest.json")
@@ -746,7 +762,11 @@ func evaluateDataQuality(stats csvout.CSVStats) ([]string, []string) {
 
 func runManifestCleanDuplicates(args []string, stdout io.Writer) error {
 	fs := flag.NewFlagSet("manifest clean-duplicates", flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
+	fs.SetOutput(stdout)
+	fs.Usage = func() {
+		fmt.Fprintf(stdout, "%smanifest clean-duplicates:%s Clean duplicate rows and sort chronologically\n\nUsage:\n  dukascopy-go manifest clean-duplicates [options]\n\nOptions:\n", colorize(colorCyan), colorize(colorReset))
+		fs.PrintDefaults()
+	}
 
 	manifestPath := fs.String("manifest", "", "checkpoint manifest path")
 	outputPath := fs.String("output", "", "output CSV/Parquet path to clean")

@@ -53,6 +53,8 @@ type progressMetaMsg struct {
 	outputPath  string
 	partition   string
 	parallelism int
+	from        time.Time
+	to          time.Time
 }
 
 type progressLogMsg struct {
@@ -160,7 +162,7 @@ func (p *progressPrinter) SetStatus(status string) {
 	p.send(progressStatusMsg{status: status})
 }
 
-func (p *progressPrinter) SetDownloadMeta(symbol string, timeframe string, side string, outputPath string, partition string, parallelism int) {
+func (p *progressPrinter) SetDownloadMeta(symbol string, timeframe string, side string, outputPath string, partition string, parallelism int, from time.Time, to time.Time) {
 	p.send(progressMetaMsg{
 		symbol:      symbol,
 		timeframe:   timeframe,
@@ -168,6 +170,8 @@ func (p *progressPrinter) SetDownloadMeta(symbol string, timeframe string, side 
 		outputPath:  outputPath,
 		partition:   partition,
 		parallelism: parallelism,
+		from:        from,
+		to:          to,
 	})
 }
 
@@ -285,6 +289,39 @@ func (m progressTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.outputPath = strings.TrimSpace(msg.outputPath)
 		m.partitionMode = strings.TrimSpace(msg.partition)
 		m.parallelism = msg.parallelism
+
+		if m.partitionMode == "none" {
+			var chunkTotal int
+			var scope string
+			switch m.timeframe {
+			case "tick":
+				scope = "tick"
+				for current := hourStartUTC(msg.from); current.Before(msg.to); current = current.Add(time.Hour) {
+					if !dukascopy.IsMarketClosed(m.symbol, current) {
+						chunkTotal++
+					}
+				}
+			case "m1", "m3", "m5", "m15", "m30":
+				scope = "minute"
+				for current := midnightUTC(msg.from); current.Before(msg.to); current = current.AddDate(0, 0, 1) {
+					if dukascopy.IsCryptoSymbol(m.symbol) || current.UTC().Weekday() != time.Saturday {
+						chunkTotal++
+					}
+				}
+			case "h1", "h4":
+				scope = "hour"
+				for current := monthStartUTC(msg.from); current.Before(msg.to); current = current.AddDate(0, 1, 0) {
+					chunkTotal++
+				}
+			case "d1", "w1", "mn1":
+				scope = "day"
+				for year := msg.from.Year(); year <= msg.to.Add(-time.Nanosecond).Year(); year++ {
+					chunkTotal++
+				}
+			}
+			m.chunkTotal = chunkTotal
+			m.chunkScope = scope
+		}
 		return m, nil
 	case progressPartitionMetricsMsg:
 		m.partitionTotal = msg.total
@@ -461,4 +498,19 @@ func (m progressTUIModel) workerLines() []string {
 
 func (m progressTUIModel) metric(label string, value string) string {
 	return fmt.Sprintf("%s %s", m.labelStyle().Render(label), m.valueStyle().Render(value))
+}
+
+func midnightUTC(value time.Time) time.Time {
+	value = value.UTC()
+	return time.Date(value.Year(), value.Month(), value.Day(), 0, 0, 0, 0, time.UTC)
+}
+
+func monthStartUTC(value time.Time) time.Time {
+	value = value.UTC()
+	return time.Date(value.Year(), value.Month(), 1, 0, 0, 0, 0, time.UTC)
+}
+
+func hourStartUTC(value time.Time) time.Time {
+	value = value.UTC()
+	return value.Truncate(time.Hour)
 }

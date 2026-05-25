@@ -14,7 +14,13 @@ import (
 
 func runStats(args []string, stdout io.Writer) error {
 	fs := flag.NewFlagSet("stats", flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
+	fs.SetOutput(stdout)
+	fs.Usage = func() {
+		fmt.Fprintf(stdout, "%sstats:%s Print dataset statistics and audit liquidity gaps\n\n", colorize(colorCyan), colorize(colorReset))
+		fmt.Fprint(stdout, "Usage:\n  dukascopy-go stats [options]\n\nOptions:\n")
+		fs.PrintDefaults()
+		fmt.Fprint(stdout, "\nExamples:\n  dukascopy-go stats --input ./eurusd_m1.csv\n  dukascopy-go stats --input ./xauusd_m1.csv --show-suspicious-gaps --symbol xauusd\n")
+	}
 
 	inputPath := fs.String("input", "", "CSV, CSV.GZ, or Parquet file path")
 	symbol := fs.String("symbol", "", "optional instrument symbol hint such as xauusd or eurusd for gap classification")

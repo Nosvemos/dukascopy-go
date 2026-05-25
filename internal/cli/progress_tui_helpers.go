@@ -37,8 +37,11 @@ func partitionRangeLabel(partition downloadPartition) string {
 }
 
 func formatByteCount(value int64) string {
-	if value <= 0 {
+	if value < 0 {
 		return ""
+	}
+	if value == 0 {
+		return "0 B"
 	}
 	if value < 1024 {
 		return fmt.Sprintf("%d B", value)
@@ -160,8 +163,11 @@ func trimToDisplayWidth(value string, maxWidth int) string {
 }
 
 func formatCount(value int) string {
-	if value <= 0 {
+	if value < 0 {
 		return ""
+	}
+	if value == 0 {
+		return "0"
 	}
 	text := fmt.Sprintf("%d", value)
 	if len(text) <= 3 {

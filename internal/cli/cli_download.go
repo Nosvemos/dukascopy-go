@@ -17,7 +17,13 @@ import (
 
 func runDownload(args []string, stdout io.Writer, stderr io.Writer) error {
 	fs := flag.NewFlagSet("download", flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
+	fs.SetOutput(stdout)
+	fs.Usage = func() {
+		fmt.Fprintf(stdout, "%sdownload:%s Download historical Dukascopy tick and bar data to CSV/Parquet\n\n", colorize(colorCyan), colorize(colorReset))
+		fmt.Fprint(stdout, "Usage:\n  dukascopy-go download [options]\n\nOptions:\n")
+		fs.PrintDefaults()
+		fmt.Fprint(stdout, "\nExamples:\n  dukascopy-go download --symbol eurusd --timeframe m1 --last 30d --output ./eurusd_m1.csv\n  dukascopy-go download --symbol xauusd,gbpusd --timeframe d1 --from 2024-01-01 --to 2024-02-01 --output ./data/\n  dukascopy-go download --symbol eurusd --timeframe tick --last 1d --output ./eurusd_tick.parquet --parallelism 4 --partition day\n")
+	}
 
 	symbol := fs.String("symbol", "", "instrument symbol such as xauusd or eur/usd")
 	timeframe := fs.String("timeframe", "m1", "tick, m1, m3, m5, m15, m30, h1, h4, d1, w1, mn1")
@@ -374,7 +380,7 @@ func runDownload(args []string, stdout io.Writer, stderr io.Writer) error {
 	progressWriter := stderr
 	if progressEnabled {
 		printer := newProgressPrinter(stderr)
-		printer.SetDownloadMeta(*symbol, string(normalizedTimeframe), string(request.Side), *outputPath, normalizedPartition, *parallelism)
+		printer.SetDownloadMeta(*symbol, string(normalizedTimeframe), string(request.Side), *outputPath, normalizedPartition, *parallelism, request.From, request.To)
 		progressWriter = printer
 		client = client.WithProgress(printer.Print)
 		defer printer.Finish()

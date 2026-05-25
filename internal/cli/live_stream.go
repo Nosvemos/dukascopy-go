@@ -192,7 +192,13 @@ func wsWriteTextFrame(conn net.Conn, payload []byte) error {
 
 func runLiveStream(args []string, stdout io.Writer, stderr io.Writer) error {
 	fs := flag.NewFlagSet("live", flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
+	fs.SetOutput(stdout)
+	fs.Usage = func() {
+		fmt.Fprintf(stdout, "%slive:%s Stream real-time ticks/bars to stdout and optional WebSocket server\n\n", colorize(colorCyan), colorize(colorReset))
+		fmt.Fprint(stdout, "Usage:\n  dukascopy-go live [options]\n\nOptions:\n")
+		fs.PrintDefaults()
+		fmt.Fprint(stdout, "\nExamples:\n  dukascopy-go live --symbol eurusd --timeframe tick --format jsonl\n  dukascopy-go live --symbol eurusd --timeframe m1 --side bid --port 8080\n")
+	}
 
 	symbol       := fs.String("symbol", "", "instrument symbol such as eurusd or xauusd (required)")
 	timeframe    := fs.String("timeframe", "tick", "tick, m1, m3, m5, m15, m30, h1, h4, d1")

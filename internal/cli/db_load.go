@@ -33,7 +33,13 @@ const (
 // runDBLoad is the CLI entry-point for the `db-load` command.
 func runDBLoad(args []string, stdout io.Writer, stderr io.Writer) error {
 	fs := flag.NewFlagSet("db-load", flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
+	fs.SetOutput(stdout)
+	fs.Usage = func() {
+		fmt.Fprintf(stdout, "%sdb-load:%s Ingest a CSV or Parquet file directly into ClickHouse or InfluxDB\n\n", colorize(colorCyan), colorize(colorReset))
+		fmt.Fprint(stdout, "Usage:\n  dukascopy-go db-load [options]\n\nOptions:\n")
+		fs.PrintDefaults()
+		fmt.Fprint(stdout, "\nExamples:\n  dukascopy-go db-load --input ./eurusd_m1.csv --db clickhouse --url http://localhost:8123 --table eurusd_m1\n  dukascopy-go db-load --input ./eurusd_tick.csv --db influxdb --url http://localhost:8086 --org myorg --bucket mybucket --token mytoken --table eurusd_tick --symbol eurusd\n")
+	}
 
 	input    := fs.String("input", "", "path to the local CSV or Parquet file to ingest (required)")
 	dbType   := fs.String("db", "", "target database: clickhouse, influxdb, or postgres (required)")
