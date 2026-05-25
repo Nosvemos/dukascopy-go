@@ -38,3 +38,5 @@ docs/
 __pycache__/
 *.py[cod]
 *$py.class
+dukascopy-go
+dukascopy-go-sdk
