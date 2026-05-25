@@ -51,6 +51,13 @@ go build -o dukascopy-go ./cmd/dukascopy-go
 
 ## 📖 Quick Start
 
+### 🪄 Interactive Wizard (Zero Config!)
+Don't want to learn CLI flags? Just run the binary without arguments to launch the **Interactive Setup Wizard**:
+```bash
+dukascopy-go
+```
+*Use your arrow keys to select instruments, timeframes, and formats interactively.*
+
 ### 🔍 Find Instruments
 Search for a specific instrument, or list them all:
 ```bash
@@ -59,8 +66,16 @@ dukascopy-go instruments  # Lists all available
 ```
 
 ### 📉 Download Historical Data
-Download 1-minute gold bars to CSV (using simple YYYY-MM-DD format):
+Download 1-minute gold bars to CSV using a **flexible duration** (`--last 30d`) or exact dates (`YYYY-MM-DD`):
 ```bash
+# Download the last 30 days of 1-minute data
+dukascopy-go download \
+  --symbol xauusd \
+  --timeframe m1 \
+  --last 30d \
+  --output ./data/xauusd-m1.csv
+
+# Or specify exact dates
 dukascopy-go download \
   --symbol xauusd \
   --timeframe m1 \
@@ -119,8 +134,9 @@ dukascopy-go db-load \
 | --- | --- | --- |
 | `--symbol` | **(Required)** Instrument to download | `eurusd`, `btcusd` |
 | `--timeframe` | **(Required)** Resolution of data | `tick`, `m1`, `h1`, `d1` |
-| `--from` | **(Required)** Start time (RFC3339) | `2024-01-01T00:00:00Z` |
-| `--to` | End time. Defaults to *now* | `2024-01-02T00:00:00Z` |
+| `--last` | **(Optional)** Duration to download back from now | `30d`, `6mo`, `1y` |
+| `--from` | **(Required unless --last)** Start time | `2024-01-01` or RFC3339 |
+| `--to` | End time. Defaults to *now* | `2024-01-02` |
 | `--output` | **(Required)** Output file path | `./data.csv` or `-` for stdout |
 | `--simple` / `--full`| Schema type (OHLCV vs Bid/Ask/Spread) | `--simple` |
 | `--custom-columns` | Customize output fields | `timestamp,bid_open,ask_open`|

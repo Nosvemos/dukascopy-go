@@ -46,7 +46,7 @@ func TestRunRouterErrorAndSuccessCoverage(t *testing.T) {
 	if code := Run([]string{"download", "--symbol", "xauusd"}, &stdout, &stderr); code != 1 {
 		t.Fatalf("expected download validation error code 1, got %d", code)
 	}
-	if !strings.Contains(stderr.String(), "--from is required") {
+	if !strings.Contains(stderr.String(), "--from or --last is required") {
 		t.Fatalf("unexpected download stderr: %s", stderr.String())
 	}
 

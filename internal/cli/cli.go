@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -41,6 +42,9 @@ func Run(args []string, stdout io.Writer, stderr io.Writer) int {
 	args = loadedArgs
 
 	if len(args) == 0 {
+		if isInteractiveTerminal(stdout) {
+			return runWizard(stdout, stderr)
+		}
 		printUsage(stderr)
 		return 2
 	}
@@ -176,6 +180,7 @@ func runDownload(args []string, stdout io.Writer, stderr io.Writer) error {
 	simpleOutput := fs.Bool("simple", false, "write the reduced CSV column set")
 	fullOutput := fs.Bool("full", false, "write the full CSV column set with bid/ask columns")
 	customColumns := fs.String("custom-columns", "", "comma-separated CSV column list")
+	lastValue := fs.String("last", "", "download the last N duration (e.g. 30d, 1y, 6mo) instead of --from/--to")
 	fromValue := fs.String("from", "", "inclusive RFC3339 start timestamp")
 	toValue := fs.String("to", "", "inclusive RFC3339 end timestamp")
 	outputPath := fs.String("output", "", "target CSV path")
@@ -305,11 +310,11 @@ func runDownload(args []string, stdout io.Writer, stderr io.Writer) error {
 	if strings.TrimSpace(*symbol) == "" {
 		return errors.New("--symbol is required")
 	}
-	if strings.TrimSpace(*fromValue) == "" {
-		return errors.New("--from is required")
+	if strings.TrimSpace(*fromValue) == "" && strings.TrimSpace(*lastValue) == "" {
+		return errors.New("either --from or --last is required")
 	}
-	if !*live && strings.TrimSpace(*toValue) == "" {
-		return errors.New("--to is required")
+	if !*live && strings.TrimSpace(*toValue) == "" && strings.TrimSpace(*lastValue) == "" {
+		return errors.New("--to is required when --last is not provided")
 	}
 	if strings.TrimSpace(*outputPath) == "" {
 		return errors.New("--output is required")
@@ -318,16 +323,31 @@ func runDownload(args []string, stdout io.Writer, stderr io.Writer) error {
 		return errors.New("--to cannot be combined with --live")
 	}
 
-	from, err := parseFlexibleTime(*fromValue)
-	if err != nil {
-		return fmt.Errorf("--from %w", err)
-	}
-
-	to := from
-	if !*live {
-		to, err = parseFlexibleTime(*toValue)
+	var from, to time.Time
+	var err error
+	if strings.TrimSpace(*lastValue) != "" {
+		to = time.Now().UTC()
+		if !*live && strings.TrimSpace(*toValue) != "" {
+			to, err = parseFlexibleTime(*toValue)
+			if err != nil {
+				return fmt.Errorf("--to %w", err)
+			}
+		}
+		from, err = parseLookback(*lastValue, to)
 		if err != nil {
-			return fmt.Errorf("--to %w", err)
+			return fmt.Errorf("--last %w", err)
+		}
+	} else {
+		from, err = parseFlexibleTime(*fromValue)
+		if err != nil {
+			return fmt.Errorf("--from %w", err)
+		}
+		to = from
+		if !*live {
+			to, err = parseFlexibleTime(*toValue)
+			if err != nil {
+				return fmt.Errorf("--to %w", err)
+			}
 		}
 	}
 
@@ -569,6 +589,48 @@ func parseFlexibleTime(value string) (time.Time, error) {
 		return t, nil
 	}
 	return time.Time{}, fmt.Errorf("must be RFC3339 or YYYY-MM-DD format")
+}
+
+func parseLookback(s string, now time.Time) (time.Time, error) {
+	s = strings.ToLower(strings.TrimSpace(s))
+	if s == "" {
+		return time.Time{}, fmt.Errorf("empty duration")
+	}
+
+	if d, err := time.ParseDuration(s); err == nil {
+		return now.Add(-d), nil
+	}
+
+	var val int
+	var unit string
+	for i, r := range s {
+		if r < '0' || r > '9' {
+			valStr := s[:i]
+			unit = s[i:]
+			var err error
+			val, err = strconv.Atoi(valStr)
+			if err != nil {
+				return time.Time{}, fmt.Errorf("invalid lookback number: %s", valStr)
+			}
+			break
+		}
+	}
+	if unit == "" {
+		return time.Time{}, fmt.Errorf("missing unit in lookback (use d, w, mo, y)")
+	}
+
+	switch unit {
+	case "d", "day", "days":
+		return now.AddDate(0, 0, -val), nil
+	case "w", "week", "weeks":
+		return now.AddDate(0, 0, -val*7), nil
+	case "mo", "month", "months":
+		return now.AddDate(0, -val, 0), nil
+	case "y", "yr", "year", "years":
+		return now.AddDate(-val, 0, 0), nil
+	default:
+		return time.Time{}, fmt.Errorf("unsupported lookback unit: %s", unit)
+	}
 }
 
 func runSingleDownload(
