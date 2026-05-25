@@ -76,6 +76,18 @@ func Run(args []string, stdout io.Writer, stderr io.Writer) int {
 			return 1
 		}
 		return 0
+	case "live":
+		if err := runLiveStream(args[1:], stdout, stderr); err != nil {
+			fmt.Fprintf(stderr, "%serror:%s %v\n", colorize(colorRed), colorize(colorReset), err)
+			return 1
+		}
+		return 0
+	case "db-load":
+		if err := runDBLoad(args[1:], stdout, stderr); err != nil {
+			fmt.Fprintf(stderr, "%serror:%s %v\n", colorize(colorRed), colorize(colorReset), err)
+			return 1
+		}
+		return 0
 	case "help", "-h", "--help":
 		printUsage(stdout)
 		return 0
@@ -95,6 +107,8 @@ func printUsage(w io.Writer) {
   stats        Print dataset statistics
   manifest     Inspect or verify checkpoint manifests
   download     Download historical data and save it as CSV or Parquet
+  live         Stream real-time ticks/bars to stdout and optional WebSocket server
+  db-load      Ingest a CSV or Parquet file directly into ClickHouse or InfluxDB
   list-timeframes  Print supported timeframe values
   version      Print build version information
 
@@ -118,6 +132,10 @@ examples:
   dukascopy-go download --symbol xauusd --timeframe m1 --from 2024-01-02T00:00:00Z --output ./data/xauusd-live.csv --simple --live --poll-interval 5s
   dukascopy-go download --symbol xauusd --timeframe m1 --from 2024-01-02T00:00:00Z --to 2024-01-02T06:00:00Z --output ./data/xauusd.csv --simple --rate-limit 150ms
   dukascopy-go download --symbol xauusd --timeframe m1 --from 2024-01-01T00:00:00Z --to 2024-02-01T00:00:00Z --output ./data/xauusd.csv --simple --partition auto --parallelism 4
+  dukascopy-go live --symbol eurusd --timeframe tick --format jsonl --poll-interval 1s
+  dukascopy-go live --symbol xauusd --timeframe m1 --format jsonl --port 8080
+  dukascopy-go db-load --input ./data/eurusd_m1.parquet --db clickhouse --url http://localhost:8123 --table eurusd_m1
+  dukascopy-go db-load --input ./data/eurusd_m1.csv --db influxdb --url http://localhost:8086 --table eurusd --token MY_TOKEN --org my-org --bucket market-data
 `)
 }
 
