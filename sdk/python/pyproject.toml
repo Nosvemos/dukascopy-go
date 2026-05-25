@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=42", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dukascopy-go"
+version = "1.0.0"
+description = "Blazing fast Dukascopy market data downloader SDK built on Go"
+readme = "../../README.md"
+requires-python = ">=3.7"
+authors = [
+  { name="Nosvemos" }
+]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent",
+  "Topic :: Office/Business :: Financial :: Investment",
+]
+
+[project.urls]
+"Homepage" = "https://github.com/Nosvemos/dukascopy-go"
+"Bug Tracker" = "https://github.com/Nosvemos/dukascopy-go/issues"

@@ -113,29 +113,12 @@ func printUsage(w io.Writer) {
   version      Print build version information
 
 examples:
-  dukascopy-go --config ./dukascopy.json instruments --query xauusd
+  dukascopy-go instruments
   dukascopy-go instruments --query xauusd
-  dukascopy-go instruments --query xauusd --json
-  dukascopy-go --list-timeframes
-  dukascopy-go --version
-  dukascopy-go stats --input ./data/xauusd.csv
-  dukascopy-go manifest inspect --output ./data/xauusd.csv
-  dukascopy-go manifest prune --output ./data/xauusd.csv
-  dukascopy-go manifest repair --output ./data/xauusd.csv
-  dukascopy-go manifest verify --manifest ./data/xauusd.csv.manifest.json
-  dukascopy-go download --symbol xauusd --timeframe m1 --from 2024-01-02T00:00:00Z --to 2024-01-02T01:00:00Z --output ./data/xauusd.csv --simple
-  dukascopy-go download --symbol xauusd --timeframe h1 --from 2024-01-01T00:00:00Z --to 2024-01-02T00:00:00Z --output ./data/xauusd-full.csv --full
-  dukascopy-go download --symbol xauusd --timeframe m1 --from 2024-01-02T00:00:00Z --to 2024-01-02T06:00:00Z --output ./data/xauusd.parquet --full
-  dukascopy-go download --symbol xauusd --timeframe m1 --from 2024-01-02T00:00:00Z --to 2024-01-02T01:00:00Z --output ./data/xauusd-custom.csv --custom-columns timestamp,bid_open,ask_open,volume
-  dukascopy-go download --symbol xauusd --timeframe m1 --from 2024-01-02T00:00:00Z --to 2024-01-02T00:03:00Z --output - --simple
-  dukascopy-go download --symbol xauusd --timeframe m1 --from 2024-01-02T00:00:00Z --to 2024-01-02T06:00:00Z --output ./data/xauusd.csv --simple --resume --retries 5
-  dukascopy-go download --symbol xauusd --timeframe m1 --from 2024-01-02T00:00:00Z --output ./data/xauusd-live.csv --simple --live --poll-interval 5s
-  dukascopy-go download --symbol xauusd --timeframe m1 --from 2024-01-02T00:00:00Z --to 2024-01-02T06:00:00Z --output ./data/xauusd.csv --simple --rate-limit 150ms
-  dukascopy-go download --symbol xauusd --timeframe m1 --from 2024-01-01T00:00:00Z --to 2024-02-01T00:00:00Z --output ./data/xauusd.csv --simple --partition auto --parallelism 4
-  dukascopy-go live --symbol eurusd --timeframe tick --format jsonl --poll-interval 1s
-  dukascopy-go live --symbol xauusd --timeframe m1 --format jsonl --port 8080
-  dukascopy-go db-load --input ./data/eurusd_m1.parquet --db clickhouse --url http://localhost:8123 --table eurusd_m1
-  dukascopy-go db-load --input ./data/eurusd_m1.csv --db influxdb --url http://localhost:8086 --table eurusd --token MY_TOKEN --org my-org --bucket market-data
+  dukascopy-go download --symbol xauusd --timeframe m1 --from 2024-01-02T00:00:00Z --output ./xauusd.csv
+  dukascopy-go download --symbol xauusd --timeframe d1 --from 2024-01-01T00:00:00Z --to 2024-02-01T00:00:00Z --output ./xauusd.parquet
+  dukascopy-go live --symbol eurusd --timeframe tick --format jsonl
+  dukascopy-go db-load --input ./eurusd_m1.csv --db clickhouse --url http://localhost:8123 --table eurusd_m1
 `)
 }
 
@@ -151,9 +134,6 @@ func runInstruments(args []string, stdout io.Writer) error {
 		return err
 	}
 	applyInstrumentConfigDefaults(fs, limit, baseURL)
-	if strings.TrimSpace(*query) == "" {
-		return errors.New("--query is required")
-	}
 	if *limit <= 0 {
 		return errors.New("--limit must be greater than 0")
 	}
@@ -338,16 +318,16 @@ func runDownload(args []string, stdout io.Writer, stderr io.Writer) error {
 		return errors.New("--to cannot be combined with --live")
 	}
 
-	from, err := time.Parse(time.RFC3339, *fromValue)
+	from, err := parseFlexibleTime(*fromValue)
 	if err != nil {
-		return fmt.Errorf("--from must be RFC3339: %w", err)
+		return fmt.Errorf("--from %w", err)
 	}
 
 	to := from
 	if !*live {
-		to, err = time.Parse(time.RFC3339, *toValue)
+		to, err = parseFlexibleTime(*toValue)
 		if err != nil {
-			return fmt.Errorf("--to must be RFC3339: %w", err)
+			return fmt.Errorf("--to %w", err)
 		}
 	}
 
@@ -573,6 +553,22 @@ func readBaseURL() string {
 
 func newDownloadContext() (context.Context, context.CancelFunc) {
 	return signal.NotifyContext(context.Background(), os.Interrupt)
+}
+
+func parseFlexibleTime(value string) (time.Time, error) {
+	if t, err := time.Parse(time.RFC3339, value); err == nil {
+		return t, nil
+	}
+	if t, err := time.Parse("2006-01-02", value); err == nil {
+		return t, nil
+	}
+	if t, err := time.Parse("2006-01-02 15:04", value); err == nil {
+		return t, nil
+	}
+	if t, err := time.Parse("2006-01-02 15:04:05", value); err == nil {
+		return t, nil
+	}
+	return time.Time{}, fmt.Errorf("must be RFC3339 or YYYY-MM-DD format")
 }
 
 func runSingleDownload(

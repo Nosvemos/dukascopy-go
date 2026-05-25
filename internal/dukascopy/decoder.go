@@ -71,6 +71,18 @@ func ResolveInstrument(instruments []Instrument, raw string) (Instrument, error)
 }
 
 func FilterInstruments(instruments []Instrument, raw string, limit int) []Instrument {
+	if strings.TrimSpace(raw) == "" {
+		filtered := make([]Instrument, len(instruments))
+		copy(filtered, instruments)
+		sort.SliceStable(filtered, func(i, j int) bool {
+			return filtered[i].Name < filtered[j].Name
+		})
+		if limit > 0 && limit < len(filtered) {
+			filtered = filtered[:limit]
+		}
+		return filtered
+	}
+
 	needle := compactSymbol(raw)
 	if needle == "" {
 		return nil

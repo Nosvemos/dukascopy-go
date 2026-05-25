@@ -213,6 +213,9 @@ func WriteBars(outputPath string, instrument dukascopy.Instrument, columns []str
 	if isParquetPath(outputPath) {
 		return writeBarsParquet(outputPath, instrument, columns, primaryBars, bidBars, askBars)
 	}
+	if IsJSONLPath(outputPath) {
+		return writeBarsJSONL(outputPath, instrument, columns, primaryBars, bidBars, askBars)
+	}
 	if err := ensureParentDir(outputPath); err != nil {
 		return err
 	}
@@ -243,6 +246,9 @@ func WriteBarsRowsToWriter(w io.Writer, instrument dukascopy.Instrument, columns
 func WriteTicks(outputPath string, instrument dukascopy.Instrument, columns []string, ticks []dukascopy.Tick) error {
 	if isParquetPath(outputPath) {
 		return writeTicksParquet(outputPath, instrument, columns, ticks)
+	}
+	if IsJSONLPath(outputPath) {
+		return writeTicksJSONL(outputPath, instrument, columns, ticks)
 	}
 	if err := ensureParentDir(outputPath); err != nil {
 		return err

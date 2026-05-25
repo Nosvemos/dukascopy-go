@@ -104,8 +104,8 @@ func TestBucketStartAndDecoderRemainingBranches(t *testing.T) {
 	}
 
 	t.Run("filter instruments with empty query and zero limit", func(t *testing.T) {
-		if got := FilterInstruments([]Instrument{{Code: "XAU-USD"}}, "", 1); got != nil {
-			t.Fatalf("expected nil empty-query result, got %+v", got)
+		if got := FilterInstruments([]Instrument{{Code: "XAU-USD"}}, "", 1); len(got) != 1 {
+			t.Fatalf("expected 1 result for empty query, got %+v", got)
 		}
 		if got := FilterInstruments([]Instrument{{Name: "Gold", Code: "XAU-USD", Description: "Gold vs US Dollar"}}, "gold", 0); len(got) != 0 {
 			t.Fatalf("expected zero-limit result, got %+v", got)

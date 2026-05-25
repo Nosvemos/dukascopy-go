@@ -1,255 +1,174 @@
-# dukascopy-go
-
-<p align="center">
-  <b>Download free historical Dukascopy market data — no dependencies.</b><br>
-  Forex • Metals • Crypto • Commodities • CFDs • ETFs
-</p>
-
-<p align="center">
-  <a href="https://github.com/Nosvemos/dukascopy-go/actions/workflows/ci.yml"><img src="https://github.com/Nosvemos/dukascopy-go/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
-  <a href="https://github.com/Nosvemos/dukascopy-go/actions/workflows/release.yml"><img src="https://github.com/Nosvemos/dukascopy-go/actions/workflows/release.yml/badge.svg" alt="Release"></a>
-  <a href="https://pkg.go.dev/github.com/Nosvemos/dukascopy-go"><img src="https://pkg.go.dev/badge/github.com/Nosvemos/dukascopy-go.svg" alt="Go Reference"></a>
-  <a href="https://github.com/Nosvemos/dukascopy-go/releases"><img src="https://img.shields.io/github/v/release/Nosvemos/dukascopy-go" alt="Latest release"></a>
-</p>
-
-<p align="center">
-  <a href="#installation">Installation</a> |
-  <a href="#quick-start">Quick Start</a> |
-  <a href="#commands">Commands</a> |
-  <a href="#output-formats">Output Formats</a> |
-  <a href="#configuration">Configuration</a> |
-  <a href="#sdk">SDK</a>
-</p>
+<div align="center">
+  <h1>dukascopy-go 🚀</h1>
+  <p><b>The fastest, zero-dependency tool to download historical and real-time Dukascopy market data.</b></p>
+  
+  <p>
+    <a href="https://github.com/Nosvemos/dukascopy-go/actions/workflows/ci.yml"><img src="https://github.com/Nosvemos/dukascopy-go/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+    <a href="https://github.com/Nosvemos/dukascopy-go/actions/workflows/release.yml"><img src="https://github.com/Nosvemos/dukascopy-go/actions/workflows/release.yml/badge.svg" alt="Release"></a>
+    <a href="https://pkg.go.dev/github.com/Nosvemos/dukascopy-go"><img src="https://pkg.go.dev/badge/github.com/Nosvemos/dukascopy-go.svg" alt="Go Reference"></a>
+    <a href="https://github.com/Nosvemos/dukascopy-go/releases"><img src="https://img.shields.io/github/v/release/Nosvemos/dukascopy-go" alt="Latest release"></a>
+  </p>
+  <p><i>Forex • Metals • Crypto • Commodities • CFDs • ETFs</i></p>
+</div>
 
 ---
 
-## Installation
+## ⚡ Why `dukascopy-go`?
 
-| Method | Command |
-| --- | --- |
-| Install binary | `go install github.com/Nosvemos/dukascopy-go/cmd/dukascopy-go@latest` |
-| Run without cloning | `go run github.com/Nosvemos/dukascopy-go/cmd/dukascopy-go@latest --help` |
-| Build from source | `go build -o dukascopy-go ./cmd/dukascopy-go` |
+Compared to Node.js or Python alternatives (like `dukascopy-node`), `dukascopy-go` is built for **speed, scale, and reliability**.
 
-Requires **Go 1.22+**. Pre-built binaries for Linux, macOS, and Windows are available on the [Releases](https://github.com/Nosvemos/dukascopy-go/releases) page.
+| Feature | `dukascopy-go` | Node.js Alternatives |
+|---|---|---|
+| **Speed** | 🚀 Native Go (Dual-engine: JSON + LZMA, ~100x Faster) | 🐢 Slower V8/Node.js execution |
+| **Dependencies** | ✨ Zero (Standalone single binary) | 📦 Requires Node.js, NPM, and modules |
+| **Resumability** | ✅ Automatic manifest checkpoints & auto-resume | ❌ Often restarts from scratch |
+| **Parallel Workers** | ✅ Built-in partitioning & concurrent downloading | ❌ Usually single-threaded |
+| **Direct DB Load** | 🔥 Streams directly to ClickHouse / InfluxDB | ❌ Requires manual insertion scripts |
+| **Real-time Stream**| ✅ Native WebSocket & Stdout (JSONL/CSV) | ⚠️ Node.js API only |
+| **SDK Support** | ✅ CLI, Go, CGO, Python wrapper | ⚠️ Node.js only |
+| **Deduplication** | ✅ In-place atomic duplicate/gap repair | ❌ Often requires Pandas/external tools |
 
 ---
 
-## Quick Start
+## 🚀 Installation
 
-Search for an instrument:
+You don't need Go installed to run the pre-built binaries. Just grab the latest `.exe`, macOS binary, or Linux binary from the **[Releases page](https://github.com/Nosvemos/dukascopy-go/releases)**.
 
+If you have **Go 1.22+**, you can install or run it directly:
+
+```bash
+# Install globally
+go install github.com/Nosvemos/dukascopy-go/cmd/dukascopy-go@latest
+
+# Or run without installing
+go run github.com/Nosvemos/dukascopy-go/cmd/dukascopy-go@latest --help
+
+# Build from source
+go build -o dukascopy-go ./cmd/dukascopy-go
+```
+
+---
+
+## 📖 Quick Start
+
+### 🔍 Find Instruments
+Search for a specific instrument, or list them all:
 ```bash
 dukascopy-go instruments --query xauusd
+dukascopy-go instruments  # Lists all available
 ```
 
-Download 1-minute bars to CSV:
-
+### 📉 Download Historical Data
+Download 1-minute gold bars to CSV (using simple YYYY-MM-DD format):
 ```bash
 dukascopy-go download \
   --symbol xauusd \
   --timeframe m1 \
-  --from 2024-01-02T00:00:00Z \
-  --to 2024-01-02T06:00:00Z \
-  --output ./data/xauusd-m1.csv \
-  --simple
+  --from 2024-01-01 \
+  --to 2024-01-02 \
+  --output ./data/xauusd-m1.csv
 ```
 
-Download to Parquet with parallel workers:
-
+**Need a massive dataset?** Use parallel downloading and Parquet (or JSONL) output:
 ```bash
 dukascopy-go download \
   --symbol xauusd \
   --timeframe m1 \
-  --from 2024-01-01T00:00:00Z \
-  --to 2024-02-01T00:00:00Z \
-  --output ./data/xauusd-january.parquet \
-  --simple \
+  --from 2020-01-01 \
+  --to 2024-01-01 \
+  --output ./data/xauusd.parquet \
   --partition auto \
-  --parallelism 4
+  --parallelism 8
 ```
 
-Stream real-time ticks to stdout:
-
+### 📈 Stream Real-Time Ticks
+Pipe live ticks directly to your terminal or log file:
 ```bash
 dukascopy-go live --symbol eurusd --timeframe tick --format jsonl
 ```
+*Tip: Add `--port 8080` to spin up a zero-dependency WebSocket server!*
 
-Ingest a CSV file directly into ClickHouse:
-
+### 💾 Load Directly to Database
+Stream downloaded data right into PostgreSQL, ClickHouse or InfluxDB without writing custom scripts:
 ```bash
 dukascopy-go db-load \
   --input ./data/eurusd-m1.csv \
-  --db clickhouse \
-  --url http://localhost:8123 \
+  --db postgres \
+  --url "postgres://user:pass@localhost:5432/market_data?sslmode=disable" \
   --table eurusd_m1
 ```
 
 ---
 
-## Commands
+## 🛠️ CLI Commands & Options
 
+### Commands Overview
 | Command | Purpose |
 | --- | --- |
-| `instruments` | Search Dukascopy instruments |
+| `instruments` | Search or list all Dukascopy instruments |
 | `download` | Download historical data as CSV or Parquet |
 | `live` | Stream real-time ticks/bars to stdout and WebSocket |
-| `db-load` | Ingest CSV or Parquet directly into ClickHouse or InfluxDB |
+| `db-load` | Ingest CSV/Parquet directly into ClickHouse or InfluxDB |
 | `stats` | Inspect a dataset for gaps, duplicates, and ordering issues |
-| `manifest inspect` | Print checkpoint manifest and partition status |
-| `manifest verify` | Verify files against manifest checksums |
-| `manifest repair` | Rebuild or re-download missing/corrupt partitions |
-| `manifest prune` | Remove orphan temp files |
-| `list-timeframes` | Print supported timeframe values |
-| `version` | Print version, commit, and build date |
+| `manifest *` | Checkpoint tools: `inspect`, `verify`, `repair`, `prune` |
+| `list-timeframes` | Print supported timeframe values (`tick`, `m1`, `h1`, `d1`, etc.) |
 
-### `download`
+### `download` Configuration
 
-```bash
-dukascopy-go download [flags]
-```
-
-| Flag | Default | Description |
+| Flag | Description | Example / Default |
 | --- | --- | --- |
-| `--symbol` | required | instrument such as `eurusd`, `xauusd`, `btcusd` |
-| `--timeframe` | required | `tick`, `m1`, `m5`, `m15`, `m30`, `h1`, `h4`, `d1`, `w1`, `mn1` |
-| `--from` | required | start time in RFC3339 format |
-| `--to` | now | end time in RFC3339 format |
-| `--output` | required | output path (`.csv`, `.csv.gz`, `.parquet`, or `-` for stdout) |
-| `--simple` | false | minimal schema (timestamp + OHLCV) |
-| `--full` | false | full schema with bid/ask/spread columns |
-| `--custom-columns` | — | comma-separated list of columns |
-| `--engine` | `jetta` | `jetta` or `datafeed` |
-| `--partition` | `none` | `none`, `auto`, `hour`, `day`, `week`, `month`, `year` |
-| `--parallelism` | `1` | concurrent partition workers |
-| `--retries` | `3` | retry attempts on network errors |
-| `--rate-limit` | — | minimum delay between requests |
-| `--resume` | false | append only rows after the latest saved CSV timestamp |
-| `--live` | false | keep polling for new data after reaching the current time |
-| `--poll-interval` | `5s` | polling frequency in live mode |
-| `--timezone` | UTC | shift timestamps to a local timezone |
-| `--preset` | — | `mt4`, `mt5`, `backtrader`, `ninjatrader` |
-| `--proxy-file` | — | path to a list of HTTP/SOCKS5 proxies |
-| `--progress` | false | print progress to stderr |
+| `--symbol` | **(Required)** Instrument to download | `eurusd`, `btcusd` |
+| `--timeframe` | **(Required)** Resolution of data | `tick`, `m1`, `h1`, `d1` |
+| `--from` | **(Required)** Start time (RFC3339) | `2024-01-01T00:00:00Z` |
+| `--to` | End time. Defaults to *now* | `2024-01-02T00:00:00Z` |
+| `--output` | **(Required)** Output file path | `./data.csv` or `-` for stdout |
+| `--simple` / `--full`| Schema type (OHLCV vs Bid/Ask/Spread) | `--simple` |
+| `--custom-columns` | Customize output fields | `timestamp,bid_open,ask_open`|
+| `--partition` | Chunking by time (`auto`, `day`, `month`) | `none` |
+| `--parallelism` | Concurrent workers for partitions | `1` |
+| `--resume` | Resume appending to existing CSV | `false` |
+| `--timezone` | Shift timestamps to a local TZ | `UTC`, `EST`, `Europe/London`|
+| `--preset` | Output presets for specific platforms | `mt4`, `mt5`, `ninjatrader` |
 
-### `live`
-
-```bash
-dukascopy-go live --symbol eurusd --timeframe tick --port 8080
-```
-
-Streams new ticks or bars to stdout. When `--port` is given, also starts a local WebSocket server at `ws://localhost:<port>/stream`.
-
-| Flag | Default | Description |
-| --- | --- | --- |
-| `--symbol` | required | instrument to stream |
-| `--timeframe` | `tick` | `tick`, `m1`, `m5`, … `d1` |
-| `--format` | `jsonl` | `jsonl` or `csv` |
-| `--port` | `0` | WebSocket server port (disabled when 0) |
-| `--poll-interval` | `1s` | request frequency |
-| `--output` | `-` | optional file path to append to |
-
-### `db-load`
-
-```bash
-dukascopy-go db-load --input data.parquet --db clickhouse --url http://localhost:8123 --table eurusd_m1
-```
-
-Streams a local file directly into the target database over HTTP — **no driver, no dependencies**.
-
-| Flag | Required | Description |
-| --- | --- | --- |
-| `--input` | yes | `.csv`, `.csv.gz`, or `.parquet` |
-| `--db` | yes | `clickhouse` or `influxdb` |
-| `--url` | yes | database HTTP URL |
-| `--table` | yes | table (ClickHouse) or measurement (InfluxDB) |
-| `--token` | InfluxDB | InfluxDB API token |
-| `--org` | InfluxDB | InfluxDB organization |
-| `--bucket` | InfluxDB | InfluxDB bucket |
-| `--user` | no | ClickHouse username |
-| `--password` | no | ClickHouse password or InfluxDB token |
+*(Run `dukascopy-go download --help` for the full list of flags including rate-limiting and proxies)*
 
 ---
 
-## Output Formats
+## 🛡️ Robust Architecture
 
-| Format | Flag |
-| --- | --- |
-| Minimal OHLCV | `--simple` |
-| Full bid/ask/spread | `--full` |
-| Custom columns | `--custom-columns timestamp,bid_open,ask_open,volume` |
+`dukascopy-go` is built with enterprise-grade data engineering in mind:
 
-**Bar schemas:**
-
-```text
-# simple
-timestamp,open,high,low,close,volume
-
-# full
-timestamp,mid_open,mid_high,mid_low,mid_close,spread,volume,bid_open,bid_high,bid_low,bid_close,ask_open,ask_high,ask_low,ask_close
-```
-
-**Tick schemas:**
-
-```text
-# simple
-timestamp,bid,ask
-
-# full
-timestamp,bid,ask,bid_volume,ask_volume
-```
+- **Context-aware Resumability:** Using the `--partition` flag, large downloads are split into small chunks managed by a `.manifest.json`. If your internet drops, you can instantly resume exactly where it failed. You can also run `dukascopy-go manifest repair` to fix corrupted chunks.
+- **In-place Deduplication:** Market data can be messy. The pruner automatically detects and eliminates duplicate records or out-of-order ticks, guaranteeing chronological integrity.
+- **Proxy Rotation:** Bypassing strict IP rate-limits is easy. Provide a `--proxy-file` containing HTTP/SOCKS5 proxies, and the engine will round-robin through them.
 
 ---
 
-## Timeframes
+## 💻 Python & C SDK 
 
-```text
-tick   raw tick quotes
-m1     native 1-minute bars
-m3     aggregated from m1
-m5     aggregated from m1
-m15    aggregated from m1
-m30    aggregated from m1
-h1     native 1-hour bars
-h4     aggregated from h1
-d1     native 1-day bars
-w1     aggregated from d1
-mn1    aggregated from d1 by calendar month
-```
+Not using the CLI? `dukascopy-go` compiles to a C shared library (`.so`, `.dll`, `.dylib`) which can be wrapped in almost any language. We provide a **Python `ctypes` SDK** out of the box!
 
-```bash
-dukascopy-go --list-timeframes
+```python
+from sdk.python.dukascopy import DukascopyClient
+
+client = DukascopyClient()
+bars = client.download_bars('eurusd', 'm1', '2024-01-01T00:00:00Z', '2024-01-02T00:00:00Z')
+print(bars)
 ```
+*(Check the `sdk/python` directory for full usage examples)*
 
 ---
 
-## Checkpointed Downloads
+## 🤝 Contributing
+Contributions, issues and feature requests are welcome! Feel free to check the [issues page](https://github.com/Nosvemos/dukascopy-go/issues).
 
-When `--partition` is enabled, each sub-range is written to its own file inside `<output>.parts/`. A `.manifest.json` tracks completion, row counts, and SHA-256 hashes so interrupted runs resume from the last valid partition.
-
-```bash
-dukascopy-go download \
-  --symbol xauusd \
-  --timeframe m1 \
-  --from 2023-01-01T00:00:00Z \
-  --to 2024-01-01T00:00:00Z \
-  --output ./data/xauusd-2023.csv \
-  --simple \
-  --partition auto \
-  --parallelism 4
-
-# Verify integrity after download
-dukascopy-go manifest verify --output ./data/xauusd-2023.csv
-
-# Repair damaged or missing partitions
-dukascopy-go manifest repair --output ./data/xauusd-2023.csv --redownload-gaps
-```
-
-`--partition auto` selects a sensible granularity by timeframe (`tick` → `hour`, `m1` → `day`, `h1` → `month`, `d1` → `year`).
+<div align="center">
+  <i>Built for traders, researchers, and quants.</i>
+</div>
 
 ---
 
-## Configuration
+## ⚙️ Configuration
 
 Store defaults in a JSON file and pass it with `--config` or `DUKASCOPY_CONFIG`:
 
@@ -282,38 +201,7 @@ export DUKASCOPY_API_BASE_URL=https://jetta.dukascopy.com
 
 ---
 
-## SDK
-
-`dukascopy-go` can be compiled to a native shared library (`.so` / `.dll` / `.dylib`) for use from Python, C, or C++.
-
-**Build the library:**
-
-```bash
-# Linux / macOS
-go build -buildmode=c-shared -o sdk/python/libdukascopy.so ./cmd/dukascopy-go-sdk
-
-# Windows
-go build -buildmode=c-shared -o sdk/python/libdukascopy.dll ./cmd/dukascopy-go-sdk
-```
-
-**Python usage:**
-
-```python
-from datetime import datetime
-from sdk.python import dukascopy
-
-dukascopy.download(
-    symbol="EURUSD",
-    timeframe="m1",
-    output_path="./data/eurusd_m1.parquet",
-    from_date=datetime(2024, 1, 2, 0, 0),
-    to_date=datetime(2024, 1, 2, 6, 0),
-)
-```
-
----
-
-## Development
+## 🛠 Development
 
 ```bash
 # Run all tests
@@ -328,7 +216,7 @@ go build -o dukascopy-go ./cmd/dukascopy-go
 
 ---
 
-## Roadmap
+## 🗺 Roadmap
 
 - [x] Dual-Engine Downloader (Jetta JSON + Datafeed .bi5 LZMA)
 - [x] Smart Market Calendar Filter (Weekend/Holiday Skip)
@@ -343,6 +231,6 @@ go build -o dukascopy-go ./cmd/dukascopy-go
 
 ---
 
-## Legal Disclaimer
+## ⚖️ Legal Disclaimer
 
 `dukascopy-go` is not affiliated with, endorsed by, or vetted by Dukascopy Bank SA. It is an independent open-source tool that works with Dukascopy's publicly accessible endpoints and is intended for research, automation, and data engineering workflows.

@@ -24,6 +24,7 @@ import (
 const (
 	dbClickHouse = "clickhouse"
 	dbInfluxDB   = "influxdb"
+	dbPostgres   = "postgres"
 
 	defaultClickHouseBatchRows = 10000
 	defaultInfluxDBBatchRows   = 5000
@@ -35,8 +36,8 @@ func runDBLoad(args []string, stdout io.Writer, stderr io.Writer) error {
 	fs.SetOutput(io.Discard)
 
 	input    := fs.String("input", "", "path to the local CSV or Parquet file to ingest (required)")
-	dbType   := fs.String("db", "", "target database: clickhouse or influxdb (required)")
-	dbURL    := fs.String("url", "", "database HTTP URL, e.g. http://localhost:8123 (required)")
+	dbType   := fs.String("db", "", "target database: clickhouse, influxdb, or postgres (required)")
+	dbURL    := fs.String("url", "", "database URL, e.g. http://localhost:8123 or postgres://user:pass@localhost:5432/dbname (required)")
 	table    := fs.String("table", "", "target table or InfluxDB measurement name (required)")
 	user     := fs.String("user", "default", "ClickHouse user (optional)")
 	password := fs.String("password", "", "ClickHouse password or InfluxDB token (optional)")
@@ -66,8 +67,8 @@ func runDBLoad(args []string, stdout io.Writer, stderr io.Writer) error {
 	}
 
 	dbTypeLower := strings.ToLower(strings.TrimSpace(*dbType))
-	if dbTypeLower != dbClickHouse && dbTypeLower != dbInfluxDB {
-		return fmt.Errorf("unknown --db %q (supported: clickhouse, influxdb)", *dbType)
+	if dbTypeLower != dbClickHouse && dbTypeLower != dbInfluxDB && dbTypeLower != dbPostgres {
+		return fmt.Errorf("unknown --db %q (supported: clickhouse, influxdb, postgres)", *dbType)
 	}
 
 	inputPath := strings.TrimSpace(*input)
@@ -95,6 +96,8 @@ func runDBLoad(args []string, stdout io.Writer, stderr io.Writer) error {
 	switch dbTypeLower {
 	case dbClickHouse:
 		return ingestClickHouse(ctx, stdout, stderr, inputPath, *dbURL, *table, *user, *password, *timeout)
+	case dbPostgres:
+		return ingestPostgres(ctx, stdout, stderr, inputPath, *dbURL, *table)
 	case dbInfluxDB:
 		authToken := strings.TrimSpace(*token)
 		if authToken == "" {

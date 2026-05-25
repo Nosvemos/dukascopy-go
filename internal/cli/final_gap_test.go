@@ -93,9 +93,6 @@ func TestStatsConfigAndInstrumentGapBranches(t *testing.T) {
 		if err := runInstruments([]string{"--bad-flag"}, &out); err == nil {
 			t.Fatal("expected instruments flag parse error")
 		}
-		if err := runInstruments(nil, &out); err == nil {
-			t.Fatal("expected instruments missing query error")
-		}
 		if err := runInstruments([]string{"--query", "xauusd", "--limit", "0"}, &out); err == nil {
 			t.Fatal("expected instruments bad limit error")
 		}
@@ -344,7 +341,7 @@ func TestDownloadAndResumeGapBranches(t *testing.T) {
 
 		var stdout bytes.Buffer
 		var stderr bytes.Buffer
-		if code := Run([]string{"instruments"}, &stdout, &stderr); code != 1 {
+		if code := Run([]string{"instruments", "--limit", "0"}, &stdout, &stderr); code != 1 {
 			t.Fatalf("expected instruments error exit code, got %d", code)
 		}
 
