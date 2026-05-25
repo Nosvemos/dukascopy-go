@@ -1,6 +1,7 @@
 package dukascopy
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -16,6 +17,13 @@ import (
 	"os"
 	"path/filepath"
 	"flag"
+)
+
+type Engine string
+
+const (
+	EngineJetta    Engine = "jetta"
+	EngineDatafeed Engine = "datafeed"
 )
 
 type Granularity string
@@ -118,6 +126,7 @@ type Client struct {
 	cacheMu     sync.RWMutex
 	instruments []Instrument
 	proxyPool   *ProxyPool
+	engine      Engine
 }
 
 func NewClient(rawBaseURL string, timeout time.Duration) *Client {
@@ -140,7 +149,16 @@ func NewClient(rawBaseURL string, timeout time.Duration) *Client {
 		proxyPool:  pool,
 		maxRetries: 3,
 		backoff:    500 * time.Millisecond,
+		engine:     EngineJetta,
 	}
+}
+
+func (c *Client) WithEngine(engine Engine) *Client {
+	if engine == "" {
+		engine = EngineJetta
+	}
+	c.engine = engine
+	return c
 }
 
 func (c *Client) WithRetries(maxRetries int) *Client {
@@ -312,16 +330,41 @@ func (c *Client) downloadMinuteBars(ctx context.Context, instrument Instrument, 
 			Total:   len(days),
 			Detail:  current.Format("2006-01-02"),
 		})
-		var payload candlePayload
-		if err := c.getJSON(ctx, []string{
-			"v1", "candles", "minute", instrument.Code, string(side),
-			fmt.Sprintf("%d", current.Year()),
-			fmt.Sprintf("%d", int(current.Month())),
-			fmt.Sprintf("%d", current.Day()),
-		}, &payload); err != nil {
-			return nil, err
+
+		if c.engine == EngineDatafeed {
+			symbolClean := formatDatafeedSymbol(instrument.Code)
+			monthStr := fmt.Sprintf("%02d", int(current.Month())-1)
+			dayStr := fmt.Sprintf("%02d", current.Day())
+			segments := []string{
+				"datafeed", symbolClean,
+				fmt.Sprintf("%d", current.Year()),
+				monthStr,
+				dayStr,
+				string(side) + "_candles_min_1.bi5",
+			}
+			bytesData, err := c.getRawBytes(ctx, segments)
+			if err != nil {
+				return nil, err
+			}
+			if len(bytesData) > 0 {
+				decoded, err := DecodeBarsBi5(bytes.NewReader(bytesData), current, instrument.PriceScale)
+				if err != nil {
+					return nil, err
+				}
+				all = append(all, filterBars(decoded, from, to)...)
+			}
+		} else {
+			var payload candlePayload
+			if err := c.getJSON(ctx, []string{
+				"v1", "candles", "minute", instrument.Code, string(side),
+				fmt.Sprintf("%d", current.Year()),
+				fmt.Sprintf("%d", int(current.Month())),
+				fmt.Sprintf("%d", current.Day()),
+			}, &payload); err != nil {
+				return nil, err
+			}
+			all = append(all, filterBars(decodeBars(payload), from, to)...)
 		}
-		all = append(all, filterBars(decodeBars(payload), from, to)...)
 	}
 	return all, nil
 }
@@ -399,17 +442,43 @@ func (c *Client) downloadTicks(ctx context.Context, instrument Instrument, from 
 			Total:   len(hours),
 			Detail:  current.Format(time.RFC3339),
 		})
-		var payload tickPayload
-		if err := c.getJSON(ctx, []string{
-			"v1", "ticks", instrument.Code,
-			fmt.Sprintf("%d", current.Year()),
-			fmt.Sprintf("%d", int(current.Month())),
-			fmt.Sprintf("%d", current.Day()),
-			fmt.Sprintf("%d", current.Hour()),
-		}, &payload); err != nil {
-			return nil, err
+
+		if c.engine == EngineDatafeed {
+			symbolClean := formatDatafeedSymbol(instrument.Code)
+			monthStr := fmt.Sprintf("%02d", int(current.Month())-1)
+			dayStr := fmt.Sprintf("%02d", current.Day())
+			hourStr := fmt.Sprintf("%02dh_ticks.bi5", current.Hour())
+			segments := []string{
+				"datafeed", symbolClean,
+				fmt.Sprintf("%d", current.Year()),
+				monthStr,
+				dayStr,
+				hourStr,
+			}
+			bytesData, err := c.getRawBytes(ctx, segments)
+			if err != nil {
+				return nil, err
+			}
+			if len(bytesData) > 0 {
+				decoded, err := DecodeTicksBi5(bytes.NewReader(bytesData), current, instrument.PriceScale)
+				if err != nil {
+					return nil, err
+				}
+				all = append(all, filterTicks(decoded, from, to)...)
+			}
+		} else {
+			var payload tickPayload
+			if err := c.getJSON(ctx, []string{
+				"v1", "ticks", instrument.Code,
+				fmt.Sprintf("%d", current.Year()),
+				fmt.Sprintf("%d", int(current.Month())),
+				fmt.Sprintf("%d", current.Day()),
+				fmt.Sprintf("%d", current.Hour()),
+			}, &payload); err != nil {
+				return nil, err
+			}
+			all = append(all, filterTicks(decodeTicks(payload), from, to)...)
 		}
-		all = append(all, filterTicks(decodeTicks(payload), from, to)...)
 	}
 	return all, nil
 }
@@ -474,6 +543,74 @@ func (c *Client) getJSON(ctx context.Context, segments []string, target any) err
 	}
 
 	return lastErr
+}
+
+func (c *Client) getRawBytes(ctx context.Context, segments []string) ([]byte, error) {
+	requestURL := *c.baseURL
+	if c.engine == EngineDatafeed && (requestURL.Host == "jetta.dukascopy.com" || requestURL.Host == "") {
+		requestURL.Host = "datafeed.dukascopy.com"
+	}
+	requestURL.Path = path.Join(append([]string{c.baseURL.Path}, segments...)...)
+
+	var lastErr error
+	for attempt := 0; attempt <= c.maxRetries; attempt++ {
+		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, requestURL.String(), nil)
+		if err := c.waitForRateLimit(ctx); err != nil {
+			return nil, err
+		}
+
+		res, err := c.httpClient.Do(req)
+		if err == nil {
+			if res.StatusCode == http.StatusOK {
+				body, err := io.ReadAll(res.Body)
+				res.Body.Close()
+				if err != nil {
+					lastErr = err
+				} else {
+					return body, nil
+				}
+			} else if res.StatusCode == http.StatusNotFound {
+				res.Body.Close()
+				return nil, nil
+			} else {
+				body, _ := io.ReadAll(io.LimitReader(res.Body, 512))
+				res.Body.Close()
+				lastErr = fmt.Errorf("datafeed api %s returned %s: %s", requestURL.String(), res.Status, strings.TrimSpace(string(body)))
+				if !shouldRetryResponse(res.StatusCode, body) {
+					attempt = c.maxRetries
+				}
+			}
+		} else {
+			lastErr = err
+		}
+
+		if attempt == c.maxRetries {
+			break
+		}
+
+		c.emitProgress(ProgressEvent{
+			Kind:       "retry",
+			Scope:      "http",
+			Detail:     requestURL.String(),
+			Attempt:    attempt + 1,
+			MaxAttempt: c.maxRetries + 1,
+		})
+
+		wait := c.backoff * time.Duration(attempt+1)
+		timer := time.NewTimer(wait)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return nil, ctx.Err()
+		case <-timer.C:
+		}
+	}
+
+	return nil, lastErr
+}
+
+func formatDatafeedSymbol(code string) string {
+	return strings.ToUpper(strings.NewReplacer("/", "", "-", "", "_", "", " ", "", ".", "").Replace(code))
 }
 
 func shouldRetryStatus(statusCode int) bool {

@@ -199,9 +199,14 @@ func runDownload(args []string, stdout io.Writer, stderr io.Writer) error {
 	noHeader := fs.Bool("no-header", false, "suppress header row in output CSV files")
 	preset := fs.String("preset", "", "backtest output preset profile (mt4, mt5, backtrader, ninjatrader)")
 	proxyFile := fs.String("proxy-file", "", "optional proxy list file path (HTTP/SOCKS5)")
+	engine := fs.String("engine", "jetta", "downloader engine: jetta or datafeed")
 
 	if err := fs.Parse(args); err != nil {
 		return err
+	}
+	engineVal := dukascopy.Engine(strings.ToLower(strings.TrimSpace(*engine)))
+	if engineVal != dukascopy.EngineJetta && engineVal != dukascopy.EngineDatafeed {
+		return fmt.Errorf("unknown engine %q (supported: jetta, datafeed)", *engine)
 	}
 	if err := applyDownloadConfigDefaults(
 		fs,
@@ -443,6 +448,7 @@ func runDownload(args []string, stdout io.Writer, stderr io.Writer) error {
 	}
 
 	client := dukascopy.NewClient(*baseURL, defaultHTTPTimeout).
+		WithEngine(engineVal).
 		WithRetries(*retries).
 		WithBackoff(*retryBackoff).
 		WithRateLimit(*rateLimit)
