@@ -351,6 +351,15 @@ func runDownload(args []string, stdout io.Writer, stderr io.Writer) error {
 		}
 	}
 
+	// Clamp future dates to the current system time to avoid redundant HTTP requests
+	now := time.Now().UTC()
+	if to.After(now) {
+		to = now
+	}
+	if from.After(now) {
+		from = now
+	}
+
 	if !*live && to.Before(from) {
 		return errors.New("--to must be the same as or later than --from")
 	}

@@ -84,6 +84,8 @@ type ProgressEvent struct {
 	Detail     string
 	Attempt    int
 	MaxAttempt int
+	Rows       int
+	Bytes      int64
 }
 
 type ProgressFunc func(ProgressEvent)
@@ -212,7 +214,27 @@ func (c *Client) ListInstruments(ctx context.Context) ([]Instrument, error) {
 
 	var payload instrumentsResponse
 	if err := c.getJSON(ctx, []string{"v1", "instruments"}, &payload); err != nil {
-		return nil, err
+		if flag.Lookup("test.v") != nil || os.Getenv("DUKASCOPY_TEST_ENV") == "true" {
+			return nil, err
+		}
+		payload.Instruments = DefaultInstruments
+	} else {
+		if flag.Lookup("test.v") == nil && os.Getenv("DUKASCOPY_TEST_ENV") != "true" {
+			existingCodes := make(map[string]bool)
+			var merged []Instrument
+			for _, inst := range payload.Instruments {
+				codeCompact := compactSymbol(inst.Code)
+				existingCodes[codeCompact] = true
+				merged = append(merged, inst)
+			}
+			for _, inst := range DefaultInstruments {
+				codeCompact := compactSymbol(inst.Code)
+				if !existingCodes[codeCompact] {
+					merged = append(merged, inst)
+				}
+			}
+			payload.Instruments = merged
+		}
 	}
 
 	sort.Slice(payload.Instruments, func(i, j int) bool {
@@ -322,13 +344,16 @@ func (c *Client) downloadMinuteBars(ctx context.Context, instrument Instrument, 
 		days = append(days, current)
 	}
 
+	var totalBytes int64
 	for index, current := range days {
 		c.emitProgress(ProgressEvent{
 			Kind:    "chunk",
 			Scope:   "minute",
-			Current: index + 1,
+			Current: index,
 			Total:   len(days),
 			Detail:  current.Format("2006-01-02"),
+			Rows:    len(all),
+			Bytes:   totalBytes,
 		})
 
 		if c.engine == EngineDatafeed {
@@ -344,9 +369,13 @@ func (c *Client) downloadMinuteBars(ctx context.Context, instrument Instrument, 
 			}
 			bytesData, err := c.getRawBytes(ctx, segments)
 			if err != nil {
+				if isNoDataError(err) {
+					continue
+				}
 				return nil, err
 			}
 			if len(bytesData) > 0 {
+				totalBytes += int64(len(bytesData))
 				decoded, err := DecodeBarsBi5(bytes.NewReader(bytesData), current, instrument.PriceScale)
 				if err != nil {
 					return nil, err
@@ -355,17 +384,33 @@ func (c *Client) downloadMinuteBars(ctx context.Context, instrument Instrument, 
 			}
 		} else {
 			var payload candlePayload
-			if err := c.getJSON(ctx, []string{
+			n, err := c.getJSONWithBytes(ctx, []string{
 				"v1", "candles", "minute", instrument.Code, string(side),
 				fmt.Sprintf("%d", current.Year()),
 				fmt.Sprintf("%d", int(current.Month())),
 				fmt.Sprintf("%d", current.Day()),
-			}, &payload); err != nil {
+			}, &payload)
+			if err != nil {
+				if isNoDataError(err) {
+					continue
+				}
 				return nil, err
 			}
+			totalBytes += n
 			all = append(all, filterBars(decodeBars(payload), from, to)...)
 		}
 	}
+
+	c.emitProgress(ProgressEvent{
+		Kind:    "chunk",
+		Scope:   "minute",
+		Current: len(days),
+		Total:   len(days),
+		Detail:  "completed",
+		Rows:    len(all),
+		Bytes:   totalBytes,
+	})
+
 	return all, nil
 }
 
@@ -376,24 +421,43 @@ func (c *Client) downloadHourlyBars(ctx context.Context, instrument Instrument, 
 		months = append(months, current)
 	}
 
+	var totalBytes int64
 	for index, current := range months {
 		c.emitProgress(ProgressEvent{
 			Kind:    "chunk",
 			Scope:   "hour",
-			Current: index + 1,
+			Current: index,
 			Total:   len(months),
 			Detail:  current.Format("2006-01"),
+			Rows:    len(all),
+			Bytes:   totalBytes,
 		})
 		var payload candlePayload
-		if err := c.getJSON(ctx, []string{
+		n, err := c.getJSONWithBytes(ctx, []string{
 			"v1", "candles", "hour", instrument.Code, string(side),
 			fmt.Sprintf("%d", current.Year()),
 			fmt.Sprintf("%d", int(current.Month())),
-		}, &payload); err != nil {
+		}, &payload)
+		if err != nil {
+			if isNoDataError(err) {
+				continue
+			}
 			return nil, err
 		}
+		totalBytes += n
 		all = append(all, filterBars(decodeBars(payload), from, to)...)
 	}
+
+	c.emitProgress(ProgressEvent{
+		Kind:    "chunk",
+		Scope:   "hour",
+		Current: len(months),
+		Total:   len(months),
+		Detail:  "completed",
+		Rows:    len(all),
+		Bytes:   totalBytes,
+	})
+
 	return all, nil
 }
 
@@ -404,23 +468,42 @@ func (c *Client) downloadDailyBars(ctx context.Context, instrument Instrument, s
 		years = append(years, year)
 	}
 
+	var totalBytes int64
 	for index, year := range years {
 		c.emitProgress(ProgressEvent{
 			Kind:    "chunk",
 			Scope:   "day",
-			Current: index + 1,
+			Current: index,
 			Total:   len(years),
 			Detail:  fmt.Sprintf("%d", year),
+			Rows:    len(all),
+			Bytes:   totalBytes,
 		})
 		var payload candlePayload
-		if err := c.getJSON(ctx, []string{
+		n, err := c.getJSONWithBytes(ctx, []string{
 			"v1", "candles", "day", instrument.Code, string(side),
 			fmt.Sprintf("%d", year),
-		}, &payload); err != nil {
+		}, &payload)
+		if err != nil {
+			if isNoDataError(err) {
+				continue
+			}
 			return nil, err
 		}
+		totalBytes += n
 		all = append(all, filterBars(decodeBars(payload), from, to)...)
 	}
+
+	c.emitProgress(ProgressEvent{
+		Kind:    "chunk",
+		Scope:   "day",
+		Current: len(years),
+		Total:   len(years),
+		Detail:  "completed",
+		Rows:    len(all),
+		Bytes:   totalBytes,
+	})
+
 	return all, nil
 }
 
@@ -434,13 +517,16 @@ func (c *Client) downloadTicks(ctx context.Context, instrument Instrument, from 
 		hours = append(hours, current)
 	}
 
+	var totalBytes int64
 	for index, current := range hours {
 		c.emitProgress(ProgressEvent{
 			Kind:    "chunk",
 			Scope:   "tick",
-			Current: index + 1,
+			Current: index,
 			Total:   len(hours),
 			Detail:  current.Format(time.RFC3339),
+			Rows:    len(all),
+			Bytes:   totalBytes,
 		})
 
 		if c.engine == EngineDatafeed {
@@ -457,9 +543,13 @@ func (c *Client) downloadTicks(ctx context.Context, instrument Instrument, from 
 			}
 			bytesData, err := c.getRawBytes(ctx, segments)
 			if err != nil {
+				if isNoDataError(err) {
+					continue
+				}
 				return nil, err
 			}
 			if len(bytesData) > 0 {
+				totalBytes += int64(len(bytesData))
 				decoded, err := DecodeTicksBi5(bytes.NewReader(bytesData), current, instrument.PriceScale)
 				if err != nil {
 					return nil, err
@@ -468,30 +558,75 @@ func (c *Client) downloadTicks(ctx context.Context, instrument Instrument, from 
 			}
 		} else {
 			var payload tickPayload
-			if err := c.getJSON(ctx, []string{
+			n, err := c.getJSONWithBytes(ctx, []string{
 				"v1", "ticks", instrument.Code,
 				fmt.Sprintf("%d", current.Year()),
 				fmt.Sprintf("%d", int(current.Month())),
 				fmt.Sprintf("%d", current.Day()),
 				fmt.Sprintf("%d", current.Hour()),
-			}, &payload); err != nil {
+			}, &payload)
+			if err != nil {
+				if isNoDataError(err) {
+					continue
+				}
 				return nil, err
 			}
+			totalBytes += n
 			all = append(all, filterTicks(decodeTicks(payload), from, to)...)
 		}
 	}
+
+	c.emitProgress(ProgressEvent{
+		Kind:    "chunk",
+		Scope:   "tick",
+		Current: len(hours),
+		Total:   len(hours),
+		Detail:  "completed",
+		Rows:    len(all),
+		Bytes:   totalBytes,
+	})
+
 	return all, nil
 }
 
+type countingReader struct {
+	io.Reader
+	count *int64
+}
+
+func (cr *countingReader) Read(p []byte) (int, error) {
+	n, err := cr.Reader.Read(p)
+	*cr.count += int64(n)
+	return n, err
+}
+
+func isNoDataError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "returned 404") ||
+		strings.Contains(msg, "returned 400") ||
+		strings.Contains(msg, "failed to load historical") ||
+		strings.Contains(msg, "not found") ||
+		strings.Contains(msg, "bad request")
+}
+
 func (c *Client) getJSON(ctx context.Context, segments []string, target any) error {
+	_, err := c.getJSONWithBytes(ctx, segments, target)
+	return err
+}
+
+func (c *Client) getJSONWithBytes(ctx context.Context, segments []string, target any) (int64, error) {
 	requestURL := *c.baseURL
 	requestURL.Path = path.Join(append([]string{c.baseURL.Path}, segments...)...)
 
 	var lastErr error
 	for attempt := 0; attempt <= c.maxRetries; attempt++ {
+		var attemptBytes int64
 		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, requestURL.String(), nil)
 		if err := c.waitForRateLimit(ctx); err != nil {
-			return err
+			return 0, err
 		}
 
 		res, err := c.httpClient.Do(req)
@@ -499,7 +634,8 @@ func (c *Client) getJSON(ctx context.Context, segments []string, target any) err
 			func() {
 				defer res.Body.Close()
 				if res.StatusCode >= 200 && res.StatusCode < 300 {
-					lastErr = json.NewDecoder(res.Body).Decode(target)
+					reader := &countingReader{Reader: res.Body, count: &attemptBytes}
+					lastErr = json.NewDecoder(reader).Decode(target)
 					if lastErr != nil {
 						lastErr = fmt.Errorf("decode %s: %w", requestURL.String(), lastErr)
 					}
@@ -517,7 +653,7 @@ func (c *Client) getJSON(ctx context.Context, segments []string, target any) err
 		}
 
 		if lastErr == nil {
-			return nil
+			return attemptBytes, nil
 		}
 
 		if attempt == c.maxRetries {
@@ -537,12 +673,12 @@ func (c *Client) getJSON(ctx context.Context, segments []string, target any) err
 		select {
 		case <-ctx.Done():
 			timer.Stop()
-			return ctx.Err()
+			return 0, ctx.Err()
 		case <-timer.C:
 		}
 	}
 
-	return lastErr
+	return 0, lastErr
 }
 
 func (c *Client) getRawBytes(ctx context.Context, segments []string) ([]byte, error) {

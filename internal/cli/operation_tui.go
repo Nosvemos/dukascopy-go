@@ -66,9 +66,6 @@ func newOperationPrinter(w io.Writer) *operationPrinter {
 		tea.WithOutput(w),
 		tea.WithoutSignalHandler(),
 	}
-	if isInteractiveTerminal(w) {
-		options = append(options, tea.WithAltScreen())
-	}
 
 	program := tea.NewProgram(model, options...)
 	p := &operationPrinter{

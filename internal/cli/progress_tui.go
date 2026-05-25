@@ -110,9 +110,6 @@ func newProgressPrinter(w io.Writer) *progressPrinter {
 		tea.WithOutput(w),
 		tea.WithoutSignalHandler(),
 	}
-	if isInteractiveTerminal(w) {
-		options = append(options, tea.WithAltScreen())
-	}
 
 	program := tea.NewProgram(model, options...)
 	p := &progressPrinter{
@@ -244,6 +241,10 @@ func (m progressTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.retryAttempt = 0
 			m.retryMax = 0
 			m.retryDetail = ""
+			if m.partitionTotal <= 0 {
+				m.completedRows = msg.event.Rows
+				m.completedBytes = msg.event.Bytes
+			}
 			if strings.TrimSpace(m.statusText) == "" || m.statusText == "starting" {
 				m.statusText = "downloading"
 				m.startThroughputWindow()

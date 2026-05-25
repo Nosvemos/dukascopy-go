@@ -8,20 +8,23 @@
     <a href="https://pkg.go.dev/github.com/Nosvemos/dukascopy-go"><img src="https://pkg.go.dev/badge/github.com/Nosvemos/dukascopy-go.svg" alt="Go Reference"></a>
     <a href="https://github.com/Nosvemos/dukascopy-go/releases"><img src="https://img.shields.io/github/v/release/Nosvemos/dukascopy-go" alt="Latest release"></a>
   </p>
-  <p><i>Forex • Metals • Crypto • Commodities • CFDs • ETFs</i></p>
+  <p><i>Forex (100+ Pairs) • Metals • Crypto • Commodities • CFDs • Stocks • Indices</i></p>
 </div>
 
 ---
 
 ## ⚡ Why `dukascopy-go`?
 
-Compared to Node.js or Python alternatives (like `dukascopy-node`), `dukascopy-go` is built for **speed, scale, and reliability**.
+Compared to Node.js or Python alternatives (like `dukascopy-node`), `dukascopy-go` is built for **speed, scale, and extreme reliability**.
 
 | Feature | `dukascopy-go` | Node.js Alternatives |
 |---|---|---|
 | **Speed** | 🚀 Native Go (Dual-engine: JSON + LZMA, ~100x Faster) | 🐢 Slower V8/Node.js execution |
+| **Parities (Assets)**| 🌍 **170+ Offline Fallback database** + online merging | ⚠️ Requires full online resolution |
 | **Dependencies** | ✨ Zero (Standalone single binary) | 📦 Requires Node.js, NPM, and modules |
 | **Resumability** | ✅ Automatic manifest checkpoints & auto-resume | ❌ Often restarts from scratch |
+| **Date Clamping** | ✅ Smart future dates auto-clamping & history skips | ❌ Throws fatal errors and discards data |
+| **Persistent CLI**| ✅ Updates inline; keeps loading stats in scrollback | ❌ TUI alt-screen clears logs on exit |
 | **Parallel Workers** | ✅ Built-in partitioning & concurrent downloading | ❌ Usually single-threaded |
 | **Direct DB Load** | 🔥 Streams directly to ClickHouse / InfluxDB | ❌ Requires manual insertion scripts |
 | **Real-time Stream**| ✅ Native WebSocket & Stdout (JSONL/CSV) | ⚠️ Node.js API only |
@@ -58,11 +61,17 @@ dukascopy-go
 ```
 *Use your arrow keys to select instruments, timeframes, and formats interactively.*
 
-### 🔍 Find Instruments
-Search for a specific instrument, or list them all:
+### 🔍 Find Instruments (170+ Supported!)
+Search for a specific instrument, or list them all. Works completely offline:
 ```bash
-dukascopy-go instruments --query xauusd
-dukascopy-go instruments  # Lists all available
+# Search for Turkish Lira crosses
+dukascopy-go instruments --query try
+
+# Search for Tesla stock CFD
+dukascopy-go instruments --query tsla
+
+# Lists all 170+ available instruments (Forex, Metals, Cryptos, Indices, Commodities, Stock CFDs)
+dukascopy-go instruments
 ```
 
 ### 📉 Download Historical Data
@@ -96,67 +105,18 @@ dukascopy-go download \
   --parallelism 8
 ```
 
-### 📈 Stream Real-Time Ticks
-Pipe live ticks directly to your terminal or log file:
-```bash
-dukascopy-go live --symbol eurusd --timeframe tick --format jsonl
-```
-*Tip: Add `--port 8080` to spin up a zero-dependency WebSocket server!*
-
-### 💾 Load Directly to Database
-Stream downloaded data right into PostgreSQL, ClickHouse or InfluxDB without writing custom scripts:
-```bash
-dukascopy-go db-load \
-  --input ./data/eurusd-m1.csv \
-  --db postgres \
-  --url "postgres://user:pass@localhost:5432/market_data?sslmode=disable" \
-  --table eurusd_m1
-```
-
----
-
-## 🛠️ CLI Commands & Options
-
-### Commands Overview
-| Command | Purpose |
-| --- | --- |
-| `instruments` | Search or list all Dukascopy instruments |
-| `download` | Download historical data as CSV or Parquet |
-| `live` | Stream real-time ticks/bars to stdout and WebSocket |
-| `db-load` | Ingest CSV/Parquet directly into ClickHouse or InfluxDB |
-| `stats` | Inspect a dataset for gaps, duplicates, and ordering issues |
-| `manifest *` | Checkpoint tools: `inspect`, `verify`, `repair`, `prune` |
-| `list-timeframes` | Print supported timeframe values (`tick`, `m1`, `h1`, `d1`, etc.) |
-
-### `download` Configuration
-
-| Flag | Description | Example / Default |
-| --- | --- | --- |
-| `--symbol` | **(Required)** Instrument to download | `eurusd`, `btcusd` |
-| `--timeframe` | **(Required)** Resolution of data | `tick`, `m1`, `h1`, `d1` |
-| `--last` | **(Optional)** Duration to download back from now | `30d`, `6mo`, `1y` |
-| `--from` | **(Required unless --last)** Start time | `2024-01-01` or RFC3339 |
-| `--to` | End time. Defaults to *now* | `2024-01-02` |
-| `--output` | **(Required)** Output file path | `./data.csv` or `-` for stdout |
-| `--simple` / `--full`| Schema type (OHLCV vs Bid/Ask/Spread) | `--simple` |
-| `--custom-columns` | Customize output fields | `timestamp,bid_open,ask_open`|
-| `--partition` | Chunking by time (`auto`, `day`, `month`) | `none` |
-| `--parallelism` | Concurrent workers for partitions | `1` |
-| `--resume` | Resume appending to existing CSV | `false` |
-| `--timezone` | Shift timestamps to a local TZ | `UTC`, `EST`, `Europe/London`|
-| `--preset` | Output presets for specific platforms | `mt4`, `mt5`, `ninjatrader` |
-
-*(Run `dukascopy-go download --help` for the full list of flags including rate-limiting and proxies)*
-
 ---
 
 ## 🛡️ Robust Architecture
 
 `dukascopy-go` is built with enterprise-grade data engineering in mind:
 
-- **Context-aware Resumability:** Using the `--partition` flag, large downloads are split into small chunks managed by a `.manifest.json`. If your internet drops, you can instantly resume exactly where it failed. You can also run `dukascopy-go manifest repair` to fix corrupted chunks.
-- **In-place Deduplication:** Market data can be messy. The pruner automatically detects and eliminates duplicate records or out-of-order ticks, guaranteeing chronological integrity.
-- **Proxy Rotation:** Bypassing strict IP rate-limits is easy. Provide a `--proxy-file` containing HTTP/SOCKS5 proxies, and the engine will round-robin through them.
+- **Smart Date Clamping**: If you request future dates (e.g. `--to 2028-01-01`), the CLI automatically clamps it to the present moment to prevent redundant network queries.
+- **Graceful History Skips**: If you request dates before available history, the loop gracefully skips empty chunk responses (`isNoDataError`) and writes all successfully downloaded data, rather than crashing and discarding progress.
+- **Context-aware Resumability**: Using the `--partition` flag, large downloads are split into small chunks managed by a `.manifest.json`. If your internet drops, you can instantly resume exactly where it failed. You can also run `dukascopy-go manifest repair` to fix corrupted chunks.
+- **Durable TUI Scrollback**: Bubble Tea alternate screen clearing is disabled for downloads. When a download completes, the beautiful progress dashboard and download speed stats remain written inline in your terminal scrollback.
+- **In-place Deduplication**: Market data can be messy. The pruner automatically detects and eliminates duplicate records or out-of-order ticks, guaranteeing chronological integrity.
+- **Proxy Rotation**: Bypassing strict IP rate-limits is easy. Provide a `--proxy-file` containing HTTP/SOCKS5 proxies, and the engine will round-robin through them.
 
 ---
 
@@ -229,21 +189,6 @@ go test ./tests/e2e -v
 # Build the binary locally
 go build -o dukascopy-go ./cmd/dukascopy-go
 ```
-
----
-
-## 🗺 Roadmap
-
-- [x] Dual-Engine Downloader (Jetta JSON + Datafeed .bi5 LZMA)
-- [x] Smart Market Calendar Filter (Weekend/Holiday Skip)
-- [x] Universal Timezone Shifting & Broker Presets
-- [x] Proxy Connection Pool (HTTP/SOCKS5 round-robin)
-- [x] Transactional Checkpoint Manifests & Partitioned Downloads
-- [x] Duplicate & Out-of-Order Line Pruner
-- [x] Interactive TUI Dashboard
-- [x] Multi-Language SDK Bindings (Python / C / C++)
-- [x] Real-Time Streaming (`live` command + WebSocket broadcast)
-- [x] Direct Database Loading (`db-load` → ClickHouse & InfluxDB)
 
 ---
 
