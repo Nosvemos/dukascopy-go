@@ -12,8 +12,8 @@ import (
 	"time"
 
 	"github.com/Nosvemos/dukascopy-go/internal/checkpoint"
-	"github.com/Nosvemos/dukascopy-go/internal/csvout"
-	"github.com/Nosvemos/dukascopy-go/internal/dukascopy"
+	"github.com/Nosvemos/dukascopy-go/pkg/csvout"
+	"github.com/Nosvemos/dukascopy-go/pkg/dukascopy"
 )
 
 const (

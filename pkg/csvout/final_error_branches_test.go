@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Nosvemos/dukascopy-go/internal/dukascopy"
+	"github.com/Nosvemos/dukascopy-go/pkg/dukascopy"
 )
 
 func TestCSVOutputFailureBranches(t *testing.T) {

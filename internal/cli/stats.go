@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Nosvemos/dukascopy-go/internal/csvout"
+	"github.com/Nosvemos/dukascopy-go/pkg/csvout"
 )
 
 func runStats(args []string, stdout io.Writer) error {

@@ -6,7 +6,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/Nosvemos/dukascopy-go/internal/dukascopy"
+	"github.com/Nosvemos/dukascopy-go/pkg/dukascopy"
 )
 
 func writeTicksJSONL(outputPath string, instrument dukascopy.Instrument, columns []string, ticks []dukascopy.Tick) error {

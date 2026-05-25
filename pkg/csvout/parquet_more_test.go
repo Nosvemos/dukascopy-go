@@ -8,7 +8,7 @@ import (
 
 	parquet "github.com/parquet-go/parquet-go"
 
-	"github.com/Nosvemos/dukascopy-go/internal/dukascopy"
+	"github.com/Nosvemos/dukascopy-go/pkg/dukascopy"
 )
 
 func TestParquetRemainingBranches(t *testing.T) {

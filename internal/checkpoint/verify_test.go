@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Nosvemos/dukascopy-go/internal/csvout"
+	"github.com/Nosvemos/dukascopy-go/pkg/csvout"
 )
 
 func TestVerifyPartAndOutput(t *testing.T) {
