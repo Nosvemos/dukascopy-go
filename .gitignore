@@ -34,3 +34,7 @@ dist/
 # documentation
 docs/
 
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
