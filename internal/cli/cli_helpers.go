@@ -24,6 +24,7 @@ func printUsage(w io.Writer) {
   stats        Print dataset statistics
   manifest     Inspect or verify checkpoint manifests
   download     Download historical data and save it as CSV or Parquet
+  sync         Sync an existing dataset file up to the present moment
   live         Stream real-time ticks/bars to stdout and optional WebSocket server
   db-load      Ingest a CSV or Parquet file directly into ClickHouse or InfluxDB
   list-timeframes  Print supported timeframe values
@@ -33,6 +34,7 @@ examples:
   dukascopy-go instruments
   dukascopy-go instruments --query xauusd
   dukascopy-go download --symbol xauusd --timeframe m1 --from 2024-01-02T00:00:00Z --output ./xauusd.csv
+  dukascopy-go sync --symbol xauusd --output ./xauusd.csv
   dukascopy-go download --symbol xauusd --timeframe d1 --from 2024-01-01T00:00:00Z --to 2024-02-01T00:00:00Z --output ./xauusd.parquet
   dukascopy-go live --symbol eurusd --timeframe tick --format jsonl
   dukascopy-go db-load --input ./eurusd_m1.csv --db clickhouse --url http://localhost:8123 --table eurusd_m1
@@ -186,4 +188,54 @@ func instrumentFieldLengths(instruments []dukascopy.Instrument, selector func(du
 		lengths = append(lengths, len(selector(instrument)))
 	}
 	return lengths
+}
+
+func safeSymbolFilename(sym string) string {
+	s := strings.ToLower(strings.TrimSpace(sym))
+	s = strings.ReplaceAll(s, "/", "_")
+	s = strings.ReplaceAll(s, "-", "_")
+	s = strings.ReplaceAll(s, " ", "_")
+	return s
+}
+
+func formatMultiSymbolOutputPath(outputPath string, sym string) string {
+	safeSym := safeSymbolFilename(sym)
+	lowerPath := strings.ToLower(outputPath)
+
+	if strings.Contains(lowerPath, "{symbol}") {
+		formatted := outputPath
+		for {
+			l := strings.ToLower(formatted)
+			idx := strings.Index(l, "{symbol}")
+			if idx < 0 {
+				break
+			}
+			formatted = formatted[:idx] + safeSym + formatted[idx+8:]
+		}
+		return formatted
+	}
+
+	fi, err := os.Stat(outputPath)
+	isDir := err == nil && fi.IsDir()
+	if isDir || strings.HasSuffix(outputPath, "/") || strings.HasSuffix(outputPath, "\\") {
+		ext := ".csv"
+		if strings.HasSuffix(lowerPath, ".parquet") {
+			ext = ".parquet"
+		} else if strings.HasSuffix(lowerPath, ".jsonl") {
+			ext = ".jsonl"
+		} else if strings.HasSuffix(lowerPath, ".gz") {
+			ext = ".csv.gz"
+		}
+		return filepath.Join(outputPath, safeSym+ext)
+	}
+
+	ext := filepath.Ext(outputPath)
+	base := strings.TrimSuffix(outputPath, ext)
+
+	if ext == ".gz" && strings.HasSuffix(strings.ToLower(base), ".csv") {
+		ext = ".csv.gz"
+		base = strings.TrimSuffix(base, ".csv")
+	}
+
+	return fmt.Sprintf("%s-%s%s", base, safeSym, ext)
 }

@@ -53,6 +53,40 @@ func runDownload(args []string, stdout io.Writer, stderr io.Writer) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+
+	if strings.Contains(*symbol, ",") {
+		symbols := strings.Split(*symbol, ",")
+		fmt.Fprintf(stdout, "%sbatch%s downloading %d symbols...\n", colorize(colorCyan), colorize(colorReset), len(symbols))
+		for _, sym := range symbols {
+			sym = strings.TrimSpace(sym)
+			if sym == "" {
+				continue
+			}
+
+			formattedOutput := formatMultiSymbolOutputPath(*outputPath, sym)
+
+			var nextArgs []string
+			for i := 0; i < len(args); {
+				arg := args[i]
+				if arg == "--symbol" || arg == "-symbol" || arg == "--output" || arg == "-output" {
+					i += 2
+				} else if strings.HasPrefix(arg, "--symbol=") || strings.HasPrefix(arg, "-symbol=") || strings.HasPrefix(arg, "--output=") || strings.HasPrefix(arg, "-output=") {
+					i += 1
+				} else {
+					nextArgs = append(nextArgs, arg)
+					i++
+				}
+			}
+			nextArgs = append(nextArgs, "--symbol", sym, "--output", formattedOutput)
+
+			fmt.Fprintf(stdout, "%sbatch%s starting download for %s -> %s\n", colorize(colorCyan), colorize(colorReset), sym, formattedOutput)
+			if err := runDownload(nextArgs, stdout, stderr); err != nil {
+				return fmt.Errorf("download for symbol %s failed: %w", sym, err)
+			}
+		}
+		return nil
+	}
+
 	engineVal := dukascopy.Engine(strings.ToLower(strings.TrimSpace(*engine)))
 	if engineVal != dukascopy.EngineJetta && engineVal != dukascopy.EngineDatafeed {
 		return fmt.Errorf("unknown engine %q (supported: jetta, datafeed)", *engine)

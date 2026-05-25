@@ -73,6 +73,12 @@ func Run(args []string, stdout io.Writer, stderr io.Writer) int {
 			return 1
 		}
 		return 0
+	case "sync":
+		if err := runSync(args[1:], stdout, stderr); err != nil {
+			fmt.Fprintf(stderr, "%serror:%s %v\n", colorize(colorRed), colorize(colorReset), err)
+			return 1
+		}
+		return 0
 	case "live":
 		if err := runLiveStream(args[1:], stdout, stderr); err != nil {
 			fmt.Fprintf(stderr, "%serror:%s %v\n", colorize(colorRed), colorize(colorReset), err)
