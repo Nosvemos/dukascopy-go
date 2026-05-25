@@ -109,6 +109,7 @@ func runInstruments(args []string, stdout io.Writer) error {
 	limit := fs.Int("limit", 20, "maximum number of rows to print")
 	jsonOutput := fs.Bool("json", false, "print matching instruments as JSON")
 	baseURL := fs.String("base-url", readBaseURL(), "Dukascopy API base URL")
+	update := fs.Bool("update", false, "force update the local instruments cache from online catalog")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -117,7 +118,7 @@ func runInstruments(args []string, stdout io.Writer) error {
 		return errors.New("--limit must be greater than 0")
 	}
 
-	client := dukascopy.NewClient(*baseURL, defaultHTTPTimeout)
+	client := dukascopy.NewClient(*baseURL, defaultHTTPTimeout).WithForceUpdate(*update)
 	ctx, cancel := context.WithTimeout(context.Background(), defaultHTTPTimeout)
 	defer cancel()
 

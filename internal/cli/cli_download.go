@@ -49,6 +49,7 @@ func runDownload(args []string, stdout io.Writer, stderr io.Writer) error {
 	preset := fs.String("preset", "", "backtest output preset profile (mt4, mt5, backtrader, ninjatrader)")
 	proxyFile := fs.String("proxy-file", "", "optional proxy list file path (HTTP/SOCKS5)")
 	engine := fs.String("engine", "jetta", "downloader engine: jetta or datafeed")
+	fillGaps := fs.String("fill-gaps", "none", "gap filling mode: none, forward")
 
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -186,6 +187,7 @@ func runDownload(args []string, stdout io.Writer, stderr io.Writer) error {
 	}
 
 	csvout.HideCSVHeader = *noHeader
+	csvout.FillGaps = strings.ToLower(strings.TrimSpace(*fillGaps))
 
 	if strings.TrimSpace(*symbol) == "" {
 		return errors.New("--symbol is required")
@@ -278,6 +280,9 @@ func runDownload(args []string, stdout io.Writer, stderr io.Writer) error {
 
 	barColumns := csvout.BarColumnsForProfile(profile)
 	tickColumns := csvout.TickColumnsForProfile(profile)
+	if !*simpleOutput && !*fullOutput && strings.TrimSpace(*customColumns) == "" {
+		tickColumns = csvout.TickColumnsForProfile(csvout.ProfileFull)
+	}
 	if strings.TrimSpace(*customColumns) != "" {
 		if normalizedTimeframe == dukascopy.GranularityTick {
 			tickColumns, err = csvout.ParseTickColumns(*customColumns)

@@ -94,13 +94,79 @@ func writeBarsCSVRows(csvWriter csvRecordWriter, instrument dukascopy.Instrument
 		}
 	}
 
+	var interval time.Duration
+	if len(primaryBars) > 1 {
+		var intervals []time.Duration
+		for i := 1; i < len(primaryBars); i++ {
+			d := primaryBars[i].Time.Sub(primaryBars[i-1].Time)
+			if d > 0 {
+				intervals = append(intervals, d)
+			}
+		}
+		interval = inferExpectedInterval(intervals)
+	} else if len(bidBars) > 1 {
+		var intervals []time.Duration
+		for i := 1; i < len(bidBars); i++ {
+			d := bidBars[i].Time.Sub(bidBars[i-1].Time)
+			if d > 0 {
+				intervals = append(intervals, d)
+			}
+		}
+		interval = inferExpectedInterval(intervals)
+	}
+
 	if BarColumnsNeedBidAsk(columns) {
 		rows, err := combineBarRows(bidBars, askBars)
 		if err != nil {
 			return err
 		}
 
-		for _, row := range rows {
+		var prevTime time.Time
+		var prevBidClose float64
+		var prevAskClose float64
+
+		for i, row := range rows {
+			if i > 0 && interval > 0 && FillGaps == "forward" {
+				expectedNext := prevTime.Add(interval)
+				for expectedNext.Before(row.Time) {
+					if IsExpectedGapForProfile(expectedNext.Add(-interval), expectedNext.Add(interval), interval, instrument.Code, "auto") {
+						expectedNext = expectedNext.Add(interval)
+						continue
+					}
+
+					syntheticBidBar := dukascopy.Bar{
+						Time:   expectedNext,
+						Open:   prevBidClose,
+						High:   prevBidClose,
+						Low:    prevBidClose,
+						Close:  prevBidClose,
+						Volume: 0,
+					}
+					syntheticAskBar := dukascopy.Bar{
+						Time:   expectedNext,
+						Open:   prevAskClose,
+						High:   prevAskClose,
+						Low:    prevAskClose,
+						Close:  prevAskClose,
+						Volume: 0,
+					}
+
+					record := make([]string, 0, len(columns))
+					for _, column := range columns {
+						value, valueErr := formatBarColumn(column, instrument.PriceScale, syntheticBidBar, syntheticAskBar)
+						if valueErr != nil {
+							return valueErr
+						}
+						record = append(record, value)
+					}
+					if err := csvWriter.Write(record); err != nil {
+						return err
+					}
+
+					expectedNext = expectedNext.Add(interval)
+				}
+			}
+
 			record := make([]string, 0, len(columns))
 			for _, column := range columns {
 				value, valueErr := formatBarColumn(column, instrument.PriceScale, row.Bid, row.Ask)
@@ -112,12 +178,52 @@ func writeBarsCSVRows(csvWriter csvRecordWriter, instrument dukascopy.Instrument
 			if err := csvWriter.Write(record); err != nil {
 				return err
 			}
+
+			prevTime = row.Time
+			prevBidClose = row.Bid.Close
+			prevAskClose = row.Ask.Close
 		}
 
 		return csvWriter.Error()
 	}
 
-	for _, bar := range primaryBars {
+	var prevTime time.Time
+	var prevClose float64
+
+	for i, bar := range primaryBars {
+		if i > 0 && interval > 0 && FillGaps == "forward" {
+			expectedNext := prevTime.Add(interval)
+			for expectedNext.Before(bar.Time) {
+				if IsExpectedGapForProfile(expectedNext.Add(-interval), expectedNext.Add(interval), interval, instrument.Code, "auto") {
+					expectedNext = expectedNext.Add(interval)
+					continue
+				}
+
+				syntheticBar := dukascopy.Bar{
+					Time:   expectedNext,
+					Open:   prevClose,
+					High:   prevClose,
+					Low:    prevClose,
+					Close:  prevClose,
+					Volume: 0,
+				}
+
+				record := make([]string, 0, len(columns))
+				for _, column := range columns {
+					value, err := formatPrimaryBarColumn(column, instrument.PriceScale, syntheticBar)
+					if err != nil {
+						return err
+					}
+					record = append(record, value)
+				}
+				if err := csvWriter.Write(record); err != nil {
+					return err
+				}
+
+				expectedNext = expectedNext.Add(interval)
+			}
+		}
+
 		record := make([]string, 0, len(columns))
 		for _, column := range columns {
 			value, err := formatPrimaryBarColumn(column, instrument.PriceScale, bar)
@@ -129,6 +235,9 @@ func writeBarsCSVRows(csvWriter csvRecordWriter, instrument dukascopy.Instrument
 		if err := csvWriter.Write(record); err != nil {
 			return err
 		}
+
+		prevTime = bar.Time
+		prevClose = bar.Close
 	}
 
 	return csvWriter.Error()

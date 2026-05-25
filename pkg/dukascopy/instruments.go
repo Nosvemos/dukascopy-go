@@ -33,9 +33,11 @@ func (c *Client) ListInstruments(ctx context.Context) ([]Instrument, error) {
 		return cloneInstruments(c.instruments), nil
 	}
 
-	if cached, ok := loadLocalCache(); ok && len(cached) > 0 {
-		c.instruments = cloneInstruments(cached)
-		return cloneInstruments(c.instruments), nil
+	if !c.forceUpdate {
+		if cached, ok := loadLocalCache(); ok && len(cached) > 0 {
+			c.instruments = cloneInstruments(cached)
+			return cloneInstruments(c.instruments), nil
+		}
 	}
 
 	var payload instrumentsResponse

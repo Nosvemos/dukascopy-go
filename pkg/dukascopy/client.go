@@ -113,18 +113,20 @@ type DownloadResult struct {
 }
 
 type Client struct {
-	baseURL     *url.URL
-	httpClient  *http.Client
-	maxRetries  int
-	backoff     time.Duration
-	rateLimit   time.Duration
-	progress    ProgressFunc
-	rateMu      sync.Mutex
-	nextSlot    time.Time
-	cacheMu     sync.RWMutex
-	instruments []Instrument
-	proxyPool   *ProxyPool
-	engine      Engine
+	baseURL      *url.URL
+	httpClient   *http.Client
+	maxRetries   int
+	backoff      time.Duration
+	rateLimit    time.Duration
+	adaptiveRate time.Duration
+	forceUpdate  bool
+	progress     ProgressFunc
+	rateMu       sync.Mutex
+	nextSlot     time.Time
+	cacheMu      sync.RWMutex
+	instruments  []Instrument
+	proxyPool    *ProxyPool
+	engine       Engine
 }
 
 func NewClient(rawBaseURL string, timeout time.Duration) *Client {
@@ -180,6 +182,7 @@ func (c *Client) WithRateLimit(rateLimit time.Duration) *Client {
 		rateLimit = 0
 	}
 	c.rateLimit = rateLimit
+	c.adaptiveRate = rateLimit
 	return c
 }
 
@@ -188,8 +191,47 @@ func (c *Client) WithProgress(progress ProgressFunc) *Client {
 	return c
 }
 
+func (c *Client) WithForceUpdate(force bool) *Client {
+	c.forceUpdate = force
+	return c
+}
+
 func (c *Client) LoadProxies(path string) error {
 	return c.proxyPool.LoadFromFile(path)
+}
+
+func (c *Client) adjustRateLimit(isError bool, statusCode int) {
+	c.rateMu.Lock()
+	defer c.rateMu.Unlock()
+
+	if c.adaptiveRate == 0 {
+		c.adaptiveRate = c.rateLimit
+	}
+
+	if isError {
+		if statusCode == 429 {
+			if c.adaptiveRate == 0 {
+				c.adaptiveRate = 200 * time.Millisecond
+			} else {
+				c.adaptiveRate *= 2
+			}
+			if c.adaptiveRate > 5*time.Second {
+				c.adaptiveRate = 5 * time.Second
+			}
+		} else {
+			c.adaptiveRate += 50 * time.Millisecond
+			if c.adaptiveRate > 2*time.Second {
+				c.adaptiveRate = 2 * time.Second
+			}
+		}
+	} else {
+		if c.adaptiveRate > c.rateLimit {
+			c.adaptiveRate -= 10 * time.Millisecond
+			if c.adaptiveRate < c.rateLimit {
+				c.adaptiveRate = c.rateLimit
+			}
+		}
+	}
 }
 
 type countingReader struct {
@@ -241,18 +283,23 @@ func (c *Client) getJSONWithBytes(ctx context.Context, segments []string, target
 					lastErr = json.NewDecoder(reader).Decode(target)
 					if lastErr != nil {
 						lastErr = fmt.Errorf("decode %s: %w", requestURL.String(), lastErr)
+						c.adjustRateLimit(true, res.StatusCode)
+					} else {
+						c.adjustRateLimit(false, 0)
 					}
 					return
 				}
 
 				body, _ := io.ReadAll(io.LimitReader(res.Body, 512))
 				lastErr = fmt.Errorf("dukascopy api %s returned %s: %s", requestURL.String(), res.Status, strings.TrimSpace(string(body)))
+				c.adjustRateLimit(true, res.StatusCode)
 				if !shouldRetryResponse(res.StatusCode, body) {
 					attempt = c.maxRetries
 				}
 			}()
 		} else {
 			lastErr = err
+			c.adjustRateLimit(true, 0)
 		}
 
 		if lastErr == nil {
@@ -305,22 +352,27 @@ func (c *Client) getRawBytes(ctx context.Context, segments []string) ([]byte, er
 				res.Body.Close()
 				if err != nil {
 					lastErr = err
+					c.adjustRateLimit(true, 0)
 				} else {
+					c.adjustRateLimit(false, 0)
 					return body, nil
 				}
 			} else if res.StatusCode == http.StatusNotFound {
 				res.Body.Close()
+				c.adjustRateLimit(false, 0)
 				return nil, nil
 			} else {
 				body, _ := io.ReadAll(io.LimitReader(res.Body, 512))
 				res.Body.Close()
 				lastErr = fmt.Errorf("datafeed api %s returned %s: %s", requestURL.String(), res.Status, strings.TrimSpace(string(body)))
+				c.adjustRateLimit(true, res.StatusCode)
 				if !shouldRetryResponse(res.StatusCode, body) {
 					attempt = c.maxRetries
 				}
 			}
 		} else {
 			lastErr = err
+			c.adjustRateLimit(true, 0)
 		}
 
 		if attempt == c.maxRetries {
@@ -349,7 +401,14 @@ func (c *Client) getRawBytes(ctx context.Context, segments []string) ([]byte, er
 }
 
 func (c *Client) waitForRateLimit(ctx context.Context) error {
-	if c.rateLimit <= 0 {
+	c.rateMu.Lock()
+	limit := c.rateLimit
+	if c.adaptiveRate > 0 {
+		limit = c.adaptiveRate
+	}
+	c.rateMu.Unlock()
+
+	if limit <= 0 {
 		return nil
 	}
 
@@ -358,7 +417,7 @@ func (c *Client) waitForRateLimit(ctx context.Context) error {
 	if c.nextSlot.After(slot) {
 		slot = c.nextSlot
 	}
-	c.nextSlot = slot.Add(c.rateLimit)
+	c.nextSlot = slot.Add(limit)
 	c.rateMu.Unlock()
 
 	wait := time.Until(slot)

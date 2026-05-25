@@ -135,4 +135,61 @@ func TestCleanDuplicates(t *testing.T) {
 	}
 }
 
+func TestWriteBarsCSVRowsWithForwardGapFilling(t *testing.T) {
+	origFill := FillGaps
+	defer func() {
+		FillGaps = origFill
+	}()
+
+	FillGaps = "forward"
+	mockWriter := &mockCSVRecordWriter{}
+	instrument := dukascopy.Instrument{Code: "EURUSD", PriceScale: 5}
+	columns := []string{"timestamp", "open", "close", "volume"}
+
+	// Two bars with a 3-minute gap. Inferred timeframe interval is 1 minute.
+	// Gaps at minute 1 and minute 2 should be forward-filled!
+	t1 := time.Date(2026, 5, 25, 12, 0, 0, 0, time.UTC)
+	t2 := time.Date(2026, 5, 25, 12, 1, 0, 0, time.UTC)
+	t3 := time.Date(2026, 5, 25, 12, 2, 0, 0, time.UTC)
+	t4 := time.Date(2026, 5, 25, 12, 5, 0, 0, time.UTC)
+
+	bars := []dukascopy.Bar{
+		{Time: t1, Open: 1.0850, Close: 1.0860, Volume: 100},
+		{Time: t2, Open: 1.0860, Close: 1.0870, Volume: 110},
+		{Time: t3, Open: 1.0870, Close: 1.0880, Volume: 120},
+		{Time: t4, Open: 1.0890, Close: 1.0900, Volume: 200},
+	}
+
+	err := writeBarsCSVRows(mockWriter, instrument, columns, bars, nil, nil, false)
+	if err != nil {
+		t.Fatalf("writeBarsCSVRows failed: %v", err)
+	}
+
+	// We expect 6 bars: t1, t2, t3, t3+1m (synthetic), t3+2m (synthetic), t4
+	if len(mockWriter.records) != 6 {
+		t.Fatalf("expected 6 records (4 actual + 2 filled), got %d: %+v", len(mockWriter.records), mockWriter.records)
+	}
+
+	// Verify first synthetic bar (t3+1m = 12:03) has Close price of t3 (1.08800) and volume 0
+	row1 := mockWriter.records[3]
+	if row1[0] != "2026-05-25T12:03:00Z" {
+		t.Errorf("expected synthetic timestamp 12:03:00, got %s", row1[0])
+	}
+	if row1[1] != "1.08800" || row1[2] != "1.08800" {
+		t.Errorf("expected synthetic price 1.08800, got open=%s close=%s", row1[1], row1[2])
+	}
+	if row1[3] != "0" {
+		t.Errorf("expected synthetic volume 0, got %s", row1[3])
+	}
+
+	// Verify second synthetic bar (t3+2m = 12:04) has Close price of t3 (1.08800) and volume 0
+	row2 := mockWriter.records[4]
+	if row2[0] != "2026-05-25T12:04:00Z" {
+		t.Errorf("expected synthetic timestamp 12:04:00, got %s", row2[0])
+	}
+	if row2[3] != "0" {
+		t.Errorf("expected synthetic volume 0, got %s", row2[3])
+	}
+}
+
 
