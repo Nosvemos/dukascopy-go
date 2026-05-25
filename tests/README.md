@@ -4,10 +4,10 @@
 
 ## Unit tests
 
-Located next to each package (`internal/.../*_test.go`). They test unexported helpers directly and run with:
+Located next to each package (`internal/.../*_test.go` and `pkg/.../*_test.go`). They test unexported helpers directly and run with:
 
 ```bash
-go test ./internal/...
+go test ./internal/... ./pkg/...
 ```
 
 Unit tests stay colocated with their packages so they can access private functions without forcing a black-box interface. Moving them under `tests/units/` would require exporting those helpers, which reduces coverage quality.

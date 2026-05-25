@@ -118,6 +118,45 @@ dukascopy-go download \
 - **In-place Deduplication**: Market data can be messy. The pruner automatically detects and eliminates duplicate records or out-of-order ticks, guaranteeing chronological integrity.
 - **Proxy Rotation**: Bypassing strict IP rate-limits is easy. Provide a `--proxy-file` containing HTTP/SOCKS5 proxies, and the engine will round-robin through them.
 
+## 🐹 Go Library SDK (Public `pkg/`)
+
+Since `dukascopy-go` places its core client and CSV exporter packages under the public `pkg/` folder, you can seamlessly import them as a library in your own Go applications!
+
+```go
+package main
+
+import (
+	"context"
+	"fmt"
+	"time"
+
+	"github.com/Nosvemos/dukascopy-go/pkg/dukascopy"
+)
+
+func main() {
+	// Initialize the public SDK client
+	client := dukascopy.NewClient("https://jetta.dukascopy.com", 30*time.Second)
+
+	req := dukascopy.DownloadRequest{
+		Symbol:      "EUR/USD",
+		Granularity: dukascopy.GranularityD1,
+		Side:        dukascopy.PriceSideBid,
+		From:        time.Now().AddDate(0, 0, -5),
+		To:          time.Now(),
+	}
+
+	result, err := client.Download(context.Background(), req)
+	if err != nil {
+		panic(err)
+	}
+
+	fmt.Printf("Downloaded %d bars for symbol: %s\n", len(result.Bars), result.Instrument.Name)
+	for _, bar := range result.Bars {
+		fmt.Printf("Time: %s, Open: %f, Close: %f\n", bar.Time, bar.Open, bar.Close)
+	}
+}
+```
+
 ---
 
 ## 💻 Python & C SDK 

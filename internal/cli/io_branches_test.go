@@ -10,7 +10,7 @@ import (
 
 	"github.com/Nosvemos/dukascopy-go/internal/buildinfo"
 	"github.com/Nosvemos/dukascopy-go/internal/checkpoint"
-	"github.com/Nosvemos/dukascopy-go/internal/csvout"
+	"github.com/Nosvemos/dukascopy-go/pkg/csvout"
 )
 
 func TestRunInstrumentsAndStatsErrorBranches(t *testing.T) {

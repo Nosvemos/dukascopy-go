@@ -5,7 +5,7 @@ import (
 	"time"
 	"path/filepath"
 
-	"github.com/Nosvemos/dukascopy-go/internal/dukascopy"
+	"github.com/Nosvemos/dukascopy-go/pkg/dukascopy"
 )
 
 func TestCombineBarRowsRejectsMismatchedTimestamps(t *testing.T) {

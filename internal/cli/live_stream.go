@@ -18,7 +18,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Nosvemos/dukascopy-go/internal/dukascopy"
+	"github.com/Nosvemos/dukascopy-go/pkg/dukascopy"
 
 	_ "time/tzdata"
 )
