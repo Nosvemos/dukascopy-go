@@ -79,3 +79,41 @@ func TestDownloadMinuteFullCSV(t *testing.T) {
 		t.Fatalf("missing expected full row: %s", content)
 	}
 }
+
+func TestDownloadMinuteFusedCSV(t *testing.T) {
+	server := newMockServer()
+	defer server.Close()
+
+	outputPath := filepath.Join(t.TempDir(), "xauusd-minute-fused.csv")
+	output := runCLI(
+		t,
+		server.URL,
+		"download",
+		"--symbol", "xauusd",
+		"--granularity", "minute",
+		"--from", "2024-01-02T00:00:00Z",
+		"--to", "2024-01-02T00:03:00Z",
+		"--output", outputPath,
+		"--fused",
+	)
+
+	if !strings.Contains(output, "wrote 3 bars") {
+		t.Fatalf("unexpected download output: %s", output)
+	}
+
+	data, err := os.ReadFile(outputPath)
+	if err != nil {
+		t.Fatalf("read output file: %v", err)
+	}
+
+	content := string(data)
+	if !strings.Contains(content, "timestamp,bid_open,bid_high,bid_low,bid_close,ask_open,ask_high,ask_low,ask_close,spread,volume") {
+		t.Fatalf("missing fused header: %s", content)
+	}
+	if strings.Contains(content, "mid_open") || strings.Contains(content, "mid_high") {
+		t.Fatalf("fused output should not include mid columns: %s", content)
+	}
+	if !strings.Contains(content, "2024-01-02T00:00:00Z,100.000,101.000,99.000,100.500,100.200,101.200,99.200,100.700,0.200,1100") {
+		t.Fatalf("missing expected fused row: %s", content)
+	}
+}

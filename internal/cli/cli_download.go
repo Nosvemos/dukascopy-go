@@ -31,6 +31,7 @@ func runDownload(args []string, stdout io.Writer, stderr io.Writer) error {
 	side := fs.String("side", "bid", "bid or ask")
 	simpleOutput := fs.Bool("simple", false, "write the reduced CSV column set")
 	fullOutput := fs.Bool("full", false, "write the full CSV column set with bid/ask columns")
+	fusedOutput := fs.Bool("fused", false, "write the fused CSV column set with bid/ask and spread but no mid columns")
 	customColumns := fs.String("custom-columns", "", "comma-separated CSV column list")
 	lastValue := fs.String("last", "", "download the last N duration (e.g. 30d, 1y, 6mo) instead of --from/--to")
 	fromValue := fs.String("from", "", "inclusive RFC3339 start timestamp")
@@ -269,8 +270,14 @@ func runDownload(args []string, stdout io.Writer, stderr io.Writer) error {
 	if *simpleOutput && *fullOutput {
 		return errors.New("--simple and --full cannot be used together")
 	}
+	if *fusedOutput && (*simpleOutput || *fullOutput) {
+		return errors.New("only one of --simple, --full, or --fused can be used")
+	}
 	if strings.TrimSpace(*customColumns) != "" && (*simpleOutput || *fullOutput) {
 		return errors.New("--custom-columns cannot be combined with --simple or --full")
+	}
+	if strings.TrimSpace(*customColumns) != "" && *fusedOutput {
+		return errors.New("--custom-columns cannot be combined with --fused")
 	}
 
 	timeframeValue := strings.TrimSpace(*timeframe)
@@ -282,11 +289,13 @@ func runDownload(args []string, stdout io.Writer, stderr io.Writer) error {
 	profile := csvout.ProfileSimple
 	if *fullOutput {
 		profile = csvout.ProfileFull
+	} else if *fusedOutput {
+		profile = csvout.ProfileFused
 	}
 
 	barColumns := csvout.BarColumnsForProfile(profile)
 	tickColumns := csvout.TickColumnsForProfile(profile)
-	if !*simpleOutput && !*fullOutput && strings.TrimSpace(*customColumns) == "" {
+	if !*simpleOutput && !*fullOutput && !*fusedOutput && strings.TrimSpace(*customColumns) == "" {
 		tickColumns = csvout.TickColumnsForProfile(csvout.ProfileFull)
 	}
 	if strings.TrimSpace(*customColumns) != "" {
