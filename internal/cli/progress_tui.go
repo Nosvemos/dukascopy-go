@@ -102,10 +102,11 @@ type progressTUIModel struct {
 	width               int
 	height              int
 	noColor             bool
+	theme               string
 }
 
-func newProgressPrinter(w io.Writer) *progressPrinter {
-	model := newProgressTUIModel(strings.TrimSpace(os.Getenv("NO_COLOR")) != "")
+func newProgressPrinter(w io.Writer, theme string) *progressPrinter {
+	model := newProgressTUIModel(strings.TrimSpace(os.Getenv("NO_COLOR")) != "", theme)
 	options := []tea.ProgramOption{
 		tea.WithInput(nil),
 		tea.WithOutput(w),
@@ -124,10 +125,26 @@ func newProgressPrinter(w io.Writer) *progressPrinter {
 	return p
 }
 
-func newProgressTUIModel(noColor bool) progressTUIModel {
+func newProgressTUIModel(noColor bool, theme string) progressTUIModel {
+	if theme == "" {
+		theme = "default"
+	}
+	theme = strings.ToLower(theme)
+
 	spin := spinner.New(spinner.WithSpinner(spinner.Dot))
 	if !noColor {
-		spin.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("81"))
+		switch theme {
+		case "catppuccin":
+			spin.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("#cba6f7"))
+		case "nord":
+			spin.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("#88c0d0"))
+		case "gruvbox":
+			spin.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("#fabd2f"))
+		case "dracula":
+			spin.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("#bd93f9"))
+		default:
+			spin.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("81"))
+		}
 	}
 
 	return progressTUIModel{
@@ -138,6 +155,7 @@ func newProgressTUIModel(noColor bool) progressTUIModel {
 		height:     16,
 		noColor:    noColor,
 		workers:    make(map[int]workerSnapshot),
+		theme:      theme,
 	}
 }
 

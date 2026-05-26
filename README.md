@@ -99,6 +99,34 @@ dukascopy-go download \
 
 ---
 
+### 📋 CLI Command Reference
+
+Below is a detailed guide to all options supported by `dukascopy-go download`:
+
+| Flag | Type | Default | Description |
+|---|---|---|---|
+| `--symbol` | `string` | *(required)* | Instrument code (e.g., `eurusd`, `xauusd`). Supports comma-separated batch lists: `eurusd,gbpusd`. |
+| `--timeframe` | `string` | `m1` | Granularity layout: `tick`, `m1`, `m3`, `m5`, `m15`, `m30`, `h1`, `h4`, `d1`, `w1`, `mn1`. |
+| `--side` | `string` | `bid` | Price side to target: `bid` or `ask`. |
+| `--output` | `string` | *(required)* | Output file or directory path. Use `.parquet` for Parquet, `.csv` for CSV, `.csv.gz` for compressed CSV. |
+| `--last` | `duration` | `""` | Duration to download relative to now (e.g. `30d`, `6mo`, `1y`). Overrides `--from`/`--to`. |
+| `--from` | `string` | `""` | Start timestamp in `YYYY-MM-DD`, `YYYY-MM-DD HH:MM`, or ISO `RFC3339` format. |
+| `--to` | `string` | `""` | End timestamp in `YYYY-MM-DD`, `YYYY-MM-DD HH:MM`, or ISO `RFC3339` format. |
+| `--simple` | `bool` | `false` | Export basic columns only (reduced CSV footprint). |
+| `--full` | `bool` | `false` | Export complete Bid and Ask candlestick fields. |
+| `--fused` | `bool` | `false` | Export fused Bid and Ask fields complete with dynamic spread calculations (no mid fields). |
+| `--custom-columns` | `string` | `""` | Explicit comma-separated custom column projection list. |
+| `--progress` | `bool` | `false` | Force-enable the interactive progress TUI dashboard. |
+| `--tui-theme` | `string` | `default` | Dashboard theme: `default`, `catppuccin`, `nord`, `gruvbox`, or `dracula`. |
+| `--partition` | `string` | `none` | Partitions range into multiple files: `none`, `auto`, `hour`, `day`, `week`, `month`, `year`. |
+| `--parallelism` | `int` | `1` | Number of concurrent downloading partition workers. |
+| `--fill-gaps` | `string` | `none` | Gap filling: `none` or `forward` (forward-fills during active market sessions). |
+| `--timezone` | `string` | `UTC` | Target output timezone (e.g. `Europe/London`, `EST`, `MT4`, `MT5`). |
+| `--preset` | `string` | `""` | Custom format mappings matching backtest engines: `mt4`, `mt5`, `backtrader`, `ninjatrader`. |
+| `--engine` | `string` | `jetta` | Underlying data source: `jetta` (JSON) or `datafeed` (binary `.bi5` archives). |
+
+---
+
 ## 💎 Elite Quant Enhancements
 
 ### 🔄 In-Place Smart Delta Sync (`sync`)

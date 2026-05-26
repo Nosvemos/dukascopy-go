@@ -44,6 +44,7 @@ func runDownload(args []string, stdout io.Writer, stderr io.Writer) error {
 	rateLimit := fs.Duration("rate-limit", 0, "minimum delay between HTTP requests such as 100ms or 1s")
 	progress := fs.Bool("progress", false, "force-enable the interactive progress dashboard")
 	noProgress := fs.Bool("no-progress", false, "disable the interactive progress dashboard")
+	tuiTheme := fs.String("tui-theme", "default", "interactive dashboard color theme: default, catppuccin, nord, gruvbox, dracula")
 	resume := fs.Bool("resume", false, "append missing rows to an existing CSV when possible")
 	partition := fs.String("partition", "none", "partition mode: none, auto, hour, day, week, month, year")
 	parallelism := fs.Int("parallelism", 1, "partition worker count")
@@ -388,7 +389,7 @@ func runDownload(args []string, stdout io.Writer, stderr io.Writer) error {
 
 	progressWriter := stderr
 	if progressEnabled {
-		printer := newProgressPrinter(stderr)
+		printer := newProgressPrinter(stderr, *tuiTheme)
 		printer.SetDownloadMeta(*symbol, string(normalizedTimeframe), string(request.Side), *outputPath, normalizedPartition, *parallelism, request.From, request.To)
 		progressWriter = printer
 		client = client.WithProgress(printer.Print)

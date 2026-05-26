@@ -184,42 +184,97 @@ func (m progressTUIModel) progressLabel() string {
 
 func (m progressTUIModel) titleStyle() lipgloss.Style {
 	style := lipgloss.NewStyle().Bold(true)
-	if !m.noColor {
-		style = style.Foreground(lipgloss.Color("159"))
+	if m.noColor {
+		return style
 	}
-	return style
+	switch m.theme {
+	case "catppuccin":
+		return style.Foreground(lipgloss.Color("#cba6f7")) // Mauve
+	case "nord":
+		return style.Foreground(lipgloss.Color("#88c0d0")) // Frost Cyan
+	case "gruvbox":
+		return style.Foreground(lipgloss.Color("#fabd2f")) // Warm Yellow
+	case "dracula":
+		return style.Foreground(lipgloss.Color("#ff79c6")) // Pink
+	default:
+		return style.Foreground(lipgloss.Color("159"))
+	}
 }
 
 func (m progressTUIModel) subtleStyle() lipgloss.Style {
 	style := lipgloss.NewStyle().Faint(true)
-	if !m.noColor {
-		style = style.Foreground(lipgloss.Color("244"))
+	if m.noColor {
+		return style
 	}
-	return style
+	switch m.theme {
+	case "catppuccin":
+		return style.Foreground(lipgloss.Color("#585b70")) // Surface2
+	case "nord":
+		return style.Foreground(lipgloss.Color("#4c566a")) // Polar Night Gray
+	case "gruvbox":
+		return style.Foreground(lipgloss.Color("#928374")) // Gray
+	case "dracula":
+		return style.Foreground(lipgloss.Color("#6272a4")) // Comment Purple-gray
+	default:
+		return style.Foreground(lipgloss.Color("244"))
+	}
 }
 
 func (m progressTUIModel) labelStyle() lipgloss.Style {
 	style := lipgloss.NewStyle().Bold(true)
-	if !m.noColor {
-		style = style.Foreground(lipgloss.Color("86"))
+	if m.noColor {
+		return style
 	}
-	return style
+	switch m.theme {
+	case "catppuccin":
+		return style.Foreground(lipgloss.Color("#89b4fa")) // Blue
+	case "nord":
+		return style.Foreground(lipgloss.Color("#81a1c1")) // Frost Blue
+	case "gruvbox":
+		return style.Foreground(lipgloss.Color("#83a598")) // Blue
+	case "dracula":
+		return style.Foreground(lipgloss.Color("#8be9fd")) // Cyan
+	default:
+		return style.Foreground(lipgloss.Color("86"))
+	}
 }
 
 func (m progressTUIModel) valueStyle() lipgloss.Style {
 	style := lipgloss.NewStyle()
-	if !m.noColor {
-		style = style.Foreground(lipgloss.Color("230"))
+	if m.noColor {
+		return style
 	}
-	return style
+	switch m.theme {
+	case "catppuccin":
+		return style.Foreground(lipgloss.Color("#cdd6f4")) // Text
+	case "nord":
+		return style.Foreground(lipgloss.Color("#d8dee9")) // Snow Storm White
+	case "gruvbox":
+		return style.Foreground(lipgloss.Color("#ebdbb2")) // Warm White
+	case "dracula":
+		return style.Foreground(lipgloss.Color("#f8f8f2")) // Foreground White
+	default:
+		return style.Foreground(lipgloss.Color("230"))
+	}
 }
 
 func (m progressTUIModel) percentStyle() lipgloss.Style {
 	style := lipgloss.NewStyle().Bold(true)
-	if !m.noColor {
-		style = style.Foreground(lipgloss.Color("121"))
+	if m.noColor {
+		return style
 	}
-	return style
+	switch m.theme {
+	case "catppuccin":
+		return style.Foreground(lipgloss.Color("#a6e3a1")) // Green
+	case "nord":
+		return style.Foreground(lipgloss.Color("#a3be8c")) // Aurora Green
+	case "gruvbox":
+		return style.Foreground(lipgloss.Color("#b8bb26")) // Green
+	case "dracula":
+		return style.Foreground(lipgloss.Color("#50fa7b")) // Green
+	default:
+		return style.Foreground(lipgloss.Color("121"))
+	}
 }
 
 func (m progressTUIModel) phaseBadge() string {
@@ -234,17 +289,80 @@ func (m progressTUIModel) phaseBadge() string {
 		return style.Render(label)
 	}
 
-	switch {
-	case strings.Contains(status, "failed"), strings.Contains(status, "error"):
-		style = style.Foreground(lipgloss.Color("231")).Background(lipgloss.Color("160"))
-	case strings.Contains(status, "assembling"), strings.Contains(status, "verified"), strings.Contains(status, "completed"):
-		style = style.Foreground(lipgloss.Color("16")).Background(lipgloss.Color("114"))
-	case strings.Contains(status, "checkpoint"), strings.Contains(status, "scan"):
-		style = style.Foreground(lipgloss.Color("16")).Background(lipgloss.Color("221"))
-	case strings.Contains(status, "download"):
-		style = style.Foreground(lipgloss.Color("16")).Background(lipgloss.Color("81"))
+	var bg, fg string
+	switch m.theme {
+	case "catppuccin":
+		fg = "#11111b"
+		switch {
+		case strings.Contains(status, "failed"), strings.Contains(status, "error"):
+			bg = "#f38ba8"
+		case strings.Contains(status, "assembling"), strings.Contains(status, "verified"), strings.Contains(status, "completed"):
+			bg = "#a6e3a1"
+		case strings.Contains(status, "checkpoint"), strings.Contains(status, "scan"):
+			bg = "#f9e2af"
+		case strings.Contains(status, "download"):
+			bg = "#89b4fa"
+		default:
+			bg = "#bac2de"
+		}
+	case "nord":
+		fg = "#2e3440"
+		switch {
+		case strings.Contains(status, "failed"), strings.Contains(status, "error"):
+			bg = "#bf616a"
+		case strings.Contains(status, "assembling"), strings.Contains(status, "verified"), strings.Contains(status, "completed"):
+			bg = "#a3be8c"
+		case strings.Contains(status, "checkpoint"), strings.Contains(status, "scan"):
+			bg = "#ebcb8b"
+		case strings.Contains(status, "download"):
+			bg = "#81a1c1"
+		default:
+			bg = "#d8dee9"
+		}
+	case "gruvbox":
+		fg = "#282828"
+		switch {
+		case strings.Contains(status, "failed"), strings.Contains(status, "error"):
+			bg = "#fb4934"
+		case strings.Contains(status, "assembling"), strings.Contains(status, "verified"), strings.Contains(status, "completed"):
+			bg = "#b8bb26"
+		case strings.Contains(status, "checkpoint"), strings.Contains(status, "scan"):
+			bg = "#fabd2f"
+		case strings.Contains(status, "download"):
+			bg = "#83a598"
+		default:
+			bg = "#a89984"
+		}
+	case "dracula":
+		fg = "#282a36"
+		switch {
+		case strings.Contains(status, "failed"), strings.Contains(status, "error"):
+			bg = "#ff5555"
+		case strings.Contains(status, "assembling"), strings.Contains(status, "verified"), strings.Contains(status, "completed"):
+			bg = "#50fa7b"
+		case strings.Contains(status, "checkpoint"), strings.Contains(status, "scan"):
+			bg = "#f1fa8c"
+		case strings.Contains(status, "download"):
+			bg = "#bd93f9"
+		default:
+			bg = "#f8f8f2"
+		}
 	default:
-		style = style.Foreground(lipgloss.Color("16")).Background(lipgloss.Color("252"))
+		switch {
+		case strings.Contains(status, "failed"), strings.Contains(status, "error"):
+			style = style.Foreground(lipgloss.Color("231")).Background(lipgloss.Color("160"))
+		case strings.Contains(status, "assembling"), strings.Contains(status, "verified"), strings.Contains(status, "completed"):
+			style = style.Foreground(lipgloss.Color("16")).Background(lipgloss.Color("114"))
+		case strings.Contains(status, "checkpoint"), strings.Contains(status, "scan"):
+			style = style.Foreground(lipgloss.Color("16")).Background(lipgloss.Color("221"))
+		case strings.Contains(status, "download"):
+			style = style.Foreground(lipgloss.Color("16")).Background(lipgloss.Color("81"))
+		default:
+			style = style.Foreground(lipgloss.Color("16")).Background(lipgloss.Color("252"))
+		}
+		return style.Render(label)
 	}
+
+	style = style.Foreground(lipgloss.Color(fg)).Background(lipgloss.Color(bg))
 	return style.Render(label)
 }

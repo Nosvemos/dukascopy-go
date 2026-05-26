@@ -104,7 +104,7 @@ func TestProgressTUIModelCalculations(t *testing.T) {
 }
 
 func TestProgressViewRendersFine(t *testing.T) {
-	model := newProgressTUIModel(true)
+	model := newProgressTUIModel(true, "")
 	model.symbol = "EURUSD"
 	model.timeframe = "m1"
 	model.side = "BID"
