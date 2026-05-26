@@ -89,46 +89,61 @@ def main():
         print(f"ERROR: Parquet Download failed: {e}")
         sys.exit(1)
 
-    # 4. Integration Guidelines Demo
+    # 4. Integration Guidelines Demo & CGO DB Loader Verification
     print("\n" + "=" * 60)
-    print("Quantitative Integration Blueprint")
+    print("High-Performance SDK DB Loader Verification")
     print("=" * 60)
+    print("Testing Python SDK 'db_load' with ClickHouse (expecting connection refusal error)...")
+    
+    try:
+        dukascopy.db_load(
+            db_type="clickhouse",
+            db_url="http://127.0.0.1:9999",  # Non-existent port to trigger connection error
+            table_name="eurusd_m1",
+            input_path=csv_output,
+            timeout_sec=5
+        )
+        print("SUCCESS: ClickHouse ingestion succeeded!")
+    except dukascopy.DukascopyError as e:
+        print(f"VERIFIED: SDK successfully captured Go database error:\n  -> {e}")
+    except Exception as e:
+        print(f"FAILED: Unexpected python error occurred: {e}")
+
+    print("\nQuantitative Integration Blueprint")
+    print("-" * 35)
     print("""
-To stream or insert these files directly into ClickHouse or InfluxDB:
+The Python SDK exposes 'dukascopy.db_load' which streams local files into database tables
+natively using Go's high-performance drivers.
 
-1. CLICKHOUSE DIRECT INGESTION (High Performance):
---------------------------------------------------
-import clickhouse_connect
+Examples:
 
-client = clickhouse_connect.get_client(host='localhost', username='default')
-
-# Create schema
-client.command('''
-    CREATE TABLE IF NOT EXISTS eurusd_m1 (
-        timestamp DateTime,
-        open Float64,
-        high Float64,
-        low Float64,
-        close Float64,
-        volume Float64
-    ) ENGINE = MergeTree()
-    ORDER BY timestamp
-''')
-
-# Direct high-speed file insertion
-client.command(
-    f"INSERT INTO eurusd_m1 FORMAT CSV",
-    file_name=csv_output
+# Ingest CSV/Parquet into ClickHouse
+dukascopy.db_load(
+    db_type="clickhouse",
+    db_url="http://localhost:8123",
+    table_name="eurusd_m1",
+    input_path="./eurusd_m1.csv"
 )
-print("SUCCESS: ClickHouse Ingestion Blueprint complete.")
 
-2. INFLUXDB DIRECT INGESTION:
------------------------------
-from influxdb_client import InfluxDBClient, Point, WriteOptions
+# Ingest CSV into PostgreSQL using fast COPY
+dukascopy.db_load(
+    db_type="postgres",
+    db_url="postgres://user:pass@localhost:5432/dbname",
+    table_name="eurusd_m1",
+    input_path="./eurusd_m1.csv"
+)
 
-# For InfluxDB, parse CSV/Parquet using pandas, convert to line protocol,
-# and write with high-performance batching:
-# ...
+# Ingest CSV into InfluxDB
+dukascopy.db_load(
+    db_type="influxdb",
+    db_url="http://localhost:8086",
+    table_name="eurusd_m1",
+    input_path="./eurusd_m1.csv",
+    org="myorg",
+    bucket="mybucket",
+    token="mytoken",
+    symbol_tag="EURUSD"
+)
 """)
     print("Demo complete!")
 
