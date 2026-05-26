@@ -7,10 +7,12 @@ import "C"
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 	"unsafe"
 
+	"github.com/Nosvemos/dukascopy-go/internal/cli"
 	"github.com/Nosvemos/dukascopy-go/pkg/csvout"
 	"github.com/Nosvemos/dukascopy-go/pkg/dukascopy"
 )
@@ -85,6 +87,55 @@ func DownloadData(
 		return C.CString(fmt.Sprintf("export failed: %v", err))
 	}
 
+	return nil
+}
+
+//export DBLoadData
+func DBLoadData(
+	dbType *C.char,
+	dbURL *C.char,
+	tableName *C.char,
+	inputPath *C.char,
+	user *C.char,
+	password *C.char,
+	token *C.char,
+	org *C.char,
+	bucket *C.char,
+	symbolTag *C.char,
+	batchSize C.int,
+	timeoutSec C.int,
+) *C.char {
+	dbT := C.GoString(dbType)
+	url := C.GoString(dbURL)
+	tbl := C.GoString(tableName)
+	inp := C.GoString(inputPath)
+	usr := C.GoString(user)
+	pwd := C.GoString(password)
+	tok := C.GoString(token)
+	o := C.GoString(org)
+	b := C.GoString(bucket)
+	symTag := C.GoString(symbolTag)
+
+	opts := cli.DBLoadOptions{
+		DBType:    dbT,
+		DBURL:     url,
+		Table:     tbl,
+		InputPath: inp,
+		User:      usr,
+		Password:  pwd,
+		Token:     tok,
+		Org:       o,
+		Bucket:    b,
+		SymbolTag: symTag,
+		BatchSize: int(batchSize),
+		Timeout:   time.Duration(timeoutSec) * time.Second,
+	}
+
+	ctx := context.Background()
+	err := cli.DBLoad(ctx, os.Stdout, os.Stderr, opts)
+	if err != nil {
+		return C.CString(fmt.Sprintf("db load failed: %v", err))
+	}
 	return nil
 }
 

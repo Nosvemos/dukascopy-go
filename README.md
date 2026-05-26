@@ -166,16 +166,34 @@ func main() {
 
 ## 💻 Python & C SDK 
 
-Not using the CLI? `dukascopy-go` compiles to a C shared library (`.so`, `.dll`, `.dylib`) which can be wrapped in almost any language. We provide a **Python `ctypes` SDK** out of the box!
+Not using the CLI? `dukascopy-go` compiles to a C shared library (`.so`, `.dll`, `.dylib`) which can be wrapped in almost any language. We provide a **high-performance Python SDK** out of the box!
 
+### 📥 1. Download Historical Data
 ```python
-from sdk.python.dukascopy import DukascopyClient
+import dukascopy_go as dukascopy
+from datetime import datetime
 
-client = DukascopyClient()
-bars = client.download_bars('eurusd', 'm1', '2024-01-01T00:00:00Z', '2024-01-02T00:00:00Z')
-print(bars)
+# Download EURUSD candles straight to CSV or Parquet
+dukascopy.download(
+    symbol="EURUSD",
+    timeframe="m1",
+    output_path="./eurusd_m1.csv",
+    from_date=datetime(2026, 5, 18, 10, 0),
+    to_date=datetime(2026, 5, 18, 11, 0)
+)
 ```
-*(Check the `sdk/python` directory for full usage examples)*
+
+### ⚡ 2. Stream File Directly into Database
+Stream the local file into ClickHouse, PostgreSQL, or InfluxDB at millions of rows/second natively using the Go loader:
+```python
+dukascopy.db_load(
+    db_type="clickhouse",
+    db_url="http://localhost:8123",
+    table_name="eurusd_m1",
+    input_path="./eurusd_m1.csv"
+)
+```
+*(Check the `sdk/python` directory for full usage examples and installation guides)*
 
 ---
 

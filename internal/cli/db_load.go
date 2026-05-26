@@ -451,11 +451,43 @@ func buildLineProtocol(row []string, colIndex map[string]int, measurement string
 		return "", errors.New("no numeric fields found")
 	}
 
-	// Build tag set
 	tags := ""
 	if strings.TrimSpace(symbolTag) != "" {
 		tags = ",symbol=" + strings.ToLower(strings.TrimSpace(symbolTag))
 	}
 
 	return fmt.Sprintf("%s%s %s %d", measurement, tags, strings.Join(fields, ","), tsMS), nil
+}
+
+type DBLoadOptions struct {
+	DBType    string
+	DBURL     string
+	Table     string
+	InputPath string
+	User      string
+	Password  string
+	Token     string
+	Org       string
+	Bucket    string
+	SymbolTag string
+	BatchSize int
+	Timeout   time.Duration
+}
+
+func DBLoad(ctx context.Context, stdout io.Writer, stderr io.Writer, opt DBLoadOptions) error {
+	dbTypeLower := strings.ToLower(strings.TrimSpace(opt.DBType))
+	switch dbTypeLower {
+	case "clickhouse":
+		return ingestClickHouse(ctx, stdout, stderr, opt.InputPath, opt.DBURL, opt.Table, opt.User, opt.Password, opt.Timeout)
+	case "postgres":
+		return ingestPostgres(ctx, stdout, stderr, opt.InputPath, opt.DBURL, opt.Table)
+	case "influxdb":
+		authToken := strings.TrimSpace(opt.Token)
+		if authToken == "" {
+			authToken = strings.TrimSpace(opt.Password)
+		}
+		return ingestInfluxDB(ctx, stdout, stderr, opt.InputPath, opt.DBURL, opt.Table, opt.Org, opt.Bucket, authToken, opt.SymbolTag, opt.BatchSize, opt.Timeout)
+	default:
+		return fmt.Errorf("unknown --db %q (supported: clickhouse, influxdb, postgres)", opt.DBType)
+	}
 }

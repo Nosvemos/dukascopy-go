@@ -43,11 +43,10 @@ def _load_library():
 
 # Initialize the library
 _lib = None
-try:
-    _lib = _load_library()
-    
+
+def _bind_library_functions(lib):
     # Configure DownloadData
-    _lib.DownloadData.argtypes = [
+    lib.DownloadData.argtypes = [
         ctypes.c_char_p, # symbol
         ctypes.c_char_p, # timeframe
         ctypes.c_char_p, # side
@@ -57,11 +56,32 @@ try:
         ctypes.c_char_p, # engine
         ctypes.c_int     # priceScale
     ]
-    _lib.DownloadData.restype = ctypes.c_void_p
+    lib.DownloadData.restype = ctypes.c_void_p
+
+    # Configure DBLoadData
+    lib.DBLoadData.argtypes = [
+        ctypes.c_char_p, # dbType
+        ctypes.c_char_p, # dbURL
+        ctypes.c_char_p, # tableName
+        ctypes.c_char_p, # inputPath
+        ctypes.c_char_p, # user
+        ctypes.c_char_p, # password
+        ctypes.c_char_p, # token
+        ctypes.c_char_p, # org
+        ctypes.c_char_p, # bucket
+        ctypes.c_char_p, # symbolTag
+        ctypes.c_int,    # batchSize
+        ctypes.c_int     # timeoutSec
+    ]
+    lib.DBLoadData.restype = ctypes.c_void_p
 
     # Configure FreeString
-    _lib.FreeString.argtypes = [ctypes.c_void_p]
-    _lib.FreeString.restype = None
+    lib.FreeString.argtypes = [ctypes.c_void_p]
+    lib.FreeString.restype = None
+
+try:
+    _lib = _load_library()
+    _bind_library_functions(_lib)
 except Exception as e:
     # Library not loaded yet, or load deferred until first call
     pass
@@ -95,13 +115,7 @@ def download(
     global _lib
     if _lib is None:
         _lib = _load_library()
-        _lib.DownloadData.argtypes = [
-            ctypes.c_char_p, ctypes.c_char_p, ctypes.c_char_p, ctypes.c_char_p,
-            ctypes.c_char_p, ctypes.c_char_p, ctypes.c_char_p, ctypes.c_int
-        ]
-        _lib.DownloadData.restype = ctypes.c_void_p
-        _lib.FreeString.argtypes = [ctypes.c_void_p]
-        _lib.FreeString.restype = None
+        _bind_library_functions(_lib)
 
     # Convert datetime to ISO-8601 string
     if isinstance(from_date, datetime):
@@ -138,6 +152,83 @@ def download(
         c_output_path,
         c_engine,
         c_price_scale
+    )
+
+    # If the returned pointer is not NULL, an error occurred
+    if err_ptr:
+        err_msg = ctypes.string_at(err_ptr).decode('utf-8')
+        # Free the Go C.CString memory to avoid leak
+        _lib.FreeString(err_ptr)
+        raise DukascopyError(err_msg)
+
+def db_load(
+    db_type: str,
+    db_url: str,
+    table_name: str,
+    input_path: str,
+    user: str = "",
+    password: str = "",
+    token: str = "",
+    org: str = "",
+    bucket: str = "",
+    symbol_tag: str = "",
+    batch_size: int = 0,
+    timeout_sec: int = 120
+):
+    """
+    Ingests market data from a local CSV or Parquet file directly into the target database.
+    Supported databases: ClickHouse, PostgreSQL, InfluxDB.
+    
+    Parameters:
+        db_type (str): Target database, 'clickhouse', 'postgres', or 'influxdb'.
+        db_url (str): Connection URL, e.g. 'http://localhost:8123', 'postgres://user:pass@localhost:5432/dbname'.
+        table_name (str): Target table or measurement name.
+        input_path (str): Path to local CSV or Parquet file to ingest.
+        user (str): Database username (optional).
+        password (str): Database password (optional).
+        token (str): InfluxDB auth token (optional).
+        org (str): InfluxDB organization (required for InfluxDB).
+        bucket (str): InfluxDB bucket (required for InfluxDB).
+        symbol_tag (str): Symbol tag hint for InfluxDB records (optional).
+        batch_size (int): Batch size of rows to ingest. Default 0 uses database defaults.
+        timeout_sec (int): Request/query timeout in seconds. Default is 120.
+        
+    Raises:
+        DukascopyError: If the ingestion fails or parameter validation fails.
+    """
+    global _lib
+    if _lib is None:
+        _lib = _load_library()
+        _bind_library_functions(_lib)
+
+    # Encode arguments to C-compatible byte strings
+    c_db_type = db_type.encode('utf-8')
+    c_db_url = db_url.encode('utf-8')
+    c_table_name = table_name.encode('utf-8')
+    c_input_path = input_path.encode('utf-8')
+    c_user = user.encode('utf-8')
+    c_password = password.encode('utf-8')
+    c_token = token.encode('utf-8')
+    c_org = org.encode('utf-8')
+    c_bucket = bucket.encode('utf-8')
+    c_symbol_tag = symbol_tag.encode('utf-8')
+    c_batch_size = ctypes.c_int(batch_size)
+    c_timeout_sec = ctypes.c_int(timeout_sec)
+
+    # Call CGO function
+    err_ptr = _lib.DBLoadData(
+        c_db_type,
+        c_db_url,
+        c_table_name,
+        c_input_path,
+        c_user,
+        c_password,
+        c_token,
+        c_org,
+        c_bucket,
+        c_symbol_tag,
+        c_batch_size,
+        c_timeout_sec
     )
 
     # If the returned pointer is not NULL, an error occurred

@@ -89,6 +89,7 @@ extern "C" {
 
 extern void FreeString(char* s);
 extern char* DownloadData(char* symbol, char* timeframe, char* side, char* fromDate, char* toDate, char* outputPath, char* engine, int priceScale);
+extern char* DBLoadData(char* dbType, char* dbURL, char* tableName, char* inputPath, char* user, char* password, char* token, char* org, char* bucket, char* symbolTag, int batchSize, int timeoutSec);
 
 #ifdef __cplusplus
 }
