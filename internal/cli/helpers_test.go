@@ -172,7 +172,7 @@ func TestProgressAndManifestHelpers(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 
 	var buffer bytes.Buffer
-	printer := newProgressPrinter(&buffer)
+	printer := newProgressPrinter(&buffer, "")
 	printer.SetDownloadMeta("xauusd", "m1", "BID", "./data/xauusd.csv", "day", 4, time.Date(2024, 1, 2, 0, 0, 0, 0, time.UTC), time.Date(2024, 1, 3, 0, 0, 0, 0, time.UTC))
 	printer.Print(dukascopy.ProgressEvent{Kind: "chunk", Scope: "minute", Current: 1, Total: 2, Detail: "2024-01-02"})
 	printer.Print(dukascopy.ProgressEvent{Kind: "retry", Attempt: 1, MaxAttempt: 3, Detail: "http://example.test"})
@@ -217,7 +217,7 @@ func TestProgressAndManifestHelpers(t *testing.T) {
 
 func TestProgressViewFitsTerminalBounds(t *testing.T) {
 	for _, noColor := range []bool{true, false} {
-		model := newProgressTUIModel(noColor)
+		model := newProgressTUIModel(noColor, "")
 		model.statusText = "downloading"
 		model.symbol = "xauusd"
 		model.timeframe = "m1"

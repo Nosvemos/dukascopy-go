@@ -40,3 +40,8 @@ __pycache__/
 *$py.class
 dukascopy-go
 dukascopy-go-sdk
+
+# Data files
+*.csv
+*.csv.gz
+*.parquet
