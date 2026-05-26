@@ -15,9 +15,9 @@ import (
 	"github.com/Nosvemos/dukascopy-go/pkg/dukascopy"
 )
 
-func WriteBars(outputPath string, instrument dukascopy.Instrument, columns []string, primaryBars []dukascopy.Bar, bidBars []dukascopy.Bar, askBars []dukascopy.Bar) error {
+func (c *Config) WriteBars(outputPath string, instrument dukascopy.Instrument, columns []string, primaryBars []dukascopy.Bar, bidBars []dukascopy.Bar, askBars []dukascopy.Bar) error {
 	if isParquetPath(outputPath) {
-		return writeBarsParquet(outputPath, instrument, columns, primaryBars, bidBars, askBars)
+		return c.writeBarsParquet(outputPath, instrument, columns, primaryBars, bidBars, askBars)
 	}
 	if IsJSONLPath(outputPath) {
 		return writeBarsJSONL(outputPath, instrument, columns, primaryBars, bidBars, askBars)
@@ -26,32 +26,44 @@ func WriteBars(outputPath string, instrument dukascopy.Instrument, columns []str
 		return err
 	}
 
-	_, csvWriter, closeWriter, err := createCSVWriter(outputPath)
+	_, csvWriter, closeWriter, err := c.createCSVWriter(outputPath)
 	if err != nil {
 		return err
 	}
 	defer closeWriter()
 
-	return writeBarsCSV(csvWriter, instrument, columns, primaryBars, bidBars, askBars)
+	return c.writeBarsCSV(csvWriter, instrument, columns, primaryBars, bidBars, askBars)
+}
+
+func WriteBars(outputPath string, instrument dukascopy.Instrument, columns []string, primaryBars []dukascopy.Bar, bidBars []dukascopy.Bar, askBars []dukascopy.Bar) error {
+	return DefaultConfig().WriteBars(outputPath, instrument, columns, primaryBars, bidBars, askBars)
+}
+
+func (c *Config) WriteBarsToWriter(w io.Writer, instrument dukascopy.Instrument, columns []string, primaryBars []dukascopy.Bar, bidBars []dukascopy.Bar, askBars []dukascopy.Bar) error {
+	csvWriter := c.csvWriterFactory(w)
+	defer csvWriter.Flush()
+
+	return c.writeBarsCSV(csvWriter, instrument, columns, primaryBars, bidBars, askBars)
 }
 
 func WriteBarsToWriter(w io.Writer, instrument dukascopy.Instrument, columns []string, primaryBars []dukascopy.Bar, bidBars []dukascopy.Bar, askBars []dukascopy.Bar) error {
-	csvWriter := csvWriterFactory(w)
+	return DefaultConfig().WriteBarsToWriter(w, instrument, columns, primaryBars, bidBars, askBars)
+}
+
+func (c *Config) WriteBarsRowsToWriter(w io.Writer, instrument dukascopy.Instrument, columns []string, primaryBars []dukascopy.Bar, bidBars []dukascopy.Bar, askBars []dukascopy.Bar) error {
+	csvWriter := c.csvWriterFactory(w)
 	defer csvWriter.Flush()
 
-	return writeBarsCSV(csvWriter, instrument, columns, primaryBars, bidBars, askBars)
+	return c.writeBarsCSVRows(csvWriter, instrument, columns, primaryBars, bidBars, askBars, false)
 }
 
 func WriteBarsRowsToWriter(w io.Writer, instrument dukascopy.Instrument, columns []string, primaryBars []dukascopy.Bar, bidBars []dukascopy.Bar, askBars []dukascopy.Bar) error {
-	csvWriter := csvWriterFactory(w)
-	defer csvWriter.Flush()
-
-	return writeBarsCSVRows(csvWriter, instrument, columns, primaryBars, bidBars, askBars, false)
+	return DefaultConfig().WriteBarsRowsToWriter(w, instrument, columns, primaryBars, bidBars, askBars)
 }
 
-func WriteTicks(outputPath string, instrument dukascopy.Instrument, columns []string, ticks []dukascopy.Tick) error {
+func (c *Config) WriteTicks(outputPath string, instrument dukascopy.Instrument, columns []string, ticks []dukascopy.Tick) error {
 	if isParquetPath(outputPath) {
-		return writeTicksParquet(outputPath, instrument, columns, ticks)
+		return c.writeTicksParquet(outputPath, instrument, columns, ticks)
 	}
 	if IsJSONLPath(outputPath) {
 		return writeTicksJSONL(outputPath, instrument, columns, ticks)
@@ -60,35 +72,47 @@ func WriteTicks(outputPath string, instrument dukascopy.Instrument, columns []st
 		return err
 	}
 
-	_, csvWriter, closeWriter, err := createCSVWriter(outputPath)
+	_, csvWriter, closeWriter, err := c.createCSVWriter(outputPath)
 	if err != nil {
 		return err
 	}
 	defer closeWriter()
 
-	return writeTicksCSV(csvWriter, instrument, columns, ticks)
+	return c.writeTicksCSV(csvWriter, instrument, columns, ticks)
+}
+
+func WriteTicks(outputPath string, instrument dukascopy.Instrument, columns []string, ticks []dukascopy.Tick) error {
+	return DefaultConfig().WriteTicks(outputPath, instrument, columns, ticks)
+}
+
+func (c *Config) WriteTicksToWriter(w io.Writer, instrument dukascopy.Instrument, columns []string, ticks []dukascopy.Tick) error {
+	csvWriter := c.csvWriterFactory(w)
+	defer csvWriter.Flush()
+
+	return c.writeTicksCSV(csvWriter, instrument, columns, ticks)
 }
 
 func WriteTicksToWriter(w io.Writer, instrument dukascopy.Instrument, columns []string, ticks []dukascopy.Tick) error {
-	csvWriter := csvWriterFactory(w)
+	return DefaultConfig().WriteTicksToWriter(w, instrument, columns, ticks)
+}
+
+func (c *Config) WriteTicksRowsToWriter(w io.Writer, instrument dukascopy.Instrument, columns []string, ticks []dukascopy.Tick) error {
+	csvWriter := c.csvWriterFactory(w)
 	defer csvWriter.Flush()
 
-	return writeTicksCSV(csvWriter, instrument, columns, ticks)
+	return c.writeTicksCSVRows(csvWriter, instrument, columns, ticks, false)
 }
 
 func WriteTicksRowsToWriter(w io.Writer, instrument dukascopy.Instrument, columns []string, ticks []dukascopy.Tick) error {
-	csvWriter := csvWriterFactory(w)
-	defer csvWriter.Flush()
-
-	return writeTicksCSVRows(csvWriter, instrument, columns, ticks, false)
+	return DefaultConfig().WriteTicksRowsToWriter(w, instrument, columns, ticks)
 }
 
-func writeBarsCSV(csvWriter csvRecordWriter, instrument dukascopy.Instrument, columns []string, primaryBars []dukascopy.Bar, bidBars []dukascopy.Bar, askBars []dukascopy.Bar) error {
-	return writeBarsCSVRows(csvWriter, instrument, columns, primaryBars, bidBars, askBars, true)
+func (c *Config) writeBarsCSV(csvWriter csvRecordWriter, instrument dukascopy.Instrument, columns []string, primaryBars []dukascopy.Bar, bidBars []dukascopy.Bar, askBars []dukascopy.Bar) error {
+	return c.writeBarsCSVRows(csvWriter, instrument, columns, primaryBars, bidBars, askBars, true)
 }
 
-func writeBarsCSVRows(csvWriter csvRecordWriter, instrument dukascopy.Instrument, columns []string, primaryBars []dukascopy.Bar, bidBars []dukascopy.Bar, askBars []dukascopy.Bar, includeHeader bool) error {
-	if includeHeader && !HideCSVHeader {
+func (c *Config) writeBarsCSVRows(csvWriter csvRecordWriter, instrument dukascopy.Instrument, columns []string, primaryBars []dukascopy.Bar, bidBars []dukascopy.Bar, askBars []dukascopy.Bar, includeHeader bool) error {
+	if includeHeader && !c.HideHeader {
 		if err := csvWriter.Write(columns); err != nil {
 			return err
 		}
@@ -126,7 +150,7 @@ func writeBarsCSVRows(csvWriter csvRecordWriter, instrument dukascopy.Instrument
 		var prevAskClose float64
 
 		for i, row := range rows {
-			if i > 0 && interval > 0 && FillGaps == "forward" {
+			if i > 0 && interval > 0 && c.FillGaps == "forward" {
 				expectedNext := prevTime.Add(interval)
 				for expectedNext.Before(row.Time) {
 					if IsExpectedGapForProfile(expectedNext.Add(-interval), expectedNext.Add(interval), interval, instrument.Code, "auto") {
@@ -153,7 +177,7 @@ func writeBarsCSVRows(csvWriter csvRecordWriter, instrument dukascopy.Instrument
 
 					record := make([]string, 0, len(columns))
 					for _, column := range columns {
-						value, valueErr := formatBarColumn(column, instrument.PriceScale, syntheticBidBar, syntheticAskBar)
+						value, valueErr := c.formatBarColumn(column, instrument.PriceScale, syntheticBidBar, syntheticAskBar)
 						if valueErr != nil {
 							return valueErr
 						}
@@ -169,7 +193,7 @@ func writeBarsCSVRows(csvWriter csvRecordWriter, instrument dukascopy.Instrument
 
 			record := make([]string, 0, len(columns))
 			for _, column := range columns {
-				value, valueErr := formatBarColumn(column, instrument.PriceScale, row.Bid, row.Ask)
+				value, valueErr := c.formatBarColumn(column, instrument.PriceScale, row.Bid, row.Ask)
 				if valueErr != nil {
 					return valueErr
 				}
@@ -191,7 +215,7 @@ func writeBarsCSVRows(csvWriter csvRecordWriter, instrument dukascopy.Instrument
 	var prevClose float64
 
 	for i, bar := range primaryBars {
-		if i > 0 && interval > 0 && FillGaps == "forward" {
+		if i > 0 && interval > 0 && c.FillGaps == "forward" {
 			expectedNext := prevTime.Add(interval)
 			for expectedNext.Before(bar.Time) {
 				if IsExpectedGapForProfile(expectedNext.Add(-interval), expectedNext.Add(interval), interval, instrument.Code, "auto") {
@@ -210,7 +234,7 @@ func writeBarsCSVRows(csvWriter csvRecordWriter, instrument dukascopy.Instrument
 
 				record := make([]string, 0, len(columns))
 				for _, column := range columns {
-					value, err := formatPrimaryBarColumn(column, instrument.PriceScale, syntheticBar)
+					value, err := c.formatPrimaryBarColumn(column, instrument.PriceScale, syntheticBar)
 					if err != nil {
 						return err
 					}
@@ -226,7 +250,7 @@ func writeBarsCSVRows(csvWriter csvRecordWriter, instrument dukascopy.Instrument
 
 		record := make([]string, 0, len(columns))
 		for _, column := range columns {
-			value, err := formatPrimaryBarColumn(column, instrument.PriceScale, bar)
+			value, err := c.formatPrimaryBarColumn(column, instrument.PriceScale, bar)
 			if err != nil {
 				return err
 			}
@@ -243,12 +267,12 @@ func writeBarsCSVRows(csvWriter csvRecordWriter, instrument dukascopy.Instrument
 	return csvWriter.Error()
 }
 
-func writeTicksCSV(csvWriter csvRecordWriter, instrument dukascopy.Instrument, columns []string, ticks []dukascopy.Tick) error {
-	return writeTicksCSVRows(csvWriter, instrument, columns, ticks, true)
+func (c *Config) writeTicksCSV(csvWriter csvRecordWriter, instrument dukascopy.Instrument, columns []string, ticks []dukascopy.Tick) error {
+	return c.writeTicksCSVRows(csvWriter, instrument, columns, ticks, true)
 }
 
-func writeTicksCSVRows(csvWriter csvRecordWriter, instrument dukascopy.Instrument, columns []string, ticks []dukascopy.Tick, includeHeader bool) error {
-	if includeHeader && !HideCSVHeader {
+func (c *Config) writeTicksCSVRows(csvWriter csvRecordWriter, instrument dukascopy.Instrument, columns []string, ticks []dukascopy.Tick, includeHeader bool) error {
+	if includeHeader && !c.HideHeader {
 		if err := csvWriter.Write(columns); err != nil {
 			return err
 		}
@@ -257,7 +281,7 @@ func writeTicksCSVRows(csvWriter csvRecordWriter, instrument dukascopy.Instrumen
 	for _, tick := range ticks {
 		record := make([]string, 0, len(columns))
 		for _, column := range columns {
-			value, valueErr := formatTickColumn(column, instrument.PriceScale, tick)
+			value, valueErr := c.formatTickColumn(column, instrument.PriceScale, tick)
 			if valueErr != nil {
 				return valueErr
 			}
@@ -271,35 +295,43 @@ func writeTicksCSVRows(csvWriter csvRecordWriter, instrument dukascopy.Instrumen
 	return csvWriter.Error()
 }
 
-func WriteBarsAtomic(outputPath string, instrument dukascopy.Instrument, columns []string, primaryBars []dukascopy.Bar, bidBars []dukascopy.Bar, askBars []dukascopy.Bar) error {
+func (c *Config) WriteBarsAtomic(outputPath string, instrument dukascopy.Instrument, columns []string, primaryBars []dukascopy.Bar, bidBars []dukascopy.Bar, askBars []dukascopy.Bar) error {
 	tempPath, err := createAtomicTempPath(outputPath)
 	if err != nil {
 		return err
 	}
 	defer os.Remove(tempPath)
 
-	if err := WriteBars(tempPath, instrument, columns, primaryBars, bidBars, askBars); err != nil {
+	if err := c.WriteBars(tempPath, instrument, columns, primaryBars, bidBars, askBars); err != nil {
+		return err
+	}
+	return replaceFile(tempPath, outputPath)
+}
+
+func WriteBarsAtomic(outputPath string, instrument dukascopy.Instrument, columns []string, primaryBars []dukascopy.Bar, bidBars []dukascopy.Bar, askBars []dukascopy.Bar) error {
+	return DefaultConfig().WriteBarsAtomic(outputPath, instrument, columns, primaryBars, bidBars, askBars)
+}
+
+func (c *Config) WriteTicksAtomic(outputPath string, instrument dukascopy.Instrument, columns []string, ticks []dukascopy.Tick) error {
+	tempPath, err := createAtomicTempPath(outputPath)
+	if err != nil {
+		return err
+	}
+	defer os.Remove(tempPath)
+
+	if err := c.WriteTicks(tempPath, instrument, columns, ticks); err != nil {
 		return err
 	}
 	return replaceFile(tempPath, outputPath)
 }
 
 func WriteTicksAtomic(outputPath string, instrument dukascopy.Instrument, columns []string, ticks []dukascopy.Tick) error {
-	tempPath, err := createAtomicTempPath(outputPath)
-	if err != nil {
-		return err
-	}
-	defer os.Remove(tempPath)
-
-	if err := WriteTicks(tempPath, instrument, columns, ticks); err != nil {
-		return err
-	}
-	return replaceFile(tempPath, outputPath)
+	return DefaultConfig().WriteTicksAtomic(outputPath, instrument, columns, ticks)
 }
 
-func AssembleCSVFromParts(outputPath string, partPaths []string, from time.Time, to time.Time) error {
+func (c *Config) AssembleCSVFromParts(outputPath string, partPaths []string, from time.Time, to time.Time) error {
 	if isParquetPath(outputPath) {
-		return assembleParquetFromCSVParts(outputPath, partPaths, from, to)
+		return c.assembleParquetFromCSVParts(outputPath, partPaths, from, to)
 	}
 	if len(partPaths) == 0 {
 		return fmt.Errorf("no partition files were provided for assembly")
@@ -315,7 +347,7 @@ func AssembleCSVFromParts(outputPath string, partPaths []string, from time.Time,
 		return err
 	}
 
-	_, csvWriter, closeWriter, err := createCSVWriter(tempPath)
+	_, csvWriter, closeWriter, err := c.createCSVWriter(tempPath)
 	if err != nil {
 		return err
 	}
@@ -326,16 +358,16 @@ func AssembleCSVFromParts(outputPath string, partPaths []string, from time.Time,
 	var lastRecord []string
 
 	for _, partPath := range partPaths {
-		file, err := os.Open(partPath)
-		if err != nil {
+		_, readerFactory, closeReader, errReader := c.openCSVReader(partPath)
+		if errReader != nil {
 			closeWriter()
-			return err
+			return errReader
 		}
 
-		reader := csvReaderFactory(file)
+		reader := readerFactory()
 		partHeader, err := reader.Read()
 		if err != nil {
-			file.Close()
+			closeReader()
 			if errors.Is(err, io.EOF) {
 				continue
 			}
@@ -347,20 +379,20 @@ func AssembleCSVFromParts(outputPath string, partPaths []string, from time.Time,
 			header = cloneColumns(partHeader)
 			timestampIndex = indexOfColumn(header, "timestamp")
 			if timestampIndex < 0 {
-				file.Close()
+				closeReader()
 				closeWriter()
 				return fmt.Errorf("partition file %s does not contain a timestamp column", partPath)
 			}
-			if !HideCSVHeader {
+			if !c.HideHeader {
 				if err := csvWriter.Write(header); err != nil {
-					file.Close()
+					closeReader()
 					closeWriter()
 					return err
 				}
 			}
 			headerWritten = true
 		} else if !HeadersMatch(header, partHeader) {
-			file.Close()
+			closeReader()
 			closeWriter()
 			return fmt.Errorf("partition file %s header does not match the assembled CSV header", partPath)
 		}
@@ -371,7 +403,7 @@ func AssembleCSVFromParts(outputPath string, partPaths []string, from time.Time,
 				break
 			}
 			if readErr != nil {
-				file.Close()
+				closeReader()
 				closeWriter()
 				return readErr
 			}
@@ -379,14 +411,14 @@ func AssembleCSVFromParts(outputPath string, partPaths []string, from time.Time,
 				continue
 			}
 			if timestampIndex >= len(record) {
-				file.Close()
+				closeReader()
 				closeWriter()
 				return fmt.Errorf("partition file %s contains a malformed row", partPath)
 			}
 
 			timestamp, err := time.Parse(timestampLayout, record[timestampIndex])
 			if err != nil {
-				file.Close()
+				closeReader()
 				closeWriter()
 				return fmt.Errorf("parse partition timestamp %q: %w", record[timestampIndex], err)
 			}
@@ -398,7 +430,7 @@ func AssembleCSVFromParts(outputPath string, partPaths []string, from time.Time,
 			currentTimestamp := timestamp.Format(timestampLayout)
 			if currentTimestamp == lastTimestamp {
 				if !recordsEqual(record, lastRecord) {
-					file.Close()
+					closeReader()
 					closeWriter()
 					return fmt.Errorf("conflicting duplicate timestamp %s while assembling %s", currentTimestamp, outputPath)
 				}
@@ -406,7 +438,7 @@ func AssembleCSVFromParts(outputPath string, partPaths []string, from time.Time,
 			}
 
 			if err := csvWriter.Write(record); err != nil {
-				file.Close()
+				closeReader()
 				closeWriter()
 				return err
 			}
@@ -414,7 +446,7 @@ func AssembleCSVFromParts(outputPath string, partPaths []string, from time.Time,
 			lastRecord = cloneColumns(record)
 		}
 
-		file.Close()
+		closeReader()
 	}
 
 	csvWriter.Flush()
@@ -429,19 +461,24 @@ func AssembleCSVFromParts(outputPath string, partPaths []string, from time.Time,
 	return replaceFile(tempPath, outputPath)
 }
 
-func ExtractCSVRange(sourcePath string, outputPath string, from time.Time, to time.Time) error {
+func AssembleCSVFromParts(outputPath string, partPaths []string, from time.Time, to time.Time) error {
+	return DefaultConfig().AssembleCSVFromParts(outputPath, partPaths, from, to)
+}
+
+func (c *Config) ExtractCSVRange(sourcePath string, outputPath string, from time.Time, to time.Time) error {
 	if isParquetPath(sourcePath) {
-		return extractRangeFromParquet(sourcePath, outputPath, from, to)
+		return c.extractRangeFromParquet(sourcePath, outputPath, from, to)
 	}
 	if isParquetPath(outputPath) {
-		return extractRangeCSVToParquet(sourcePath, outputPath, from, to)
+		return c.extractRangeCSVToParquet(sourcePath, outputPath, from, to)
 	}
-	_, csvReader, closeReader, err := openCSVReader(sourcePath)
+	_, readerFactory, closeReader, err := c.openCSVReader(sourcePath)
 	if err != nil {
 		return err
 	}
 	defer closeReader()
 
+	csvReader := readerFactory()
 	header, err := csvReader.Read()
 	if err != nil {
 		return err
@@ -458,12 +495,12 @@ func ExtractCSVRange(sourcePath string, outputPath string, from time.Time, to ti
 	}
 	defer os.Remove(tempPath)
 
-	_, csvWriter, closeWriter, err := createCSVWriter(tempPath)
+	_, csvWriter, closeWriter, err := c.createCSVWriter(tempPath)
 	if err != nil {
 		return err
 	}
 
-	if !HideCSVHeader {
+	if !c.HideHeader {
 		if err := csvWriter.Write(header); err != nil {
 			closeWriter()
 			return err
@@ -515,17 +552,22 @@ func ExtractCSVRange(sourcePath string, outputPath string, from time.Time, to ti
 	return replaceFile(tempPath, outputPath)
 }
 
-func StreamCSVRowsAfter(path string, w io.Writer, after time.Time, includeHeader bool) (int, time.Time, error) {
+func ExtractCSVRange(sourcePath string, outputPath string, from time.Time, to time.Time) error {
+	return DefaultConfig().ExtractCSVRange(sourcePath, outputPath, from, to)
+}
+
+func (c *Config) StreamCSVRowsAfter(path string, w io.Writer, after time.Time, includeHeader bool) (int, time.Time, error) {
 	if isParquetPath(path) {
 		return 0, time.Time{}, fmt.Errorf("streaming parquet rows to writer is not supported")
 	}
 
-	_, csvReader, closeReader, err := openCSVReader(path)
+	_, readerFactory, closeReader, err := c.openCSVReader(path)
 	if err != nil {
 		return 0, time.Time{}, err
 	}
 	defer closeReader()
 
+	csvReader := readerFactory()
 	header, err := csvReader.Read()
 	if err != nil {
 		return 0, time.Time{}, err
@@ -536,10 +578,10 @@ func StreamCSVRowsAfter(path string, w io.Writer, after time.Time, includeHeader
 		return 0, time.Time{}, fmt.Errorf("source CSV %s does not contain a timestamp column", path)
 	}
 
-	csvWriter := csvWriterFactory(w)
+	csvWriter := c.csvWriterFactory(w)
 	defer csvWriter.Flush()
 
-	if includeHeader && !HideCSVHeader {
+	if includeHeader && !c.HideHeader {
 		if err := csvWriter.Write(header); err != nil {
 			return 0, time.Time{}, err
 		}
@@ -584,16 +626,21 @@ func StreamCSVRowsAfter(path string, w io.Writer, after time.Time, includeHeader
 	return rows, lastTimestamp, nil
 }
 
-func CleanDuplicates(path string) (int, error) {
+func StreamCSVRowsAfter(path string, w io.Writer, after time.Time, includeHeader bool) (int, time.Time, error) {
+	return DefaultConfig().StreamCSVRowsAfter(path, w, after, includeHeader)
+}
+
+func (c *Config) CleanDuplicates(path string) (int, error) {
 	if isParquetPath(path) {
-		return cleanParquetDuplicates(path)
+		return c.cleanParquetDuplicates(path)
 	}
 
-	_, reader, closeReader, err := openCSVReader(path)
+	_, readerFactory, closeReader, err := c.openCSVReader(path)
 	if err != nil {
 		return 0, err
 	}
 
+	reader := readerFactory()
 	header, err := reader.Read()
 	if err != nil {
 		closeReader()
@@ -656,7 +703,7 @@ func CleanDuplicates(path string) (int, error) {
 	}
 	defer os.Remove(tempPath)
 
-	_, csvWriter, closeWriter, err := createCSVWriter(tempPath)
+	_, csvWriter, closeWriter, err := c.createCSVWriter(tempPath)
 	if err != nil {
 		return 0, err
 	}
@@ -689,13 +736,18 @@ func CleanDuplicates(path string) (int, error) {
 	return duplicatesCount, nil
 }
 
-func MergeResumeCSV(existingPath string, tempPath string, duplicateTail []string) (int, error) {
-	_, reader, closeReader, err := openCSVReader(tempPath)
+func CleanDuplicates(path string) (int, error) {
+	return DefaultConfig().CleanDuplicates(path)
+}
+
+func (c *Config) MergeResumeCSV(existingPath string, tempPath string, duplicateTail []string) (int, error) {
+	_, readerFactory, closeReader, err := c.openCSVReader(tempPath)
 	if err != nil {
 		return 0, err
 	}
 	defer closeReader()
 
+	reader := readerFactory()
 	if _, err := reader.Read(); err != nil {
 		if errors.Is(err, io.EOF) {
 			return 0, nil
@@ -703,7 +755,7 @@ func MergeResumeCSV(existingPath string, tempPath string, duplicateTail []string
 		return 0, err
 	}
 
-	_, writer, closeWriter, err := openAppendCSVWriter(existingPath)
+	_, writer, closeWriter, err := c.openAppendCSVWriter(existingPath)
 	if err != nil {
 		return 0, err
 	}
@@ -750,13 +802,18 @@ func MergeResumeCSV(existingPath string, tempPath string, duplicateTail []string
 	return appended, writer.Error()
 }
 
-func InspectExistingCSV(outputPath string) (ResumeState, error) {
-	_, reader, closeReader, err := openCSVReader(outputPath)
+func MergeResumeCSV(existingPath string, tempPath string, duplicateTail []string) (int, error) {
+	return DefaultConfig().MergeResumeCSV(existingPath, tempPath, duplicateTail)
+}
+
+func (c *Config) InspectExistingCSV(outputPath string) (ResumeState, error) {
+	_, readerFactory, closeReader, err := c.openCSVReader(outputPath)
 	if err != nil {
 		return ResumeState{}, err
 	}
 	defer closeReader()
 
+	reader := readerFactory()
 	header, err := reader.Read()
 	if errors.Is(err, io.EOF) {
 		return ResumeState{Exists: true}, nil
@@ -806,6 +863,10 @@ func InspectExistingCSV(outputPath string) (ResumeState, error) {
 	state.LastRecord = lastRecord
 	state.LastTime = lastTime.UTC()
 	return state, nil
+}
+
+func InspectExistingCSV(outputPath string) (ResumeState, error) {
+	return DefaultConfig().InspectExistingCSV(outputPath)
 }
 
 func GetResumeDuplicateTail(outputPath string, maxRows int) ([]string, error) {
@@ -889,7 +950,7 @@ func replaceFile(sourcePath string, targetPath string) error {
 	return os.Rename(sourcePath, targetPath)
 }
 
-func createCSVWriter(outputPath string) (*os.File, csvRecordWriter, func() error, error) {
+func (c *Config) createCSVWriter(outputPath string) (*os.File, csvRecordWriter, func() error, error) {
 	file, err := os.Create(outputPath)
 	if err != nil {
 		return nil, nil, nil, err
@@ -899,7 +960,7 @@ func createCSVWriter(outputPath string) (*os.File, csvRecordWriter, func() error
 
 	if isGzipPath(outputPath) {
 		gzipWriter := gzip.NewWriter(bufWriter)
-		writer := csvWriterFactory(gzipWriter)
+		writer := c.csvWriterFactory(gzipWriter)
 		closeWriter := func() error {
 			writer.Flush()
 			if err := writer.Error(); err != nil {
@@ -922,7 +983,7 @@ func createCSVWriter(outputPath string) (*os.File, csvRecordWriter, func() error
 		return file, writer, closeWriter, nil
 	}
 
-	writer := csvWriterFactory(bufWriter)
+	writer := c.csvWriterFactory(bufWriter)
 	closeWriter := func() error {
 		writer.Flush()
 		if err := writer.Error(); err != nil {
@@ -939,7 +1000,7 @@ func createCSVWriter(outputPath string) (*os.File, csvRecordWriter, func() error
 	return file, writer, closeWriter, nil
 }
 
-func openCSVReader(path string) (*os.File, csvRecordReader, func() error, error) {
+func (c *Config) openCSVReader(path string) (*os.File, csvReaderFactoryFunc, func() error, error) {
 	file, err := os.Open(path)
 	if err != nil {
 		return nil, nil, nil, err
@@ -960,16 +1021,18 @@ func openCSVReader(path string) (*os.File, csvRecordReader, func() error, error)
 			}
 			return file.Close()
 		}
-		return file, csvReaderFactory(gzipReader), closeReader, nil
+		return file, func() csvRecordReader { return c.csvReaderFactory(gzipReader) }, closeReader, nil
 	}
 
 	closeReader := func() error {
 		return file.Close()
 	}
-	return file, csvReaderFactory(bufReader), closeReader, nil
+	return file, func() csvRecordReader { return c.csvReaderFactory(bufReader) }, closeReader, nil
 }
 
-func openAppendCSVWriter(path string) (*os.File, csvRecordWriter, func() error, error) {
+type csvReaderFactoryFunc func() csvRecordReader
+
+func (c *Config) openAppendCSVWriter(path string) (*os.File, csvRecordWriter, func() error, error) {
 	file, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0)
 	if err != nil {
 		return nil, nil, nil, err
@@ -979,7 +1042,7 @@ func openAppendCSVWriter(path string) (*os.File, csvRecordWriter, func() error, 
 
 	if isGzipPath(path) {
 		gzipWriter := gzip.NewWriter(bufWriter)
-		writer := csvWriterFactory(gzipWriter)
+		writer := c.csvWriterFactory(gzipWriter)
 		closeWriter := func() error {
 			writer.Flush()
 			if err := writer.Error(); err != nil {
@@ -1002,7 +1065,7 @@ func openAppendCSVWriter(path string) (*os.File, csvRecordWriter, func() error, 
 		return file, writer, closeWriter, nil
 	}
 
-	writer := csvWriterFactory(bufWriter)
+	writer := c.csvWriterFactory(bufWriter)
 	closeWriter := func() error {
 		writer.Flush()
 		if err := writer.Error(); err != nil {
@@ -1021,4 +1084,36 @@ func openAppendCSVWriter(path string) (*os.File, csvRecordWriter, func() error, 
 
 func isGzipPath(path string) bool {
 	return strings.HasSuffix(strings.ToLower(strings.TrimSpace(path)), ".gz")
+}
+
+func openCSVReader(path string) (*os.File, csvRecordReader, func() error, error) {
+	file, readerFactory, closeReader, err := DefaultConfig().openCSVReader(path)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	return file, readerFactory(), closeReader, nil
+}
+
+func openAppendCSVWriter(path string) (*os.File, csvRecordWriter, func() error, error) {
+	return DefaultConfig().openAppendCSVWriter(path)
+}
+
+func createCSVWriter(outputPath string) (*os.File, csvRecordWriter, func() error, error) {
+	return DefaultConfig().createCSVWriter(outputPath)
+}
+
+func writeBarsCSVRows(csvWriter csvRecordWriter, instrument dukascopy.Instrument, columns []string, primaryBars []dukascopy.Bar, bidBars []dukascopy.Bar, askBars []dukascopy.Bar, includeHeader bool) error {
+	return DefaultConfig().writeBarsCSVRows(csvWriter, instrument, columns, primaryBars, bidBars, askBars, includeHeader)
+}
+
+func writeTicksCSVRows(csvWriter csvRecordWriter, instrument dukascopy.Instrument, columns []string, ticks []dukascopy.Tick, includeHeader bool) error {
+	return DefaultConfig().writeTicksCSVRows(csvWriter, instrument, columns, ticks, includeHeader)
+}
+
+func writeBarsCSV(csvWriter csvRecordWriter, instrument dukascopy.Instrument, columns []string, primaryBars []dukascopy.Bar, bidBars []dukascopy.Bar, askBars []dukascopy.Bar) error {
+	return DefaultConfig().writeBarsCSV(csvWriter, instrument, columns, primaryBars, bidBars, askBars)
+}
+
+func writeTicksCSV(csvWriter csvRecordWriter, instrument dukascopy.Instrument, columns []string, ticks []dukascopy.Tick) error {
+	return DefaultConfig().writeTicksCSV(csvWriter, instrument, columns, ticks)
 }

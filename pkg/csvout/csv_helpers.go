@@ -5,9 +5,13 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"os"
+	"reflect"
 	"strconv"
 	"strings"
 	"time"
+
+	parquet "github.com/parquet-go/parquet-go"
 
 	"github.com/Nosvemos/dukascopy-go/pkg/dukascopy"
 )
@@ -41,7 +45,19 @@ var OutputTimestampFormat string = time.RFC3339Nano
 var CSVDelimiter rune = ','
 var HideCSVHeader bool = false
 
-func formatTime(t time.Time) string {
+type Config struct {
+	Location             *time.Location
+	TimestampFormat      string
+	CSVDelimiter         rune
+	HideHeader           bool
+	FillGaps             string
+	WriterFactory        func(io.Writer) csvRecordWriter
+	ReaderFactory        func(io.Reader) csvRecordReader
+	ParquetWriterFactory func(*os.File, *parquet.Schema) parquetRecordWriter
+	ParquetReaderFactory func(*os.File, *parquet.Schema) parquetRecordReader
+}
+
+func DefaultConfig() *Config {
 	loc := OutputLocation
 	if loc == nil {
 		loc = time.UTC
@@ -50,20 +66,93 @@ func formatTime(t time.Time) string {
 	if layout == "" {
 		layout = time.RFC3339Nano
 	}
+	delim := CSVDelimiter
+	if delim == 0 {
+		delim = ','
+	}
+
+	var wFactory func(io.Writer) csvRecordWriter
+	if reflect.ValueOf(csvWriterFactory).Pointer() != reflect.ValueOf(defaultCSVWriterFactory).Pointer() {
+		wFactory = csvWriterFactory
+	}
+
+	var rFactory func(io.Reader) csvRecordReader
+	if reflect.ValueOf(csvReaderFactory).Pointer() != reflect.ValueOf(defaultCSVReaderFactory).Pointer() {
+		rFactory = csvReaderFactory
+	}
+
+	var pWFactory func(*os.File, *parquet.Schema) parquetRecordWriter
+	if reflect.ValueOf(parquetWriterFactory).Pointer() != reflect.ValueOf(defaultParquetWriterFactory).Pointer() {
+		pWFactory = parquetWriterFactory
+	}
+
+	var pRFactory func(*os.File, *parquet.Schema) parquetRecordReader
+	if reflect.ValueOf(parquetReaderFactory).Pointer() != reflect.ValueOf(defaultParquetReaderFactory).Pointer() {
+		pRFactory = parquetReaderFactory
+	}
+
+	return &Config{
+		Location:             loc,
+		TimestampFormat:      layout,
+		CSVDelimiter:         delim,
+		HideHeader:           HideCSVHeader,
+		FillGaps:             FillGaps,
+		WriterFactory:        wFactory,
+		ReaderFactory:        rFactory,
+		ParquetWriterFactory: pWFactory,
+		ParquetReaderFactory: pRFactory,
+	}
+}
+
+func (c *Config) formatTime(t time.Time) string {
+	loc := c.Location
+	if loc == nil {
+		loc = time.UTC
+	}
+	layout := c.TimestampFormat
+	if layout == "" {
+		layout = time.RFC3339Nano
+	}
 	return t.In(loc).Format(layout)
 }
 
-var csvWriterFactory = func(w io.Writer) csvRecordWriter {
+func formatTime(t time.Time) string {
+	return DefaultConfig().formatTime(t)
+}
+
+func (c *Config) csvWriterFactory(w io.Writer) csvRecordWriter {
+	if c.WriterFactory != nil {
+		return c.WriterFactory(w)
+	}
+	writer := csv.NewWriter(w)
+	writer.Comma = c.CSVDelimiter
+	return writer
+}
+
+var defaultCSVWriterFactory = func(w io.Writer) csvRecordWriter {
 	writer := csv.NewWriter(w)
 	writer.Comma = CSVDelimiter
 	return writer
 }
 
-var csvReaderFactory = func(r io.Reader) csvRecordReader {
+var csvWriterFactory = defaultCSVWriterFactory
+
+func (c *Config) csvReaderFactory(r io.Reader) csvRecordReader {
+	if c.ReaderFactory != nil {
+		return c.ReaderFactory(r)
+	}
+	reader := csv.NewReader(r)
+	reader.Comma = c.CSVDelimiter
+	return reader
+}
+
+var defaultCSVReaderFactory = func(r io.Reader) csvRecordReader {
 	reader := csv.NewReader(r)
 	reader.Comma = CSVDelimiter
 	return reader
 }
+
+var csvReaderFactory = defaultCSVReaderFactory
 
 type ResumeState struct {
 	Exists     bool
@@ -144,10 +233,10 @@ func BarColumnsNeedBidAsk(columns []string) bool {
 	return false
 }
 
-func formatPrimaryBarColumn(column string, scale int, bar dukascopy.Bar) (string, error) {
+func (c *Config) formatPrimaryBarColumn(column string, scale int, bar dukascopy.Bar) (string, error) {
 	switch column {
 	case "timestamp":
-		return formatTime(bar.Time), nil
+		return c.formatTime(bar.Time), nil
 	case "open":
 		return formatPrice(bar.Open, scale), nil
 	case "high":
@@ -171,7 +260,11 @@ func formatPrimaryBarColumn(column string, scale int, bar dukascopy.Bar) (string
 	}
 }
 
-func formatBarColumn(column string, scale int, bid dukascopy.Bar, ask dukascopy.Bar) (string, error) {
+func formatPrimaryBarColumn(column string, scale int, bar dukascopy.Bar) (string, error) {
+	return DefaultConfig().formatPrimaryBarColumn(column, scale, bar)
+}
+
+func (c *Config) formatBarColumn(column string, scale int, bid dukascopy.Bar, ask dukascopy.Bar) (string, error) {
 	roundedBidOpen := roundToScale(bid.Open, scale)
 	roundedBidHigh := roundToScale(bid.High, scale)
 	roundedBidLow := roundToScale(bid.Low, scale)
@@ -183,7 +276,7 @@ func formatBarColumn(column string, scale int, bid dukascopy.Bar, ask dukascopy.
 
 	switch column {
 	case "timestamp":
-		return formatTime(bid.Time), nil
+		return c.formatTime(bid.Time), nil
 	case "open":
 		return formatMidPrice(midpoint(roundedBidOpen, roundedAskOpen), scale), nil
 	case "high":
@@ -225,10 +318,14 @@ func formatBarColumn(column string, scale int, bid dukascopy.Bar, ask dukascopy.
 	}
 }
 
-func formatTickColumn(column string, scale int, tick dukascopy.Tick) (string, error) {
+func formatBarColumn(column string, scale int, bid dukascopy.Bar, ask dukascopy.Bar) (string, error) {
+	return DefaultConfig().formatBarColumn(column, scale, bid, ask)
+}
+
+func (c *Config) formatTickColumn(column string, scale int, tick dukascopy.Tick) (string, error) {
 	switch column {
 	case "timestamp":
-		return formatTime(tick.Time), nil
+		return c.formatTime(tick.Time), nil
 	case "bid":
 		return formatPrice(tick.Bid, scale), nil
 	case "ask":
@@ -240,6 +337,10 @@ func formatTickColumn(column string, scale int, tick dukascopy.Tick) (string, er
 	default:
 		return "", fmt.Errorf("unsupported tick column %q", column)
 	}
+}
+
+func formatTickColumn(column string, scale int, tick dukascopy.Tick) (string, error) {
+	return DefaultConfig().formatTickColumn(column, scale, tick)
 }
 
 func parseColumns(value string, allowed map[string]struct{}) ([]string, error) {

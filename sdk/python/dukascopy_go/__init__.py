@@ -57,10 +57,10 @@ try:
         ctypes.c_char_p, # engine
         ctypes.c_int     # priceScale
     ]
-    _lib.DownloadData.restype = ctypes.c_char_p
+    _lib.DownloadData.restype = ctypes.c_void_p
 
     # Configure FreeString
-    _lib.FreeString.argtypes = [ctypes.c_char_p]
+    _lib.FreeString.argtypes = [ctypes.c_void_p]
     _lib.FreeString.restype = None
 except Exception as e:
     # Library not loaded yet, or load deferred until first call
@@ -99,8 +99,8 @@ def download(
             ctypes.c_char_p, ctypes.c_char_p, ctypes.c_char_p, ctypes.c_char_p,
             ctypes.c_char_p, ctypes.c_char_p, ctypes.c_char_p, ctypes.c_int
         ]
-        _lib.DownloadData.restype = ctypes.c_char_p
-        _lib.FreeString.argtypes = [ctypes.c_char_p]
+        _lib.DownloadData.restype = ctypes.c_void_p
+        _lib.FreeString.argtypes = [ctypes.c_void_p]
         _lib.FreeString.restype = None
 
     # Convert datetime to ISO-8601 string
@@ -141,8 +141,8 @@ def download(
     )
 
     # If the returned pointer is not NULL, an error occurred
-    if err_ptr is not None:
-        err_msg = err_ptr.decode('utf-8')
+    if err_ptr:
+        err_msg = ctypes.string_at(err_ptr).decode('utf-8')
         # Free the Go C.CString memory to avoid leak
         _lib.FreeString(err_ptr)
         raise DukascopyError(err_msg)

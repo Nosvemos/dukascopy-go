@@ -30,31 +30,49 @@ type parquetRecordReader interface {
 	Close() error
 }
 
-var parquetWriterFactory = func(file *os.File, schema *parquet.Schema) parquetRecordWriter {
+var defaultParquetWriterFactory = func(file *os.File, schema *parquet.Schema) parquetRecordWriter {
 	return parquet.NewGenericWriter[map[string]any](file, schema)
 }
 
-var parquetReaderFactory = func(file *os.File, schema *parquet.Schema) parquetRecordReader {
+var parquetWriterFactory = defaultParquetWriterFactory
+
+var defaultParquetReaderFactory = func(file *os.File, schema *parquet.Schema) parquetRecordReader {
 	return parquet.NewGenericReader[map[string]any](file, schema)
 }
 
-func writeBarsParquet(outputPath string, instrument dukascopy.Instrument, columns []string, primaryBars []dukascopy.Bar, bidBars []dukascopy.Bar, askBars []dukascopy.Bar) error {
-	records, err := buildBarParquetRecords(instrument, columns, primaryBars, bidBars, askBars)
+var parquetReaderFactory = defaultParquetReaderFactory
+
+func (c *Config) parquetWriterFactory(file *os.File, schema *parquet.Schema) parquetRecordWriter {
+	if c.ParquetWriterFactory != nil {
+		return c.ParquetWriterFactory(file, schema)
+	}
+	return parquet.NewGenericWriter[map[string]any](file, schema)
+}
+
+func (c *Config) parquetReaderFactory(file *os.File, schema *parquet.Schema) parquetRecordReader {
+	if c.ParquetReaderFactory != nil {
+		return c.ParquetReaderFactory(file, schema)
+	}
+	return parquet.NewGenericReader[map[string]any](file, schema)
+}
+
+func (c *Config) writeBarsParquet(outputPath string, instrument dukascopy.Instrument, columns []string, primaryBars []dukascopy.Bar, bidBars []dukascopy.Bar, askBars []dukascopy.Bar) error {
+	records, err := c.buildBarParquetRecords(instrument, columns, primaryBars, bidBars, askBars)
 	if err != nil {
 		return err
 	}
-	return writeParquetRecords(outputPath, columns, records)
+	return c.writeParquetRecords(outputPath, columns, records)
 }
 
-func writeTicksParquet(outputPath string, instrument dukascopy.Instrument, columns []string, ticks []dukascopy.Tick) error {
-	records, err := buildTickParquetRecords(instrument, columns, ticks)
+func (c *Config) writeTicksParquet(outputPath string, instrument dukascopy.Instrument, columns []string, ticks []dukascopy.Tick) error {
+	records, err := c.buildTickParquetRecords(instrument, columns, ticks)
 	if err != nil {
 		return err
 	}
-	return writeParquetRecords(outputPath, columns, records)
+	return c.writeParquetRecords(outputPath, columns, records)
 }
 
-func buildBarParquetRecords(instrument dukascopy.Instrument, columns []string, primaryBars []dukascopy.Bar, bidBars []dukascopy.Bar, askBars []dukascopy.Bar) ([]map[string]any, error) {
+func (c *Config) buildBarParquetRecords(instrument dukascopy.Instrument, columns []string, primaryBars []dukascopy.Bar, bidBars []dukascopy.Bar, askBars []dukascopy.Bar) ([]map[string]any, error) {
 	if BarColumnsNeedBidAsk(columns) {
 		rows, err := combineBarRows(bidBars, askBars)
 		if err != nil {
@@ -65,7 +83,7 @@ func buildBarParquetRecords(instrument dukascopy.Instrument, columns []string, p
 		for _, row := range rows {
 			record := make(map[string]any, len(columns))
 			for _, column := range columns {
-				value, err := formatBarColumn(column, instrument.PriceScale, row.Bid, row.Ask)
+				value, err := c.formatBarColumn(column, instrument.PriceScale, row.Bid, row.Ask)
 				if err != nil {
 					return nil, err
 				}
@@ -84,7 +102,7 @@ func buildBarParquetRecords(instrument dukascopy.Instrument, columns []string, p
 	for _, bar := range primaryBars {
 		record := make(map[string]any, len(columns))
 		for _, column := range columns {
-			value, err := formatPrimaryBarColumn(column, instrument.PriceScale, bar)
+			value, err := c.formatPrimaryBarColumn(column, instrument.PriceScale, bar)
 			if err != nil {
 				return nil, err
 			}
@@ -99,12 +117,12 @@ func buildBarParquetRecords(instrument dukascopy.Instrument, columns []string, p
 	return records, nil
 }
 
-func buildTickParquetRecords(instrument dukascopy.Instrument, columns []string, ticks []dukascopy.Tick) ([]map[string]any, error) {
+func (c *Config) buildTickParquetRecords(instrument dukascopy.Instrument, columns []string, ticks []dukascopy.Tick) ([]map[string]any, error) {
 	records := make([]map[string]any, 0, len(ticks))
 	for _, tick := range ticks {
 		record := make(map[string]any, len(columns))
 		for _, column := range columns {
-			value, err := formatTickColumn(column, instrument.PriceScale, tick)
+			value, err := c.formatTickColumn(column, instrument.PriceScale, tick)
 			if err != nil {
 				return nil, err
 			}
@@ -119,7 +137,7 @@ func buildTickParquetRecords(instrument dukascopy.Instrument, columns []string, 
 	return records, nil
 }
 
-func writeParquetRecords(outputPath string, columns []string, records []map[string]any) error {
+func (c *Config) writeParquetRecords(outputPath string, columns []string, records []map[string]any) error {
 	if err := ensureParentDir(outputPath); err != nil {
 		return err
 	}
@@ -130,7 +148,7 @@ func writeParquetRecords(outputPath string, columns []string, records []map[stri
 	}
 
 	schema := parquetSchemaForColumns(columns)
-	writer := parquetWriterFactory(file, schema)
+	writer := c.parquetWriterFactory(file, schema)
 	defer file.Close()
 	writer.SetKeyValueMetadata(parquetColumnsMetadataKey, strings.Join(columns, ","))
 	if len(records) > 0 {
@@ -142,6 +160,10 @@ func writeParquetRecords(outputPath string, columns []string, records []map[stri
 		return err
 	}
 	return nil
+}
+
+func writeParquetRecords(outputPath string, columns []string, records []map[string]any) error {
+	return DefaultConfig().writeParquetRecords(outputPath, columns, records)
 }
 
 func parquetSchemaForColumns(columns []string) *parquet.Schema {
@@ -200,10 +222,14 @@ func auditParquet(path string) (FileAudit, error) {
 }
 
 func inspectParquet(path string) (CSVStats, error) {
-	return inspectParquetWithOptions(path, InspectOptions{})
+	return DefaultConfig().inspectParquetWithOptions(path, InspectOptions{})
 }
 
 func inspectParquetWithOptions(path string, options InspectOptions) (CSVStats, error) {
+	return DefaultConfig().inspectParquetWithOptions(path, options)
+}
+
+func (c *Config) inspectParquetWithOptions(path string, options InspectOptions) (CSVStats, error) {
 	stats := CSVStats{
 		Path:       path,
 		Compressed: false,
@@ -222,7 +248,7 @@ func inspectParquetWithOptions(path string, options InspectOptions) (CSVStats, e
 	timestampIndex := indexOfColumn(stats.Columns, "timestamp")
 	stats.HasTimestamp = timestampIndex >= 0
 
-	reader := parquetReaderFactory(file, parquetFile.Schema())
+	reader := c.parquetReaderFactory(file, parquetFile.Schema())
 	defer reader.Close()
 
 	seenRows := make(map[string]int)
@@ -305,7 +331,7 @@ func inspectParquetWithOptions(path string, options InspectOptions) (CSVStats, e
 	return stats, nil
 }
 
-func assembleParquetFromCSVParts(outputPath string, partPaths []string, from time.Time, to time.Time) error {
+func (c *Config) assembleParquetFromCSVParts(outputPath string, partPaths []string, from time.Time, to time.Time) error {
 	if len(partPaths) == 0 {
 		return fmt.Errorf("no partition files were provided for assembly")
 	}
@@ -347,11 +373,12 @@ func assembleParquetFromCSVParts(outputPath string, partPaths []string, from tim
 	defer closeWriter()
 
 	for _, partPath := range partPaths {
-		_, reader, closeReader, err := openCSVReader(partPath)
+		_, readerFactory, closeReader, err := c.openCSVReader(partPath)
 		if err != nil {
 			return err
 		}
 
+		reader := readerFactory()
 		partHeader, err := reader.Read()
 		if err != nil {
 			closeReader()
@@ -368,7 +395,7 @@ func assembleParquetFromCSVParts(outputPath string, partPaths []string, from tim
 				closeReader()
 				return err
 			}
-			writer = parquetWriterFactory(file, parquetSchemaForColumns(columns))
+			writer = c.parquetWriterFactory(file, parquetSchemaForColumns(columns))
 			writer.SetKeyValueMetadata(parquetColumnsMetadataKey, strings.Join(columns, ","))
 			headerPrepared = true
 		} else if !HeadersMatch(columns, partHeader) {
@@ -444,7 +471,7 @@ func assembleParquetFromCSVParts(outputPath string, partPaths []string, from tim
 	return replaceFile(tempPath, outputPath)
 }
 
-func extractRangeFromParquet(sourcePath string, outputPath string, from time.Time, to time.Time) error {
+func (c *Config) extractRangeFromParquet(sourcePath string, outputPath string, from time.Time, to time.Time) error {
 	file, parquetFile, closeFile, err := openParquetFile(sourcePath)
 	if err != nil {
 		return err
@@ -456,7 +483,7 @@ func extractRangeFromParquet(sourcePath string, outputPath string, from time.Tim
 		return fmt.Errorf("source parquet %s does not contain a timestamp column", sourcePath)
 	}
 
-	reader := parquetReaderFactory(file, parquetFile.Schema())
+	reader := c.parquetReaderFactory(file, parquetFile.Schema())
 	defer reader.Close()
 
 	if isParquetPath(outputPath) {
@@ -470,7 +497,7 @@ func extractRangeFromParquet(sourcePath string, outputPath string, from time.Tim
 		if err != nil {
 			return err
 		}
-		writer := parquetWriterFactory(outFile, parquetSchemaForColumns(columns))
+		writer := c.parquetWriterFactory(outFile, parquetSchemaForColumns(columns))
 		writer.SetKeyValueMetadata(parquetColumnsMetadataKey, strings.Join(columns, ","))
 
 		for {
@@ -526,7 +553,7 @@ func extractRangeFromParquet(sourcePath string, outputPath string, from time.Tim
 	}
 	defer os.Remove(tempPath)
 
-	_, csvWriter, closeWriter, err := createCSVWriter(tempPath)
+	_, csvWriter, closeWriter, err := c.createCSVWriter(tempPath)
 	if err != nil {
 		return err
 	}
@@ -578,13 +605,14 @@ func extractRangeFromParquet(sourcePath string, outputPath string, from time.Tim
 	return replaceFile(tempPath, outputPath)
 }
 
-func extractRangeCSVToParquet(sourcePath string, outputPath string, from time.Time, to time.Time) error {
-	_, reader, closeReader, err := openCSVReader(sourcePath)
+func (c *Config) extractRangeCSVToParquet(sourcePath string, outputPath string, from time.Time, to time.Time) error {
+	_, readerFactory, closeReader, err := c.openCSVReader(sourcePath)
 	if err != nil {
 		return err
 	}
 	defer closeReader()
 
+	reader := readerFactory()
 	header, err := reader.Read()
 	if err != nil {
 		return err
@@ -605,7 +633,7 @@ func extractRangeCSVToParquet(sourcePath string, outputPath string, from time.Ti
 	if err != nil {
 		return err
 	}
-	writer := parquetWriterFactory(file, parquetSchemaForColumns(header))
+	writer := c.parquetWriterFactory(file, parquetSchemaForColumns(header))
 	writer.SetKeyValueMetadata(parquetColumnsMetadataKey, strings.Join(header, ","))
 
 	for {
@@ -797,7 +825,7 @@ func isParquetPath(path string) bool {
 	return strings.HasSuffix(strings.ToLower(strings.TrimSpace(path)), ".parquet")
 }
 
-func cleanParquetDuplicates(path string) (int, error) {
+func (c *Config) cleanParquetDuplicates(path string) (int, error) {
 	file, parquetFile, closeFile, err := openParquetFile(path)
 	if err != nil {
 		return 0, err
@@ -810,7 +838,7 @@ func cleanParquetDuplicates(path string) (int, error) {
 		return 0, fmt.Errorf("parquet does not contain a timestamp column")
 	}
 
-	reader := parquetReaderFactory(file, parquetFile.Schema())
+	reader := c.parquetReaderFactory(file, parquetFile.Schema())
 
 	type parquetRowRecord struct {
 		timestamp time.Time
@@ -874,7 +902,7 @@ func cleanParquetDuplicates(path string) (int, error) {
 		plainRecords[i] = rec.row
 	}
 
-	if err := writeParquetRecords(tempPath, columns, plainRecords); err != nil {
+	if err := c.writeParquetRecords(tempPath, columns, plainRecords); err != nil {
 		return 0, err
 	}
 
@@ -883,5 +911,37 @@ func cleanParquetDuplicates(path string) (int, error) {
 	}
 
 	return duplicatesCount, nil
+}
+
+func buildBarParquetRecords(instrument dukascopy.Instrument, columns []string, primaryBars []dukascopy.Bar, bidBars []dukascopy.Bar, askBars []dukascopy.Bar) ([]map[string]any, error) {
+	return DefaultConfig().buildBarParquetRecords(instrument, columns, primaryBars, bidBars, askBars)
+}
+
+func buildTickParquetRecords(instrument dukascopy.Instrument, columns []string, ticks []dukascopy.Tick) ([]map[string]any, error) {
+	return DefaultConfig().buildTickParquetRecords(instrument, columns, ticks)
+}
+
+func extractRangeCSVToParquet(sourcePath string, outputPath string, from time.Time, to time.Time) error {
+	return DefaultConfig().extractRangeCSVToParquet(sourcePath, outputPath, from, to)
+}
+
+func extractRangeFromParquet(sourcePath string, outputPath string, from time.Time, to time.Time) error {
+	return DefaultConfig().extractRangeFromParquet(sourcePath, outputPath, from, to)
+}
+
+func assembleParquetFromCSVParts(outputPath string, partPaths []string, from time.Time, to time.Time) error {
+	return DefaultConfig().assembleParquetFromCSVParts(outputPath, partPaths, from, to)
+}
+
+func writeBarsParquet(outputPath string, instrument dukascopy.Instrument, columns []string, primaryBars []dukascopy.Bar, bidBars []dukascopy.Bar, askBars []dukascopy.Bar) error {
+	return DefaultConfig().writeBarsParquet(outputPath, instrument, columns, primaryBars, bidBars, askBars)
+}
+
+func writeTicksParquet(outputPath string, instrument dukascopy.Instrument, columns []string, ticks []dukascopy.Tick) error {
+	return DefaultConfig().writeTicksParquet(outputPath, instrument, columns, ticks)
+}
+
+func cleanParquetDuplicates(path string) (int, error) {
+	return DefaultConfig().cleanParquetDuplicates(path)
 }
 
