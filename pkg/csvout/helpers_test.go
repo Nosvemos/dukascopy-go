@@ -15,6 +15,12 @@ func TestProfilesParseAndColumnHelpers(t *testing.T) {
 	if got := BarColumnsForProfile(ProfileSimple); len(got) == 0 || got[0] != "timestamp" {
 		t.Fatalf("unexpected simple bar columns: %v", got)
 	}
+	if got := BarColumnsForProfile(ProfileFused); len(got) == 0 || got[len(got)-1] != "volume" {
+		t.Fatalf("unexpected fused bar columns: %v", got)
+	}
+	if got := TickColumnsForProfile(ProfileFused); len(got) == 0 || got[len(got)-1] != "ask_volume" {
+		t.Fatalf("unexpected fused tick columns: %v", got)
+	}
 	if got := BarColumnsForProfile(Profile("wat")); got != nil {
 		t.Fatalf("expected unknown bar profile to return nil, got %v", got)
 	}
@@ -27,8 +33,8 @@ func TestProfilesParseAndColumnHelpers(t *testing.T) {
 	if _, err := ParseBarColumns("timestamp,mid_close,spread"); err != nil {
 		t.Fatalf("ParseBarColumns returned error: %v", err)
 	}
-	if _, err := ParseTickColumns("timestamp,bid,ask"); err != nil {
-		t.Fatalf("ParseTickColumns returned error: %v", err)
+	if _, err := ParseTickColumns("timestamp,bid,ask,spread"); err != nil {
+		t.Fatalf("ParseTickColumns with spread returned error: %v", err)
 	}
 	if _, err := ParseBarColumns("timestamp,nope"); err == nil {
 		t.Fatal("expected invalid bar column error")
@@ -341,6 +347,9 @@ func TestFormatColumnsAndWriterOutputHelpers(t *testing.T) {
 	}
 	if got, err := formatTickColumn("bid", 3, tick); err != nil || got != "100.100" {
 		t.Fatalf("unexpected tick column: %q %v", got, err)
+	}
+	if got, err := formatTickColumn("spread", 3, tick); err != nil || got != "0.200" {
+		t.Fatalf("unexpected tick spread column: %q %v", got, err)
 	}
 	if _, err := formatTickColumn("wat", 3, tick); err == nil {
 		t.Fatal("expected unsupported tick column error")

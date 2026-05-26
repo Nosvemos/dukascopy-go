@@ -23,12 +23,15 @@ type Profile string
 const (
 	ProfileSimple Profile = "simple"
 	ProfileFull   Profile = "full"
+	ProfileFused  Profile = "fused"
 )
 
 var simpleBarColumns = []string{"timestamp", "open", "high", "low", "close", "volume"}
 var fullBarColumns = []string{"timestamp", "mid_open", "mid_high", "mid_low", "mid_close", "spread", "volume", "bid_open", "bid_high", "bid_low", "bid_close", "ask_open", "ask_high", "ask_low", "ask_close"}
+var fusedBarColumns = []string{"timestamp", "bid_open", "bid_high", "bid_low", "bid_close", "ask_open", "ask_high", "ask_low", "ask_close", "spread", "volume"}
 var simpleTickColumns = []string{"timestamp", "bid", "ask"}
 var fullTickColumns = []string{"timestamp", "bid", "ask", "bid_volume", "ask_volume"}
+var fusedTickColumns = []string{"timestamp", "bid", "ask", "spread", "bid_volume", "ask_volume"}
 
 type csvRecordWriter interface {
 	Write(record []string) error
@@ -174,6 +177,8 @@ func BarColumnsForProfile(profile Profile) []string {
 		return cloneColumns(simpleBarColumns)
 	case ProfileFull:
 		return cloneColumns(fullBarColumns)
+	case ProfileFused:
+		return cloneColumns(fusedBarColumns)
 	default:
 		return nil
 	}
@@ -185,6 +190,8 @@ func TickColumnsForProfile(profile Profile) []string {
 		return cloneColumns(simpleTickColumns)
 	case ProfileFull:
 		return cloneColumns(fullTickColumns)
+	case ProfileFused:
+		return cloneColumns(fusedTickColumns)
 	default:
 		return nil
 	}
@@ -219,6 +226,7 @@ func ParseTickColumns(value string) ([]string, error) {
 		"timestamp":  {},
 		"bid":        {},
 		"ask":        {},
+		"spread":     {},
 		"bid_volume": {},
 		"ask_volume": {},
 	})
@@ -330,6 +338,8 @@ func (c *Config) formatTickColumn(column string, scale int, tick dukascopy.Tick)
 		return formatPrice(tick.Bid, scale), nil
 	case "ask":
 		return formatPrice(tick.Ask, scale), nil
+	case "spread":
+		return formatPrice(tick.Ask-tick.Bid, scale), nil
 	case "bid_volume":
 		return formatVolume(tick.BidVolume), nil
 	case "ask_volume":
