@@ -56,3 +56,51 @@ func indexOfColumn(columns []string, name string) int {
 	}
 	return -1
 }
+
+func getHivePartitionPath(outputPath string, t time.Time, mode string) string {
+	ext := filepath.Ext(outputPath)
+	baseDir := strings.TrimSuffix(outputPath, ext)
+	if ext == ".gz" && strings.HasSuffix(strings.ToLower(baseDir), ".csv") {
+		ext = ".csv.gz"
+		baseDir = strings.TrimSuffix(baseDir, ".csv")
+	}
+
+	t = t.UTC()
+	var parts []string
+	switch mode {
+	case partitionHour:
+		parts = []string{
+			fmt.Sprintf("year=%04d", t.Year()),
+			fmt.Sprintf("month=%02d", t.Month()),
+			fmt.Sprintf("day=%02d", t.Day()),
+			fmt.Sprintf("hour=%02d", t.Hour()),
+		}
+	case partitionDay:
+		parts = []string{
+			fmt.Sprintf("year=%04d", t.Year()),
+			fmt.Sprintf("month=%02d", t.Month()),
+			fmt.Sprintf("day=%02d", t.Day()),
+		}
+	case partitionWeek:
+		year, week := t.ISOWeek()
+		parts = []string{
+			fmt.Sprintf("year=%04d", year),
+			fmt.Sprintf("week=%02d", week),
+		}
+	case partitionMonth:
+		parts = []string{
+			fmt.Sprintf("year=%04d", t.Year()),
+			fmt.Sprintf("month=%02d", t.Month()),
+		}
+	case partitionYear:
+		parts = []string{
+			fmt.Sprintf("year=%04d", t.Year()),
+		}
+	default:
+		return outputPath
+	}
+
+	subDir := filepath.Join(parts...)
+	fileName := "data" + ext
+	return filepath.Join(baseDir, subDir, fileName)
+}

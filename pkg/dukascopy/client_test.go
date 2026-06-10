@@ -4,10 +4,10 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
-	"testing"
-	"time"
 	"os"
 	"path/filepath"
+	"testing"
+	"time"
 )
 
 func TestShouldRetryStatus(t *testing.T) {

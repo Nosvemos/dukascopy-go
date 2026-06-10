@@ -50,15 +50,15 @@ func TestProgressTUIFormatHelpers(t *testing.T) {
 
 func TestProgressTUIModelCalculations(t *testing.T) {
 	model := progressTUIModel{
-		noColor:        true,
-		partitionTotal: 10,
+		noColor:            true,
+		partitionTotal:     10,
 		partitionCompleted: 3,
-		chunkTotal:     5,
-		chunkCurrent:   2,
-		chunkScope:     "minute",
-		chunkDetail:    "2026-05-25",
-		completedRows:  1000,
-		completedBytes: 50000,
+		chunkTotal:         5,
+		chunkCurrent:       2,
+		chunkScope:         "minute",
+		chunkDetail:        "2026-05-25",
+		completedRows:      1000,
+		completedBytes:     50000,
 	}
 
 	frac := model.progressFraction()

@@ -677,4 +677,3 @@ func TestIngestPostgres_ValidationAndFailure(t *testing.T) {
 		t.Errorf("expected connection failure, not format support error: %v", err2)
 	}
 }
-

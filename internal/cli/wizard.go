@@ -40,7 +40,7 @@ func runWizard(stdout io.Writer, stderr io.Writer) int {
 		if err != nil {
 			return 1
 		}
-		
+
 		args := []string{"instruments"}
 		if strings.TrimSpace(query) != "" {
 			args = append(args, "--query", strings.TrimSpace(query))
@@ -72,7 +72,7 @@ func runWizard(stdout io.Writer, stderr io.Writer) int {
 				Value(&timeframe),
 		),
 	)
-	
+
 	if err := form2.Run(); err != nil {
 		return 1
 	}
@@ -121,7 +121,7 @@ func runWizard(stdout io.Writer, stderr io.Writer) int {
 
 	args := []string{"download", "--symbol", symbol, "--timeframe", timeframe, "--output", output}
 	lookback = strings.TrimSpace(lookback)
-	
+
 	if strings.HasSuffix(lookback, "d") || strings.HasSuffix(lookback, "y") || strings.HasSuffix(lookback, "mo") || strings.HasSuffix(lookback, "w") || strings.HasSuffix(lookback, "h") {
 		args = append(args, "--last", lookback)
 	} else {

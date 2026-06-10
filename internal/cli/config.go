@@ -41,6 +41,7 @@ type downloadDefaultsConfig struct {
 	CheckpointManifest string `json:"checkpoint_manifest" yaml:"checkpoint_manifest" toml:"checkpoint_manifest"`
 	CacheDir           string `json:"cache_dir" yaml:"cache_dir" toml:"cache_dir"`
 	KeepCache          *bool  `json:"keep_cache" yaml:"keep_cache" toml:"keep_cache"`
+	Hive               *bool  `json:"hive" yaml:"hive" toml:"hive"`
 }
 
 var activeConfig *appConfig
@@ -169,6 +170,7 @@ func applyDownloadConfigDefaults(
 	baseURL *string,
 	cacheDir *string,
 	keepCache *bool,
+	hive *bool,
 ) error {
 	if activeConfig == nil {
 		return nil
@@ -240,6 +242,9 @@ func applyDownloadConfigDefaults(
 	}
 	if !flagWasSet(fs, "keep-cache") && config.KeepCache != nil {
 		*keepCache = *config.KeepCache
+	}
+	if !flagWasSet(fs, "hive") && config.Hive != nil {
+		*hive = *config.Hive
 	}
 	return nil
 }

@@ -21,7 +21,6 @@ func FreeString(s *C.char) {
 	}
 }
 
-
 //export DownloadData
 func DownloadData(
 	symbol *C.char,
@@ -39,6 +38,7 @@ func DownloadData(
 	parallelism C.int,
 	partition *C.char,
 	fillGaps *C.char,
+	hive C.int,
 ) *C.char {
 	sym := C.GoString(symbol)
 	tf := C.GoString(timeframe)
@@ -54,6 +54,7 @@ func DownloadData(
 	parVal := int(parallelism)
 	partVal := C.GoString(partition)
 	fg := C.GoString(fillGaps)
+	hiveVal := hive != 0
 
 	from, err := cli.ParseFlexibleTime(fromStr)
 	if err != nil {
@@ -80,6 +81,7 @@ func DownloadData(
 		Parallelism:   parVal,
 		Partition:     partVal,
 		FillGaps:      fg,
+		Hive:          hiveVal,
 	}
 
 	ctx := context.Background()
@@ -140,4 +142,3 @@ func DBLoadData(
 }
 
 func main() {}
-

@@ -196,5 +196,3 @@ func TestParquetStreamWriter(t *testing.T) {
 		t.Errorf("expected 2 rows written via stream writer, got %d", count)
 	}
 }
-
-

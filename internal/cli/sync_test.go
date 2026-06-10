@@ -42,7 +42,7 @@ func TestFormatMultiSymbolOutputPath(t *testing.T) {
 		// Case 1: Placeholder
 		{"./data/ohlc-{symbol}.csv", "EUR/USD", "./data/ohlc-eur_usd.csv"},
 		{"./data/{symbol}/data.parquet", "GBP/USD", "./data/gbp_usd/data.parquet"},
-		
+
 		// Case 3: Standard File Name injection
 		{"./data/prices.csv", "EUR/USD", "./data/prices-eur_usd.csv"},
 		{"./data/prices.csv.gz", "EUR/USD", "./data/prices-eur_usd.csv.gz"},

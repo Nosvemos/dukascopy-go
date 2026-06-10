@@ -70,7 +70,8 @@ def _bind_library_functions(lib):
         ctypes.c_int,    # resume
         ctypes.c_int,    # parallelism
         ctypes.c_char_p, # partition
-        ctypes.c_char_p  # fillGaps
+        ctypes.c_char_p, # fillGaps
+        ctypes.c_int     # hive
     ]
     lib.DownloadData.restype = ctypes.c_void_p
 
@@ -117,7 +118,8 @@ def download(
     resume: bool = False,
     parallelism: int = 1,
     partition: str = 'none',
-    fill_gaps: str = 'none'
+    fill_gaps: str = 'none',
+    hive: bool = False
 ):
     """
     Downloads historical market data from Dukascopy using the high-speed Go downloader engine.
@@ -138,6 +140,7 @@ def download(
         parallelism (int): Number of parallel partition downloader workers. Default is 1.
         partition (str): Partition mode: 'none', 'auto', 'day', 'week', etc. Default is 'none'.
         fill_gaps (str): Gap-filling mode: 'none', 'forward'. Default is 'none'.
+        hive (bool): Hive-style directory partitioning (for Parquet/CSV). Default is False.
 
     Raises:
         DukascopyError: If the download fails or parameter validation fails.
@@ -180,6 +183,7 @@ def download(
     c_parallelism = ctypes.c_int(parallelism)
     c_partition = partition.lower().encode('utf-8')
     c_fill_gaps = fill_gaps.lower().encode('utf-8')
+    c_hive = ctypes.c_int(1 if hive else 0)
 
     # Call CGO function
     err_ptr = _lib.DownloadData(
@@ -197,7 +201,8 @@ def download(
         c_resume,
         c_parallelism,
         c_partition,
-        c_fill_gaps
+        c_fill_gaps,
+        c_hive
     )
 
     # If the returned pointer is not NULL, an error occurred
@@ -324,7 +329,8 @@ async def download_async(
     resume: bool = False,
     parallelism: int = 1,
     partition: str = 'none',
-    fill_gaps: str = 'none'
+    fill_gaps: str = 'none',
+    hive: bool = False
 ) -> None:
     """
     Async wrapper around download().
@@ -352,7 +358,8 @@ async def download_async(
         resume=resume,
         parallelism=parallelism,
         partition=partition,
-        fill_gaps=fill_gaps
+        fill_gaps=fill_gaps,
+        hive=hive
     )
 
 
@@ -449,7 +456,13 @@ def to_dataframe(
     """
     pd_mod = _ensure_pandas()
 
-    suffix = '.parquet' if output_format == 'parquet' else '.csv'
+    if output_format in ('arrow', 'ipc', 'feather'):
+        suffix = '.arrow'
+    elif output_format == 'parquet':
+        suffix = '.parquet'
+    else:
+        suffix = '.csv'
+
     # Create a named temp file and immediately close the Python file handle
     # so the Go shared library can write to it without Windows file-locking issues.
     tmp = tempfile.NamedTemporaryFile(suffix=suffix, delete=False)
@@ -476,7 +489,9 @@ def to_dataframe(
         )
 
         # Read the downloaded data into a DataFrame
-        if output_format == 'parquet':
+        if output_format in ('arrow', 'ipc', 'feather'):
+            df = pd_mod.read_feather(tmp_path)
+        elif output_format == 'parquet':
             df = pd_mod.read_parquet(tmp_path)
         else:
             df = pd_mod.read_csv(tmp_path)

@@ -58,6 +58,7 @@ func runDownload(args []string, stdout io.Writer, stderr io.Writer) error {
 	fillGaps := fs.String("fill-gaps", "none", "gap filling mode: none, forward")
 	cacheDir := fs.String("cache-dir", "./.dukascopy_cache", "temporary cache directory path")
 	keepCache := fs.Bool("keep-cache", false, "keep temporary cache files after successful download")
+	hive := fs.Bool("hive", false, "enable Hive-style partitioning directory output (e.g. year=YYYY/month=MM/...)")
 
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -120,6 +121,7 @@ func runDownload(args []string, stdout io.Writer, stderr io.Writer) error {
 		baseURL,
 		cacheDir,
 		keepCache,
+		hive,
 	); err != nil {
 		return err
 	}
@@ -360,12 +362,16 @@ func runDownload(args []string, stdout io.Writer, stderr io.Writer) error {
 	if *parallelism > 1 && normalizedPartition == partitionNone {
 		return errors.New("--parallelism greater than 1 requires --partition")
 	}
+	if *hive && normalizedPartition == partitionNone {
+		return errors.New("--hive requires --partition")
+	}
 	if err := validateLiveOptions(*live, *outputPath, normalizedPartition, *checkpointManifest, barColumns, tickColumns, resultKind); err != nil {
 		return err
 	}
 	if csvout.ColumnsContainTimestamp(barColumns) || csvout.ColumnsContainTimestamp(tickColumns) {
-		if strings.HasSuffix(strings.ToLower(strings.TrimSpace(*outputPath)), ".parquet") && *resume {
-			return errors.New("--resume is not supported for parquet output; use --partition for durable long-range parquet downloads")
+		outLower := strings.ToLower(strings.TrimSpace(*outputPath))
+		if (strings.HasSuffix(outLower, ".parquet") || strings.HasSuffix(outLower, ".arrow") || strings.HasSuffix(outLower, ".ipc") || strings.HasSuffix(outLower, ".feather")) && *resume {
+			return errors.New("--resume is not supported for parquet/arrow output; use --partition for durable long-range downloads")
 		}
 	}
 
@@ -459,6 +465,7 @@ func runDownload(args []string, stdout io.Writer, stderr io.Writer) error {
 		keepCacheVal,
 		resumeState,
 		dedupeRecord,
+		*hive,
 	)
 	if err != nil {
 		return err

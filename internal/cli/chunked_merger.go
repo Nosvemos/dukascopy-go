@@ -26,6 +26,7 @@ func mergeChunks(
 	resultKind dukascopy.ResultKind,
 	barColumns []string,
 	tickColumns []string,
+	hive bool,
 ) (totalRowsWritten int, retErr error) {
 	columns := barColumns
 	if resultKind == dukascopy.ResultKindTick {
@@ -33,6 +34,9 @@ func mergeChunks(
 	}
 
 	isParquet := strings.HasSuffix(strings.ToLower(outputPath), ".parquet")
+	isArrow := strings.HasSuffix(strings.ToLower(outputPath), ".arrow") ||
+		strings.HasSuffix(strings.ToLower(outputPath), ".ipc") ||
+		strings.HasSuffix(strings.ToLower(outputPath), ".feather")
 	isGzip := strings.HasSuffix(strings.ToLower(outputPath), ".gz")
 
 	// Determine if we need to route to partitioned output files
@@ -44,11 +48,13 @@ func mergeChunks(
 	var mainGzipWriter *gzip.Writer
 	var mainCsvWriter *csv.Writer
 	var mainParquetWriter *csvout.ParquetStreamWriter
+	var mainArrowWriter *csvout.ArrowStreamWriter
 
 	var partCsvFileWriter *os.File
 	var partGzipWriter *gzip.Writer
 	var partCsvWriter *csv.Writer
 	var partParquetWriter *csvout.ParquetStreamWriter
+	var partArrowWriter *csvout.ArrowStreamWriter
 
 	closeMainWriter := func() error {
 		var errs []string
@@ -57,6 +63,12 @@ func mergeChunks(
 				errs = append(errs, err.Error())
 			}
 			mainParquetWriter = nil
+		}
+		if mainArrowWriter != nil {
+			if err := mainArrowWriter.Close(); err != nil {
+				errs = append(errs, err.Error())
+			}
+			mainArrowWriter = nil
 		}
 		if mainCsvWriter != nil {
 			mainCsvWriter.Flush()
@@ -96,6 +108,12 @@ func mergeChunks(
 			}
 			partParquetWriter = nil
 		}
+		if partArrowWriter != nil {
+			if err := partArrowWriter.Close(); err != nil {
+				errs = append(errs, err.Error())
+			}
+			partArrowWriter = nil
+		}
 		if partCsvWriter != nil {
 			partCsvWriter.Flush()
 			if err := partCsvWriter.Error(); err != nil {
@@ -128,7 +146,13 @@ func mergeChunks(
 
 	initMainWriter := func() error {
 		targetPath := outputPath
-		if isParquet {
+		if isArrow {
+			var err error
+			mainArrowWriter, err = csvout.CreateArrowStreamWriter(targetPath, columns)
+			if err != nil {
+				return err
+			}
+		} else if isParquet {
 			var err error
 			mainParquetWriter, err = csvout.CreateParquetStreamWriter(targetPath, columns)
 			if err != nil {
@@ -165,13 +189,25 @@ func mergeChunks(
 		return nil
 	}
 
-	initPartWriter := func(key string) error {
+	initPartWriter := func(key string, t time.Time) error {
 		if err := closePartWriter(); err != nil {
 			return err
 		}
 
-		targetPath := getPartitionOutputPath(outputPath, key)
-		if isParquet {
+		var targetPath string
+		if hive {
+			targetPath = getHivePartitionPath(outputPath, t, partitionMode)
+		} else {
+			targetPath = getPartitionOutputPath(outputPath, key)
+		}
+
+		if isArrow {
+			var err error
+			partArrowWriter, err = csvout.CreateArrowStreamWriter(targetPath, columns)
+			if err != nil {
+				return err
+			}
+		} else if isParquet {
 			var err error
 			partParquetWriter, err = csvout.CreateParquetStreamWriter(targetPath, columns)
 			if err != nil {
@@ -219,6 +255,8 @@ func mergeChunks(
 	parquetBatchSize := 50000
 	mainParquetBatch := make([]map[string]any, 0, parquetBatchSize)
 	partParquetBatch := make([]map[string]any, 0, parquetBatchSize)
+	mainArrowBatch := make([]map[string]any, 0, parquetBatchSize)
+	partArrowBatch := make([]map[string]any, 0, parquetBatchSize)
 	totalRowsWritten = 0
 
 	for _, partPath := range partPaths {
@@ -273,7 +311,7 @@ func mergeChunks(
 			if isPartitionedOutput {
 				key := getPartitionKey(timestamp, partitionMode)
 				if key != currentPartitionKey {
-					// Flush current parquet batch before switching partitions
+					// Flush current parquet/arrow batch before switching partitions
 					if isParquet && len(partParquetBatch) > 0 {
 						if err := partParquetWriter.WriteBatch(partParquetBatch); err != nil {
 							file.Close()
@@ -281,9 +319,16 @@ func mergeChunks(
 						}
 						partParquetBatch = partParquetBatch[:0]
 					}
+					if isArrow && len(partArrowBatch) > 0 {
+						if err := partArrowWriter.WriteBatch(partArrowBatch); err != nil {
+							file.Close()
+							return 0, err
+						}
+						partArrowBatch = partArrowBatch[:0]
+					}
 
 					currentPartitionKey = key
-					if err := initPartWriter(key); err != nil {
+					if err := initPartWriter(key, timestamp); err != nil {
 						file.Close()
 						return 0, err
 					}
@@ -291,7 +336,7 @@ func mergeChunks(
 			}
 
 			// Write record
-			if isParquet {
+			if isParquet || isArrow {
 				row := make(map[string]any, len(columns))
 				for index, colName := range columns {
 					if index >= len(record) {
@@ -305,24 +350,47 @@ func mergeChunks(
 					}
 					row[colName] = val
 				}
-				mainParquetBatch = append(mainParquetBatch, row)
-				totalRowsWritten++
-				if len(mainParquetBatch) >= parquetBatchSize {
-					if err := mainParquetWriter.WriteBatch(mainParquetBatch); err != nil {
-						file.Close()
-						return 0, err
-					}
-					mainParquetBatch = mainParquetBatch[:0]
-				}
-
-				if isPartitionedOutput {
-					partParquetBatch = append(partParquetBatch, row)
-					if len(partParquetBatch) >= parquetBatchSize {
-						if err := partParquetWriter.WriteBatch(partParquetBatch); err != nil {
+				if isParquet {
+					mainParquetBatch = append(mainParquetBatch, row)
+					totalRowsWritten++
+					if len(mainParquetBatch) >= parquetBatchSize {
+						if err := mainParquetWriter.WriteBatch(mainParquetBatch); err != nil {
 							file.Close()
 							return 0, err
 						}
-						partParquetBatch = partParquetBatch[:0]
+						mainParquetBatch = mainParquetBatch[:0]
+					}
+
+					if isPartitionedOutput {
+						partParquetBatch = append(partParquetBatch, row)
+						if len(partParquetBatch) >= parquetBatchSize {
+							if err := partParquetWriter.WriteBatch(partParquetBatch); err != nil {
+								file.Close()
+								return 0, err
+							}
+							partParquetBatch = partParquetBatch[:0]
+						}
+					}
+				} else if isArrow {
+					mainArrowBatch = append(mainArrowBatch, row)
+					totalRowsWritten++
+					if len(mainArrowBatch) >= parquetBatchSize {
+						if err := mainArrowWriter.WriteBatch(mainArrowBatch); err != nil {
+							file.Close()
+							return 0, err
+						}
+						mainArrowBatch = mainArrowBatch[:0]
+					}
+
+					if isPartitionedOutput {
+						partArrowBatch = append(partArrowBatch, row)
+						if len(partArrowBatch) >= parquetBatchSize {
+							if err := partArrowWriter.WriteBatch(partArrowBatch); err != nil {
+								file.Close()
+								return 0, err
+							}
+							partArrowBatch = partArrowBatch[:0]
+						}
 					}
 				}
 			} else {
@@ -344,7 +412,7 @@ func mergeChunks(
 		file.Close()
 	}
 
-	// Flush remaining parquet records
+	// Flush remaining parquet/arrow records
 	if isParquet {
 		if len(mainParquetBatch) > 0 {
 			if err := mainParquetWriter.WriteBatch(mainParquetBatch); err != nil {
@@ -353,6 +421,17 @@ func mergeChunks(
 		}
 		if isPartitionedOutput && len(partParquetBatch) > 0 {
 			if err := partParquetWriter.WriteBatch(partParquetBatch); err != nil {
+				return 0, err
+			}
+		}
+	} else if isArrow {
+		if len(mainArrowBatch) > 0 {
+			if err := mainArrowWriter.WriteBatch(mainArrowBatch); err != nil {
+				return 0, err
+			}
+		}
+		if isPartitionedOutput && len(partArrowBatch) > 0 {
+			if err := partArrowWriter.WriteBatch(partArrowBatch); err != nil {
 				return 0, err
 			}
 		}

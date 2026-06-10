@@ -272,10 +272,10 @@ func isLikelyEquityMarketClosed(timestamp time.Time) bool {
 	if local.Weekday() == time.Saturday || local.Weekday() == time.Sunday {
 		return true
 	}
-	
+
 	hour := local.Hour()
 	min := local.Minute()
-	
+
 	if hour < 9 || (hour == 9 && min < 30) {
 		return true
 	}
@@ -291,7 +291,7 @@ func nextLikelyEquityClosureBoundary(timestamp time.Time) time.Time {
 	}
 	local := timestamp.In(gapMarketLocation())
 	weekday := local.Weekday()
-	
+
 	if weekday == time.Friday && (local.Hour() >= 16) {
 		return time.Date(local.Year(), local.Month(), local.Day()+3, 9, 30, 0, 0, local.Location()).UTC()
 	}
@@ -301,7 +301,7 @@ func nextLikelyEquityClosureBoundary(timestamp time.Time) time.Time {
 	if weekday == time.Sunday {
 		return time.Date(local.Year(), local.Month(), local.Day()+1, 9, 30, 0, 0, local.Location()).UTC()
 	}
-	
+
 	hour := local.Hour()
 	min := local.Minute()
 	if hour >= 16 {
@@ -310,7 +310,7 @@ func nextLikelyEquityClosureBoundary(timestamp time.Time) time.Time {
 	if hour < 9 || (hour == 9 && min < 30) {
 		return time.Date(local.Year(), local.Month(), local.Day(), 9, 30, 0, 0, local.Location()).UTC()
 	}
-	
+
 	return timestamp
 }
 

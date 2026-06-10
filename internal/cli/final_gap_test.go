@@ -82,7 +82,8 @@ func TestStatsConfigAndInstrumentGapBranches(t *testing.T) {
 		baseURL := ""
 		cacheDir := ""
 		keepCache := false
-		if err := applyDownloadConfigDefaults(fs, &timeframe, &side, &simpleOutput, &fullOutput, &customColumns, &live, &pollInterval, &retries, &retryBackoff, &rateLimit, &progress, &resume, &partition, &parallelism, &checkpointManifest, &baseURL, &cacheDir, &keepCache); err == nil {
+		hive := false
+		if err := applyDownloadConfigDefaults(fs, &timeframe, &side, &simpleOutput, &fullOutput, &customColumns, &live, &pollInterval, &retries, &retryBackoff, &rateLimit, &progress, &resume, &partition, &parallelism, &checkpointManifest, &baseURL, &cacheDir, &keepCache, &hive); err == nil {
 			t.Fatal("expected invalid rate_limit config error")
 		}
 		if side != "ask" || retries != 7 {

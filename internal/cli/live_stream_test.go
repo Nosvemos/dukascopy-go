@@ -409,7 +409,7 @@ func TestWSHandlerDisconnectCleansUp(t *testing.T) {
 		"Upgrade: websocket\r\n" +
 		"Connection: Upgrade\r\n" +
 		"Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n"
-	
+
 	if _, err := conn.Write([]byte(req)); err != nil {
 		t.Fatalf("Write failed: %v", err)
 	}
