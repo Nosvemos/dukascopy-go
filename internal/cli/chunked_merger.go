@@ -26,7 +26,7 @@ func mergeChunks(
 	resultKind dukascopy.ResultKind,
 	barColumns []string,
 	tickColumns []string,
-) (int, error) {
+) (totalRowsWritten int, retErr error) {
 	columns := barColumns
 	if resultKind == dukascopy.ResultKindTick {
 		columns = tickColumns
@@ -82,7 +82,11 @@ func mergeChunks(
 		}
 		return nil
 	}
-	defer closeMainWriter()
+	defer func() {
+		if err := closeMainWriter(); err != nil && retErr == nil {
+			retErr = err
+		}
+	}()
 
 	closePartWriter := func() error {
 		var errs []string
@@ -116,7 +120,11 @@ func mergeChunks(
 		}
 		return nil
 	}
-	defer closePartWriter()
+	defer func() {
+		if err := closePartWriter(); err != nil && retErr == nil {
+			retErr = err
+		}
+	}()
 
 	initMainWriter := func() error {
 		targetPath := outputPath
@@ -211,7 +219,7 @@ func mergeChunks(
 	parquetBatchSize := 50000
 	mainParquetBatch := make([]map[string]any, 0, parquetBatchSize)
 	partParquetBatch := make([]map[string]any, 0, parquetBatchSize)
-	totalRowsWritten := 0
+	totalRowsWritten = 0
 
 	for _, partPath := range partPaths {
 		file, err := os.Open(partPath)

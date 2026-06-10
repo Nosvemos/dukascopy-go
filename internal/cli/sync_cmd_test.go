@@ -75,3 +75,22 @@ func TestSyncWithEmptyExistingCSV(t *testing.T) {
 		t.Errorf("unexpected error: %v", err)
 	}
 }
+
+func TestSyncWithParquetError(t *testing.T) {
+	dir := t.TempDir()
+	outputPath := filepath.Join(dir, "test.parquet")
+	
+	f, err := os.Create(outputPath)
+	if err != nil {
+		t.Fatalf("failed to create temp file: %v", err)
+	}
+	f.Close()
+
+	err = runSync([]string{"--symbol", "EURUSD", "--output", outputPath}, &bytes.Buffer{}, &bytes.Buffer{})
+	if err == nil {
+		t.Fatal("expected error because syncing parquet is not supported")
+	}
+	if !strings.Contains(err.Error(), "syncing parquet files is not supported") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}

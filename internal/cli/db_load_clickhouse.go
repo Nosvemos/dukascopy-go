@@ -38,7 +38,7 @@ func ingestClickHouse(
 	info, _ := f.Stat()
 	sizeMB := float64(info.Size()) / (1024 * 1024)
 
-	query := fmt.Sprintf("INSERT INTO %s FORMAT %s", table, format)
+	query := fmt.Sprintf("INSERT INTO `%s` FORMAT %s", strings.ReplaceAll(table, "`", "\\`"), format)
 	endpoint := buildClickHouseURL(rawURL, query, user, password)
 
 	fmt.Fprintf(stderr, "%sdb-load%s streaming %.1f MB to ClickHouse table %q [%s]...\n",
@@ -53,6 +53,9 @@ func ingestClickHouse(
 		req.Header.Set("Content-Type", "text/csv")
 	} else {
 		req.Header.Set("Content-Type", "application/octet-stream")
+	}
+	if strings.HasSuffix(strings.ToLower(inputPath), ".gz") {
+		req.Header.Set("Content-Encoding", "gzip")
 	}
 
 	httpClient := &http.Client{Timeout: timeout}

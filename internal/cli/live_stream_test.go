@@ -391,3 +391,52 @@ func TestWSHealthEndpoint(t *testing.T) {
 		t.Errorf("status = %v, want ok", body["status"])
 	}
 }
+
+func TestWSHandlerDisconnectCleansUp(t *testing.T) {
+	hub := newWSHub()
+	server := httptest.NewServer(wsHandler(hub))
+	defer server.Close()
+
+	// Dial connection using raw TCP to simulate WebSocket handshake
+	conn, err := net.Dial("tcp", server.Listener.Addr().String())
+	if err != nil {
+		t.Fatalf("Dial failed: %v", err)
+	}
+
+	// Send handshake request
+	req := "GET /stream HTTP/1.1\r\n" +
+		"Host: localhost\r\n" +
+		"Upgrade: websocket\r\n" +
+		"Connection: Upgrade\r\n" +
+		"Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n"
+	
+	if _, err := conn.Write([]byte(req)); err != nil {
+		t.Fatalf("Write failed: %v", err)
+	}
+
+	// Read handshake response
+	buf := make([]byte, 1024)
+	n, err := conn.Read(buf)
+	if err != nil {
+		t.Fatalf("Read failed: %v", err)
+	}
+	resp := string(buf[:n])
+	if !strings.Contains(resp, "101 Switching Protocols") {
+		t.Fatalf("expected 101 status, got: %q", resp)
+	}
+
+	// Verify client is registered in the hub
+	time.Sleep(50 * time.Millisecond)
+	if hub.count() != 1 {
+		t.Fatalf("expected 1 registered client, got %d", hub.count())
+	}
+
+	// Close client connection to trigger server-side Read error and cleanup
+	conn.Close()
+
+	// Verify that the client is unregistered from the hub
+	time.Sleep(100 * time.Millisecond)
+	if hub.count() != 0 {
+		t.Fatalf("expected 0 registered clients after disconnect, got %d", hub.count())
+	}
+}

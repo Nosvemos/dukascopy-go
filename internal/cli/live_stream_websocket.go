@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bufio"
+	"context"
 	"crypto/sha1"
 	"encoding/base64"
 	"net"
@@ -105,10 +106,35 @@ func wsHandler(hub *wsHub) http.HandlerFunc {
 			conn.Close()
 		}()
 
-		// Write frames to client until channel is closed or write fails
-		for msg := range ch {
-			if err := wsWriteTextFrame(conn, msg); err != nil {
+		ctx, cancel := context.WithCancel(r.Context())
+		defer cancel()
+
+		// Start a read loop in a background goroutine to detect disconnects.
+		// When the client disconnects or closes the connection, Read will error.
+		// Calling cancel() and conn.Close() will unblock the writer loop select.
+		go func() {
+			buf := make([]byte, 256)
+			for {
+				if _, err := conn.Read(buf); err != nil {
+					cancel()
+					conn.Close()
+					return
+				}
+			}
+		}()
+
+		// Write frames to client until context is cancelled or write fails
+		for {
+			select {
+			case <-ctx.Done():
 				return
+			case msg, ok := <-ch:
+				if !ok {
+					return
+				}
+				if err := wsWriteTextFrame(conn, msg); err != nil {
+					return
+				}
 			}
 		}
 	}

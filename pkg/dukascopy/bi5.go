@@ -23,7 +23,7 @@ func DecodeTicksBi5(r io.Reader, baseTime time.Time, priceScale int) ([]Tick, er
 		return nil, err
 	}
 
-	var ticks []Tick
+	ticks := make([]Tick, 0, 2048)
 	buf := make([]byte, 20)
 	factor := math.Pow10(priceScale)
 
@@ -75,7 +75,7 @@ func DecodeBarsBi5(r io.Reader, baseTime time.Time, priceScale int) ([]Bar, erro
 		return nil, err
 	}
 
-	var bars []Bar
+	bars := make([]Bar, 0, 720)
 	buf := make([]byte, 24)
 	factor := math.Pow10(priceScale)
 

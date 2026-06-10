@@ -8,13 +8,10 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"strings"
 	"time"
 	"unsafe"
 
 	"github.com/Nosvemos/dukascopy-go/internal/cli"
-	"github.com/Nosvemos/dukascopy-go/pkg/csvout"
-	"github.com/Nosvemos/dukascopy-go/pkg/dukascopy"
 )
 
 //export FreeString
@@ -35,6 +32,13 @@ func DownloadData(
 	outputPath *C.char,
 	engine *C.char,
 	priceScale C.int,
+	profile *C.char,
+	timezone *C.char,
+	customColumns *C.char,
+	resume C.int,
+	parallelism C.int,
+	partition *C.char,
+	fillGaps *C.char,
 ) *C.char {
 	sym := C.GoString(symbol)
 	tf := C.GoString(timeframe)
@@ -43,6 +47,13 @@ func DownloadData(
 	toStr := C.GoString(toDate)
 	out := C.GoString(outputPath)
 	eng := C.GoString(engine)
+	prof := C.GoString(profile)
+	tz := C.GoString(timezone)
+	cc := C.GoString(customColumns)
+	resVal := resume != 0
+	parVal := int(parallelism)
+	partVal := C.GoString(partition)
+	fg := C.GoString(fillGaps)
 
 	from, err := time.Parse(time.RFC3339, fromStr)
 	if err != nil {
@@ -53,38 +64,27 @@ func DownloadData(
 		return C.CString(fmt.Sprintf("invalid to date: %v", err))
 	}
 
-	client := dukascopy.NewClient("https://jetta.dukascopy.com", 30*time.Second).
-		WithEngine(dukascopy.Engine(strings.ToLower(strings.TrimSpace(eng)))).
-		WithRetries(3).
-		WithBackoff(500 * time.Millisecond).
-		WithRateLimit(0)
-
-	normalizedTimeframe := dukascopy.NormalizeGranularity(dukascopy.Granularity(tf))
-	request := dukascopy.DownloadRequest{
-		Symbol:      sym,
-		Granularity: normalizedTimeframe,
-		Side:        dukascopy.PriceSide(sd),
-		From:        from.UTC(),
-		To:          to.UTC(),
+	opts := cli.SDKDownloadOptions{
+		Symbol:        sym,
+		Timeframe:     tf,
+		Side:          sd,
+		From:          from,
+		To:            to,
+		OutputPath:    out,
+		Engine:        eng,
+		PriceScale:    int(priceScale),
+		Profile:       prof,
+		Timezone:      tz,
+		CustomColumns: cc,
+		Resume:        resVal,
+		Parallelism:   parVal,
+		Partition:     partVal,
+		FillGaps:      fg,
 	}
 
 	ctx := context.Background()
-	res, err := client.Download(ctx, request)
-	if err != nil {
+	if err := cli.RunSDKDownload(ctx, opts); err != nil {
 		return C.CString(fmt.Sprintf("download failed: %v", err))
-	}
-
-	profile := csvout.ProfileSimple
-	if res.Kind == dukascopy.ResultKindBar {
-		barColumns := csvout.BarColumnsForProfile(profile)
-		err = csvout.WriteBars(out, dukascopy.Instrument{PriceScale: int(priceScale)}, barColumns, res.Bars, nil, nil)
-	} else {
-		tickColumns := csvout.TickColumnsForProfile(profile)
-		err = csvout.WriteTicks(out, dukascopy.Instrument{PriceScale: int(priceScale)}, tickColumns, res.Ticks)
-	}
-
-	if err != nil {
-		return C.CString(fmt.Sprintf("export failed: %v", err))
 	}
 
 	return nil

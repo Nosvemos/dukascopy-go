@@ -6,6 +6,7 @@ import (
 	"os"
 	"reflect"
 	"strings"
+	"sync"
 	"time"
 
 	parquet "github.com/parquet-go/parquet-go"
@@ -44,6 +45,8 @@ var CSVDelimiter rune = ','
 var HideCSVHeader bool = false
 var FillGaps string = "none"
 
+var ConfigMutex sync.RWMutex
+
 type Config struct {
 	Location             *time.Location
 	TimestampFormat      string
@@ -57,6 +60,9 @@ type Config struct {
 }
 
 func DefaultConfig() *Config {
+	ConfigMutex.RLock()
+	defer ConfigMutex.RUnlock()
+
 	loc := OutputLocation
 	if loc == nil {
 		loc = time.UTC

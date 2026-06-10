@@ -150,7 +150,10 @@ func TestPrepareResumeErrorBranches(t *testing.T) {
 func TestDownloadPartitionToFileTickAndBidAskBranches(t *testing.T) {
 	server := newCLITestServer()
 	defer server.Close()
-	client := dukascopy.NewClient(server.URL, time.Second)
+	client, err := dukascopy.NewClient(server.URL, time.Second)
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
 	dir := t.TempDir()
 	request := dukascopy.DownloadRequest{
 		Symbol:      "xauusd",

@@ -198,7 +198,7 @@ func questDBTCPWrite(
 					return fmt.Errorf("CSV read error at row %d: %w", totalRows+2, readErr)
 				}
 
-				line, lineErr := buildLineProtocol(row, colIndex, table, symbolTag)
+				line, lineErr := buildQuestDBLineProtocol(row, colIndex, table, symbolTag)
 				if lineErr != nil || line == "" {
 					continue
 				}
@@ -242,7 +242,7 @@ func questDBHTTPWrite(
 	stderr io.Writer,
 ) (int, error) {
 	baseURL = strings.TrimRight(baseURL, "/")
-	endpoint := baseURL + "/write"
+	endpoint := baseURL + "/write?precision=n"
 
 	httpClient := &http.Client{Timeout: timeout}
 
@@ -293,7 +293,7 @@ func questDBHTTPWrite(
 			return 0, fmt.Errorf("CSV read error at row %d: %w", totalRows+batchRows+2, readErr)
 		}
 
-		line, lineErr := buildLineProtocol(row, colIndex, table, symbolTag)
+		line, lineErr := buildQuestDBLineProtocol(row, colIndex, table, symbolTag)
 		if lineErr != nil || line == "" {
 			continue
 		}
@@ -315,4 +315,77 @@ func questDBHTTPWrite(
 	}
 
 	return totalRows, nil
+}
+
+// buildQuestDBLineProtocol converts a CSV row to QuestDB InfluxDB Line Protocol string with nanosecond precision.
+func buildQuestDBLineProtocol(row []string, colIndex map[string]int, table string, symbolTag string) (string, error) {
+	getField := func(name string) (string, bool) {
+		i, ok := colIndex[name]
+		if !ok || i >= len(row) {
+			return "", false
+		}
+		return strings.TrimSpace(row[i]), true
+	}
+
+	var tsNS int64
+	if tsStr, ok := getField("timestamp"); ok && tsStr != "" {
+		if t, err := time.Parse(time.RFC3339Nano, tsStr); err == nil {
+			tsNS = t.UnixNano()
+		} else if t, err := time.Parse(time.RFC3339, tsStr); err == nil {
+			tsNS = t.UnixNano()
+		} else if ms, err := strconv.ParseInt(tsStr, 10, 64); err == nil {
+			tsNS = ms * 1_000_000
+		} else {
+			return "", fmt.Errorf("unrecognized timestamp format: %q", tsStr)
+		}
+	} else {
+		return "", fmt.Errorf("missing timestamp column")
+	}
+
+	var fields []string
+	barCols := []string{"open", "high", "low", "close", "volume",
+		"mid_open", "mid_high", "mid_low", "mid_close",
+		"bid_open", "ask_open"}
+	isBar := false
+	for _, col := range barCols {
+		if _, ok := colIndex[col]; ok {
+			isBar = true
+			break
+		}
+	}
+
+	if isBar {
+		for _, col := range []string{"open", "high", "low", "close", "volume",
+			"mid_open", "mid_high", "mid_low", "mid_close", "spread",
+			"bid_open", "bid_high", "bid_low", "bid_close",
+			"ask_open", "ask_high", "ask_low", "ask_close"} {
+			if v, ok := getField(col); ok && v != "" {
+				if _, err := strconv.ParseFloat(v, 64); err == nil {
+					fields = append(fields, col+"="+v)
+				}
+			}
+		}
+	} else {
+		for _, col := range []string{"bid", "ask", "bid_volume", "ask_volume"} {
+			if v, ok := getField(col); ok && v != "" {
+				if _, err := strconv.ParseFloat(v, 64); err == nil {
+					fields = append(fields, col+"="+v)
+				}
+			}
+		}
+	}
+
+	if len(fields) == 0 {
+		return "", fmt.Errorf("no numeric fields found")
+	}
+
+	tags := ""
+	if strings.TrimSpace(symbolTag) != "" {
+		escapedSymbol := strings.ReplaceAll(strings.ToLower(strings.TrimSpace(symbolTag)), ",", "\\,")
+		escapedSymbol = strings.ReplaceAll(escapedSymbol, "=", "\\=")
+		escapedSymbol = strings.ReplaceAll(escapedSymbol, " ", "\\ ")
+		tags = ",symbol=" + escapedSymbol
+	}
+
+	return fmt.Sprintf("%s%s %s %d", table, tags, strings.Join(fields, ","), tsNS), nil
 }

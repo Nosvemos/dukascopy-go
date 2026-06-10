@@ -48,7 +48,11 @@ func redownloadManifestGaps(manifestPath string, manifest *checkpoint.Manifest, 
 		return 0, nil
 	}
 
-	client := dukascopy.NewClient(options.BaseURL, defaultHTTPTimeout).
+	client, err := dukascopy.NewClient(options.BaseURL, defaultHTTPTimeout)
+	if err != nil {
+		return 0, err
+	}
+	client = client.
 		WithRetries(options.Retries).
 		WithBackoff(options.RetryBackoff).
 		WithRateLimit(options.RateLimit)

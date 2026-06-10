@@ -126,7 +126,10 @@ func runLiveStream(args []string, stdout io.Writer, stderr io.Writer) error {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
 
-	client := dukascopy.NewClient(*baseURL, 30*time.Second)
+	client, err := dukascopy.NewClient(*baseURL, 30*time.Second)
+	if err != nil {
+		return err
+	}
 
 	// Resolve instrument once up front
 	instruments, err := client.ListInstruments(ctx)
@@ -178,6 +181,11 @@ func runLiveStream(args []string, stdout io.Writer, stderr io.Writer) error {
 		if isTick {
 			// Download ticks for the current hour window
 			from := now.Truncate(time.Hour)
+			stateMu.Lock()
+			if !lastTickTime.IsZero() && lastTickTime.After(from) {
+				from = lastTickTime
+			}
+			stateMu.Unlock()
 			to := now.Add(time.Nanosecond)
 			req := dukascopy.DownloadRequest{
 				Symbol:      *symbol,

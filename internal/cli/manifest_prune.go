@@ -141,7 +141,8 @@ func runManifestPrune(args []string, stdout io.Writer) error {
 }
 
 func shouldPrunePartFile(name string) bool {
-	return strings.HasSuffix(name, ".csv") || strings.Contains(name, ".tmp-")
+	lower := strings.ToLower(name)
+	return strings.HasSuffix(lower, ".csv") || strings.HasSuffix(lower, ".parquet") || strings.Contains(name, ".tmp-")
 }
 
 func shouldPruneTopLevelFile(name string, manifestBase string, outputBase string) bool {

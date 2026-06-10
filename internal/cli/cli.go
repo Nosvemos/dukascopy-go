@@ -145,7 +145,11 @@ func runInstruments(args []string, stdout io.Writer) error {
 		return errors.New("--limit must be greater than 0 (or set to -1 for unlimited)")
 	}
 
-	client := dukascopy.NewClient(*baseURL, defaultHTTPTimeout).WithForceUpdate(*update)
+	client, err := dukascopy.NewClient(*baseURL, defaultHTTPTimeout)
+	if err != nil {
+		return err
+	}
+	client = client.WithForceUpdate(*update)
 	ctx, cancel := context.WithTimeout(context.Background(), defaultHTTPTimeout)
 	defer cancel()
 

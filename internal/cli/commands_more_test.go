@@ -73,7 +73,13 @@ func TestRunLiveDownloadAppendsAndStops(t *testing.T) {
 	var stdout bytes.Buffer
 	err := runLiveDownload(
 		ctx,
-		dukascopy.NewClient(server.URL, time.Second),
+		func() *dukascopy.Client {
+			c, err := dukascopy.NewClient(server.URL, time.Second)
+			if err != nil {
+				t.Fatalf("NewClient: %v", err)
+			}
+			return c
+		}(),
 		&stdout,
 		&bytes.Buffer{},
 		outputPath,
@@ -143,7 +149,13 @@ func TestRunLiveDownloadStreamsPureCSVToStdout(t *testing.T) {
 	var stdout bytes.Buffer
 	err := runLiveDownload(
 		ctx,
-		dukascopy.NewClient(server.URL, time.Second),
+		func() *dukascopy.Client {
+			c, err := dukascopy.NewClient(server.URL, time.Second)
+			if err != nil {
+				t.Fatalf("NewClient: %v", err)
+			}
+			return c
+		}(),
 		&stdout,
 		&bytes.Buffer{},
 		"-",
@@ -231,7 +243,13 @@ func TestRunLiveDownloadStreamsPartitionedCSVToStdoutWithCheckpoint(t *testing.T
 		var stdout bytes.Buffer
 		err := runLiveDownload(
 			ctx,
-			dukascopy.NewClient(server.URL, time.Second),
+			func() *dukascopy.Client {
+				c, err := dukascopy.NewClient(server.URL, time.Second)
+				if err != nil {
+					t.Fatalf("NewClient: %v", err)
+				}
+				return c
+			}(),
 			&stdout,
 			&bytes.Buffer{},
 			"-",
@@ -340,7 +358,13 @@ func TestRunLiveDownloadWithPartitionManifestAndGzipOutput(t *testing.T) {
 		var stdout bytes.Buffer
 		err := runLiveDownload(
 			ctx,
-			dukascopy.NewClient(server.URL, time.Second),
+			func() *dukascopy.Client {
+				c, err := dukascopy.NewClient(server.URL, time.Second)
+				if err != nil {
+					t.Fatalf("NewClient: %v", err)
+				}
+				return c
+			}(),
 			&stdout,
 			&bytes.Buffer{},
 			outputPath,
@@ -490,7 +514,13 @@ func TestRunDownloadAndPartitionPipeline(t *testing.T) {
 	}
 	err = runPartitionedDownload(
 		context.Background(),
-		dukascopy.NewClient(server.URL, time.Second),
+		func() *dukascopy.Client {
+			c, err := dukascopy.NewClient(server.URL, time.Second)
+			if err != nil {
+				t.Fatalf("NewClient: %v", err)
+			}
+			return c
+		}(),
 		&stdout,
 		&stderr,
 		partitionOutput,
@@ -536,7 +566,10 @@ func TestPartitionExecutionHelpers(t *testing.T) {
 			File:  "part-1.csv",
 		},
 	}
-	client := dukascopy.NewClient(server.URL, time.Second)
+	client, err := dukascopy.NewClient(server.URL, time.Second)
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
 	result := runPartitionJob(context.Background(), client, partsDir, 1, item, request, dukascopy.ResultKindBar, []string{"timestamp", "open"}, nil)
 	if result.Err != nil || result.RowsWritten == 0 {
 		t.Fatalf("unexpected partition job result: %+v", result)
@@ -628,6 +661,10 @@ func TestRunManifestRepairAndPrune(t *testing.T) {
 	if err := os.WriteFile(orphanPath, []byte("temp"), 0o644); err != nil {
 		t.Fatalf("WriteFile returned error: %v", err)
 	}
+	orphanParquet := filepath.Join(dir, "orphan.parquet")
+	if err := os.WriteFile(orphanParquet, []byte("temp"), 0o644); err != nil {
+		t.Fatalf("WriteFile returned error: %v", err)
+	}
 	stdout.Reset()
 	if err := runManifestPrune([]string{"--output", outputPath}, &stdout); err != nil {
 		t.Fatalf("runManifestPrune returned error: %v", err)
@@ -637,6 +674,9 @@ func TestRunManifestRepairAndPrune(t *testing.T) {
 	}
 	if _, err := os.Stat(orphanPath); !os.IsNotExist(err) {
 		t.Fatalf("expected orphan temp file to be removed, got err=%v", err)
+	}
+	if _, err := os.Stat(orphanParquet); !os.IsNotExist(err) {
+		t.Fatalf("expected orphan parquet file to be removed, got err=%v", err)
 	}
 }
 

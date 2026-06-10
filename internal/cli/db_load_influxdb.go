@@ -236,7 +236,10 @@ func buildLineProtocol(row []string, colIndex map[string]int, measurement string
 
 	tags := ""
 	if strings.TrimSpace(symbolTag) != "" {
-		tags = ",symbol=" + strings.ToLower(strings.TrimSpace(symbolTag))
+		escapedSymbol := strings.ReplaceAll(strings.ToLower(strings.TrimSpace(symbolTag)), ",", "\\,")
+		escapedSymbol = strings.ReplaceAll(escapedSymbol, "=", "\\=")
+		escapedSymbol = strings.ReplaceAll(escapedSymbol, " ", "\\ ")
+		tags = ",symbol=" + escapedSymbol
 	}
 
 	return fmt.Sprintf("%s%s %s %d", measurement, tags, strings.Join(fields, ","), tsMS), nil

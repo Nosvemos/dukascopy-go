@@ -191,7 +191,11 @@ func TestClientRemainingBranches(t *testing.T) {
 		}))
 		defer server.Close()
 
-		client := NewClient(server.URL, time.Second).WithRetries(0)
+		client, err := NewClient(server.URL, time.Second)
+		if err != nil {
+			t.Fatalf("NewClient: %v", err)
+		}
+		client = client.WithRetries(0)
 		request := DownloadRequest{
 			Symbol:      "xauusd",
 			Granularity: GranularityM1,
@@ -202,7 +206,7 @@ func TestClientRemainingBranches(t *testing.T) {
 		if _, err := client.Download(context.Background(), request); err == nil {
 			t.Fatal("expected Download list-instruments error")
 		}
-		if _, _, err := client.DownloadBarsForSide(context.Background(), request, PriceSideBid); err == nil {
+		if _, _, err = client.DownloadBarsForSide(context.Background(), request, PriceSideBid); err == nil {
 			t.Fatal("expected DownloadBarsForSide list-instruments error")
 		}
 	})
@@ -219,7 +223,11 @@ func TestClientRemainingBranches(t *testing.T) {
 		}))
 		defer server.Close()
 
-		client := NewClient(server.URL, time.Second).WithRetries(0)
+		client, err := NewClient(server.URL, time.Second)
+		if err != nil {
+			t.Fatalf("NewClient: %v", err)
+		}
+		client = client.WithRetries(0)
 		if _, err := client.Download(context.Background(), DownloadRequest{
 			Symbol:      "xauusd",
 			Granularity: GranularityTick,
@@ -255,7 +263,11 @@ func TestClientRemainingBranches(t *testing.T) {
 	})
 
 	t.Run("getJSON handles transport error and canceled retry wait", func(t *testing.T) {
-		client := NewClient("https://example.test", time.Second).WithRetries(0)
+		client, err := NewClient("https://example.test", time.Second)
+		if err != nil {
+			t.Fatalf("NewClient: %v", err)
+		}
+		client = client.WithRetries(0)
 		client.httpClient = &http.Client{
 			Transport: roundTripperFunc(func(*http.Request) (*http.Response, error) {
 				return nil, &net.DNSError{Err: "dial failed"}
@@ -270,7 +282,11 @@ func TestClientRemainingBranches(t *testing.T) {
 		}))
 		defer retryServer.Close()
 
-		retryClient := NewClient(retryServer.URL, time.Second).WithRetries(1).WithBackoff(50 * time.Millisecond)
+		retryClient, err := NewClient(retryServer.URL, time.Second)
+		if err != nil {
+			t.Fatalf("NewClient: %v", err)
+		}
+		retryClient = retryClient.WithRetries(1).WithBackoff(50 * time.Millisecond)
 		ctx, cancel := context.WithCancel(context.Background())
 		go func() {
 			time.Sleep(10 * time.Millisecond)
@@ -280,7 +296,11 @@ func TestClientRemainingBranches(t *testing.T) {
 			t.Fatal("expected canceled retry wait error")
 		}
 
-		waitClient := NewClient(retryServer.URL, time.Second).WithRetries(0).WithRateLimit(50 * time.Millisecond)
+		waitClient, err := NewClient(retryServer.URL, time.Second)
+		if err != nil {
+			t.Fatalf("NewClient: %v", err)
+		}
+		waitClient = waitClient.WithRetries(0).WithRateLimit(50 * time.Millisecond)
 		waitClient.nextSlot = time.Now().Add(50 * time.Millisecond)
 		waitCtx, waitCancel := context.WithCancel(context.Background())
 		waitCancel()
@@ -290,7 +310,11 @@ func TestClientRemainingBranches(t *testing.T) {
 	})
 
 	t.Run("waitForRateLimit waits successfully", func(t *testing.T) {
-		client := NewClient("https://example.test", time.Second).WithRateLimit(10 * time.Millisecond)
+		client, err := NewClient("https://example.test", time.Second)
+		if err != nil {
+			t.Fatalf("NewClient: %v", err)
+		}
+		client = client.WithRateLimit(10 * time.Millisecond)
 		client.nextSlot = time.Now().Add(5 * time.Millisecond)
 		if err := client.waitForRateLimit(context.Background()); err != nil {
 			t.Fatalf("waitForRateLimit returned error: %v", err)
@@ -304,8 +328,11 @@ func TestClientRemainingBranches(t *testing.T) {
 		}))
 		defer server.Close()
 
-		client := NewClient(server.URL, time.Second)
-		_, _, err := client.DownloadBarsForSide(context.Background(), DownloadRequest{
+		client, err := NewClient(server.URL, time.Second)
+		if err != nil {
+			t.Fatalf("NewClient: %v", err)
+		}
+		_, _, err = client.DownloadBarsForSide(context.Background(), DownloadRequest{
 			Symbol:      "eurusd",
 			Granularity: GranularityM1,
 			From:        time.Date(2024, 1, 2, 0, 0, 0, 0, time.UTC),

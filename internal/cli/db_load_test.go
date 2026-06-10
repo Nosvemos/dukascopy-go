@@ -426,6 +426,30 @@ func TestIngestClickHouse_ServerError(t *testing.T) {
 	}
 }
 
+func TestIngestClickHouse_Gzip(t *testing.T) {
+	var receivedEncoding string
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedEncoding = r.Header.Get("Content-Encoding")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer ts.Close()
+
+	f, _ := os.CreateTemp("", "*.csv.gz")
+	f.Close()
+	defer os.Remove(f.Name())
+
+	var stdout, stderr bytes.Buffer
+	err := ingestClickHouse(context.Background(), &stdout, &stderr, f.Name(), ts.URL, "eurusd", "", "", 30*time.Second)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if receivedEncoding != "gzip" {
+		t.Errorf("expected Content-Encoding header to be 'gzip', got: %q", receivedEncoding)
+	}
+}
+
 func TestIngestClickHouse_ParquetFile(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		query := r.URL.Query().Get("query")
@@ -638,16 +662,19 @@ func TestIngestPostgres_ValidationAndFailure(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for non-csv file in postgres ingestion")
 	}
-	if !strings.Contains(err.Error(), "only supports .csv") {
+	if !strings.Contains(err.Error(), "unsupported file type") {
 		t.Errorf("unexpected error: %v", err)
 	}
 
-	// Test connection failure with invalid URL
-	csvPath := filepath.Join(dir, "data.csv")
-	_ = os.WriteFile(csvPath, []byte("timestamp,bid,ask\n"), 0o644)
-	err2 := ingestPostgres(context.Background(), &stdout, &stderr, csvPath, "postgres://127.0.0.1:1/invalid_db_non_existent", "t", false, "")
+	// Test connection failure with invalid URL (valid csv.gz path)
+	gzPath := filepath.Join(dir, "data.csv.gz")
+	_ = os.WriteFile(gzPath, []byte("compressed content"), 0o644)
+	err2 := ingestPostgres(context.Background(), &stdout, &stderr, gzPath, "postgres://127.0.0.1:1/invalid_db_non_existent", "t", false, "")
 	if err2 == nil {
 		t.Fatal("expected connection failure error")
+	}
+	if strings.Contains(err2.Error(), "unsupported file type") {
+		t.Errorf("expected connection failure, not format support error: %v", err2)
 	}
 }
 

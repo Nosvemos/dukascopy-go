@@ -22,6 +22,8 @@ func IsExpectedGapForProfile(previous time.Time, current time.Time, expectedInte
 		return isExpectedFXGap(previous, current, expectedInterval)
 	case MarketProfileOTC24x5:
 		return isExpectedOTCGap(previous, current, expectedInterval)
+	case MarketProfileEquity:
+		return isExpectedEquityGap(previous, current, expectedInterval)
 	default:
 		return isExpectedOTCGap(previous, current, expectedInterval)
 	}
@@ -107,7 +109,7 @@ func ResolveGapMarketProfile(symbol string, explicitProfile string) string {
 	profile := strings.ToLower(strings.TrimSpace(explicitProfile))
 	switch profile {
 	case "", MarketProfileAuto:
-	case MarketProfileFX24x5, MarketProfileOTC24x5, MarketProfileCrypto24x7, MarketProfileAlways:
+	case MarketProfileFX24x5, MarketProfileOTC24x5, MarketProfileCrypto24x7, MarketProfileAlways, MarketProfileEquity:
 		return profile
 	default:
 		return MarketProfileOTC24x5
@@ -121,6 +123,9 @@ func ResolveGapMarketProfile(symbol string, explicitProfile string) string {
 	}
 	if looksLikeForexSymbol(symbol) {
 		return MarketProfileFX24x5
+	}
+	if looksLikeEquitySymbol(symbol) {
+		return MarketProfileEquity
 	}
 	return MarketProfileOTC24x5
 }
@@ -242,4 +247,88 @@ func gapMarketLocation() *time.Location {
 		return location
 	}
 	return time.UTC
+}
+
+func isExpectedEquityGap(previous time.Time, current time.Time, expectedInterval time.Duration) bool {
+	probe := previous.Add(expectedInterval).UTC()
+	for probe.Before(current) {
+		if !isLikelyEquityMarketClosed(probe) {
+			return false
+		}
+		next := nextLikelyEquityClosureBoundary(probe)
+		if !next.After(probe) {
+			return false
+		}
+		probe = next
+	}
+	return true
+}
+
+func isLikelyEquityMarketClosed(timestamp time.Time) bool {
+	if isLikelyHolidayMarketClosed(timestamp, MarketProfileEquity) {
+		return true
+	}
+	local := timestamp.In(gapMarketLocation())
+	if local.Weekday() == time.Saturday || local.Weekday() == time.Sunday {
+		return true
+	}
+	
+	hour := local.Hour()
+	min := local.Minute()
+	
+	if hour < 9 || (hour == 9 && min < 30) {
+		return true
+	}
+	if hour >= 16 {
+		return true
+	}
+	return false
+}
+
+func nextLikelyEquityClosureBoundary(timestamp time.Time) time.Time {
+	if next, ok := nextHolidayClosureBoundary(timestamp, MarketProfileEquity); ok {
+		return next
+	}
+	local := timestamp.In(gapMarketLocation())
+	weekday := local.Weekday()
+	
+	if weekday == time.Friday && (local.Hour() >= 16) {
+		return time.Date(local.Year(), local.Month(), local.Day()+3, 9, 30, 0, 0, local.Location()).UTC()
+	}
+	if weekday == time.Saturday {
+		return time.Date(local.Year(), local.Month(), local.Day()+2, 9, 30, 0, 0, local.Location()).UTC()
+	}
+	if weekday == time.Sunday {
+		return time.Date(local.Year(), local.Month(), local.Day()+1, 9, 30, 0, 0, local.Location()).UTC()
+	}
+	
+	hour := local.Hour()
+	min := local.Minute()
+	if hour >= 16 {
+		return time.Date(local.Year(), local.Month(), local.Day()+1, 9, 30, 0, 0, local.Location()).UTC()
+	}
+	if hour < 9 || (hour == 9 && min < 30) {
+		return time.Date(local.Year(), local.Month(), local.Day(), 9, 30, 0, 0, local.Location()).UTC()
+	}
+	
+	return timestamp
+}
+
+func looksLikeEquitySymbol(symbol string) bool {
+	symbol = normalizeGapSymbol(symbol)
+	if symbol == "" {
+		return false
+	}
+	if strings.Contains(symbol, "IDX") {
+		return true
+	}
+	suffixes := []string{
+		"USUSD", "DEEUR", "FREUR", "GBRGBP", "JPNJPY", "CHECHF", "NLDEUR", "ITAEUR", "SWESEK", "ZAFZAR", "SGPSGD",
+	}
+	for _, suffix := range suffixes {
+		if strings.HasSuffix(symbol, suffix) {
+			return true
+		}
+	}
+	return false
 }

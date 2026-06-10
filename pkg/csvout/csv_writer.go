@@ -9,7 +9,7 @@ import (
 	"github.com/Nosvemos/dukascopy-go/pkg/dukascopy"
 )
 
-func (c *Config) WriteBars(outputPath string, instrument dukascopy.Instrument, columns []string, primaryBars []dukascopy.Bar, bidBars []dukascopy.Bar, askBars []dukascopy.Bar) error {
+func (c *Config) WriteBars(outputPath string, instrument dukascopy.Instrument, columns []string, primaryBars []dukascopy.Bar, bidBars []dukascopy.Bar, askBars []dukascopy.Bar) (retErr error) {
 	if isParquetPath(outputPath) {
 		return c.writeBarsParquet(outputPath, instrument, columns, primaryBars, bidBars, askBars)
 	}
@@ -24,7 +24,11 @@ func (c *Config) WriteBars(outputPath string, instrument dukascopy.Instrument, c
 	if err != nil {
 		return err
 	}
-	defer closeWriter()
+	defer func() {
+		if err := closeWriter(); err != nil && retErr == nil {
+			retErr = err
+		}
+	}()
 
 	return c.writeBarsCSV(csvWriter, instrument, columns, primaryBars, bidBars, askBars)
 }
@@ -33,9 +37,14 @@ func WriteBars(outputPath string, instrument dukascopy.Instrument, columns []str
 	return DefaultConfig().WriteBars(outputPath, instrument, columns, primaryBars, bidBars, askBars)
 }
 
-func (c *Config) WriteBarsToWriter(w io.Writer, instrument dukascopy.Instrument, columns []string, primaryBars []dukascopy.Bar, bidBars []dukascopy.Bar, askBars []dukascopy.Bar) error {
+func (c *Config) WriteBarsToWriter(w io.Writer, instrument dukascopy.Instrument, columns []string, primaryBars []dukascopy.Bar, bidBars []dukascopy.Bar, askBars []dukascopy.Bar) (retErr error) {
 	csvWriter := c.csvWriterFactory(w)
-	defer csvWriter.Flush()
+	defer func() {
+		csvWriter.Flush()
+		if err := csvWriter.Error(); err != nil && retErr == nil {
+			retErr = err
+		}
+	}()
 
 	return c.writeBarsCSV(csvWriter, instrument, columns, primaryBars, bidBars, askBars)
 }
@@ -44,9 +53,14 @@ func WriteBarsToWriter(w io.Writer, instrument dukascopy.Instrument, columns []s
 	return DefaultConfig().WriteBarsToWriter(w, instrument, columns, primaryBars, bidBars, askBars)
 }
 
-func (c *Config) WriteBarsRowsToWriter(w io.Writer, instrument dukascopy.Instrument, columns []string, primaryBars []dukascopy.Bar, bidBars []dukascopy.Bar, askBars []dukascopy.Bar) error {
+func (c *Config) WriteBarsRowsToWriter(w io.Writer, instrument dukascopy.Instrument, columns []string, primaryBars []dukascopy.Bar, bidBars []dukascopy.Bar, askBars []dukascopy.Bar) (retErr error) {
 	csvWriter := c.csvWriterFactory(w)
-	defer csvWriter.Flush()
+	defer func() {
+		csvWriter.Flush()
+		if err := csvWriter.Error(); err != nil && retErr == nil {
+			retErr = err
+		}
+	}()
 
 	return c.writeBarsCSVRows(csvWriter, instrument, columns, primaryBars, bidBars, askBars, false)
 }
@@ -55,7 +69,7 @@ func WriteBarsRowsToWriter(w io.Writer, instrument dukascopy.Instrument, columns
 	return DefaultConfig().WriteBarsRowsToWriter(w, instrument, columns, primaryBars, bidBars, askBars)
 }
 
-func (c *Config) WriteTicks(outputPath string, instrument dukascopy.Instrument, columns []string, ticks []dukascopy.Tick) error {
+func (c *Config) WriteTicks(outputPath string, instrument dukascopy.Instrument, columns []string, ticks []dukascopy.Tick) (retErr error) {
 	if isParquetPath(outputPath) {
 		return c.writeTicksParquet(outputPath, instrument, columns, ticks)
 	}
@@ -70,7 +84,11 @@ func (c *Config) WriteTicks(outputPath string, instrument dukascopy.Instrument, 
 	if err != nil {
 		return err
 	}
-	defer closeWriter()
+	defer func() {
+		if err := closeWriter(); err != nil && retErr == nil {
+			retErr = err
+		}
+	}()
 
 	return c.writeTicksCSV(csvWriter, instrument, columns, ticks)
 }
@@ -79,9 +97,14 @@ func WriteTicks(outputPath string, instrument dukascopy.Instrument, columns []st
 	return DefaultConfig().WriteTicks(outputPath, instrument, columns, ticks)
 }
 
-func (c *Config) WriteTicksToWriter(w io.Writer, instrument dukascopy.Instrument, columns []string, ticks []dukascopy.Tick) error {
+func (c *Config) WriteTicksToWriter(w io.Writer, instrument dukascopy.Instrument, columns []string, ticks []dukascopy.Tick) (retErr error) {
 	csvWriter := c.csvWriterFactory(w)
-	defer csvWriter.Flush()
+	defer func() {
+		csvWriter.Flush()
+		if err := csvWriter.Error(); err != nil && retErr == nil {
+			retErr = err
+		}
+	}()
 
 	return c.writeTicksCSV(csvWriter, instrument, columns, ticks)
 }
@@ -90,9 +113,14 @@ func WriteTicksToWriter(w io.Writer, instrument dukascopy.Instrument, columns []
 	return DefaultConfig().WriteTicksToWriter(w, instrument, columns, ticks)
 }
 
-func (c *Config) WriteTicksRowsToWriter(w io.Writer, instrument dukascopy.Instrument, columns []string, ticks []dukascopy.Tick) error {
+func (c *Config) WriteTicksRowsToWriter(w io.Writer, instrument dukascopy.Instrument, columns []string, ticks []dukascopy.Tick) (retErr error) {
 	csvWriter := c.csvWriterFactory(w)
-	defer csvWriter.Flush()
+	defer func() {
+		csvWriter.Flush()
+		if err := csvWriter.Error(); err != nil && retErr == nil {
+			retErr = err
+		}
+	}()
 
 	return c.writeTicksCSVRows(csvWriter, instrument, columns, ticks, false)
 }

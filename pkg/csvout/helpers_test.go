@@ -250,6 +250,26 @@ func TestFormattingAndInferenceHelpers(t *testing.T) {
 	) {
 		t.Fatal("expected Good Friday daytime closure to be classified as expected for fx symbols")
 	}
+	// Equity holiday tests
+	estZone := time.FixedZone("EST", -5*60*60)
+	if !IsExpectedGapForProfile(
+		time.Date(2024, 3, 29, 9, 30, 0, 0, estZone),
+		time.Date(2024, 3, 29, 16, 0, 0, 0, estZone),
+		time.Minute,
+		"AAPLUSUSD",
+		MarketProfileAuto,
+	) {
+		t.Fatal("expected Good Friday daytime closure to be expected for equity symbols")
+	}
+	if !IsExpectedGapForProfile(
+		time.Date(2024, 11, 28, 13, 0, 0, 0, estZone),
+		time.Date(2024, 11, 28, 16, 0, 0, 0, estZone),
+		time.Minute,
+		"AAPLUSUSD",
+		MarketProfileAuto,
+	) {
+		t.Fatal("expected Thanksgiving Day early close afternoon gap to be expected for equity symbols")
+	}
 	if got := formatPrice(1.23456, 3); got != "1.235" {
 		t.Fatalf("unexpected formatted price: %q", got)
 	}

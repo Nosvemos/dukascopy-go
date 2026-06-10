@@ -47,8 +47,11 @@ def _load_library():
     except Exception as e:
         raise OSError(f"Failed to load shared library '{lib_path}': {e}")
 
+import threading
+
 # Initialize the library
 _lib = None
+_lib_lock = threading.Lock()
 
 def _bind_library_functions(lib):
     # Configure DownloadData
@@ -60,7 +63,14 @@ def _bind_library_functions(lib):
         ctypes.c_char_p, # toDate
         ctypes.c_char_p, # outputPath
         ctypes.c_char_p, # engine
-        ctypes.c_int     # priceScale
+        ctypes.c_int,    # priceScale
+        ctypes.c_char_p, # profile
+        ctypes.c_char_p, # timezone
+        ctypes.c_char_p, # customColumns
+        ctypes.c_int,    # resume
+        ctypes.c_int,    # parallelism
+        ctypes.c_char_p, # partition
+        ctypes.c_char_p  # fillGaps
     ]
     lib.DownloadData.restype = ctypes.c_void_p
 
@@ -100,7 +110,14 @@ def download(
     to_date,
     side: str = 'BID',
     engine: str = 'jetta',
-    price_scale: int = 5
+    price_scale: int = 5,
+    profile: str = 'simple',
+    timezone: str = 'UTC',
+    custom_columns: str = '',
+    resume: bool = False,
+    parallelism: int = 1,
+    partition: str = 'none',
+    fill_gaps: str = 'none'
 ):
     """
     Downloads historical market data from Dukascopy using the high-speed Go downloader engine.
@@ -114,14 +131,23 @@ def download(
         side (str): Price side, either 'BID' or 'ASK'. Default is 'BID'.
         engine (str): Downloader engine, either 'jetta' or 'datafeed'. Default is 'jetta'.
         price_scale (int): Decimal price scale/pip scale of the instrument. Default is 5.
+        profile (str): Column profile, 'simple', 'full', or 'fused'. Default is 'simple'.
+        timezone (str): Output timezone location, e.g., 'America/New_York', 'UTC'. Default is 'UTC'.
+        custom_columns (str): Comma-separated list of columns. Default is ''.
+        resume (bool): In-place delta sync / resumed cache download. Default is False.
+        parallelism (int): Number of parallel partition downloader workers. Default is 1.
+        partition (str): Partition mode: 'none', 'auto', 'day', 'week', etc. Default is 'none'.
+        fill_gaps (str): Gap-filling mode: 'none', 'forward'. Default is 'none'.
 
     Raises:
         DukascopyError: If the download fails or parameter validation fails.
     """
     global _lib
     if _lib is None:
-        _lib = _load_library()
-        _bind_library_functions(_lib)
+        with _lib_lock:
+            if _lib is None:
+                _lib = _load_library()
+                _bind_library_functions(_lib)
 
     # Convert datetime to ISO-8601 string
     if isinstance(from_date, datetime):
@@ -147,6 +173,13 @@ def download(
     c_output_path = output_path.encode('utf-8')
     c_engine = engine.lower().encode('utf-8')
     c_price_scale = ctypes.c_int(price_scale)
+    c_profile = profile.lower().encode('utf-8')
+    c_timezone = timezone.encode('utf-8')
+    c_custom_columns = custom_columns.encode('utf-8')
+    c_resume = ctypes.c_int(1 if resume else 0)
+    c_parallelism = ctypes.c_int(parallelism)
+    c_partition = partition.lower().encode('utf-8')
+    c_fill_gaps = fill_gaps.lower().encode('utf-8')
 
     # Call CGO function
     err_ptr = _lib.DownloadData(
@@ -157,7 +190,14 @@ def download(
         c_to_date,
         c_output_path,
         c_engine,
-        c_price_scale
+        c_price_scale,
+        c_profile,
+        c_timezone,
+        c_custom_columns,
+        c_resume,
+        c_parallelism,
+        c_partition,
+        c_fill_gaps
     )
 
     # If the returned pointer is not NULL, an error occurred
@@ -204,8 +244,10 @@ def db_load(
     """
     global _lib
     if _lib is None:
-        _lib = _load_library()
-        _bind_library_functions(_lib)
+        with _lib_lock:
+            if _lib is None:
+                _lib = _load_library()
+                _bind_library_functions(_lib)
 
     # Encode arguments to C-compatible byte strings
     c_db_type = db_type.encode('utf-8')
@@ -275,7 +317,14 @@ async def download_async(
     to_date,
     side: str = 'BID',
     engine: str = 'jetta',
-    price_scale: int = 5
+    price_scale: int = 5,
+    profile: str = 'simple',
+    timezone: str = 'UTC',
+    custom_columns: str = '',
+    resume: bool = False,
+    parallelism: int = 1,
+    partition: str = 'none',
+    fill_gaps: str = 'none'
 ) -> None:
     """
     Async wrapper around download().
@@ -297,6 +346,13 @@ async def download_async(
         side=side,
         engine=engine,
         price_scale=price_scale,
+        profile=profile,
+        timezone=timezone,
+        custom_columns=custom_columns,
+        resume=resume,
+        parallelism=parallelism,
+        partition=partition,
+        fill_gaps=fill_gaps
     )
 
 
@@ -353,7 +409,14 @@ def to_dataframe(
     side: str = 'BID',
     engine: str = 'jetta',
     price_scale: int = 5,
-    output_format: str = 'parquet'
+    output_format: str = 'parquet',
+    profile: str = 'simple',
+    timezone: str = 'UTC',
+    custom_columns: str = '',
+    resume: bool = False,
+    parallelism: int = 1,
+    partition: str = 'none',
+    fill_gaps: str = 'none'
 ):
     """
     Downloads market data and returns it as a pandas.DataFrame directly,
@@ -369,6 +432,13 @@ def to_dataframe(
         price_scale (int): Decimal price scale/pip scale of the instrument. Default is 5.
         output_format (str): 'parquet' (default, recommended for type preservation)
                              or 'csv'.
+        profile (str): Column profile, 'simple', 'full', or 'fused'. Default is 'simple'.
+        timezone (str): Output timezone location. Default is 'UTC'.
+        custom_columns (str): Comma-separated list of columns. Default is ''.
+        resume (bool): In-place delta sync / resumed cache download. Default is False.
+        parallelism (int): Number of parallel partition downloader workers. Default is 1.
+        partition (str): Partition mode. Default is 'none'.
+        fill_gaps (str): Gap-filling mode. Default is 'none'.
 
     Returns:
         pandas.DataFrame with the downloaded market data.
@@ -396,6 +466,13 @@ def to_dataframe(
             side=side,
             engine=engine,
             price_scale=price_scale,
+            profile=profile,
+            timezone=timezone,
+            custom_columns=custom_columns,
+            resume=resume,
+            parallelism=parallelism,
+            partition=partition,
+            fill_gaps=fill_gaps
         )
 
         # Read the downloaded data into a DataFrame
@@ -422,7 +499,14 @@ async def to_dataframe_async(
     side: str = 'BID',
     engine: str = 'jetta',
     price_scale: int = 5,
-    output_format: str = 'parquet'
+    output_format: str = 'parquet',
+    profile: str = 'simple',
+    timezone: str = 'UTC',
+    custom_columns: str = '',
+    resume: bool = False,
+    parallelism: int = 1,
+    partition: str = 'none',
+    fill_gaps: str = 'none'
 ):
     """
     Async wrapper around to_dataframe().
@@ -449,4 +533,11 @@ async def to_dataframe_async(
         engine=engine,
         price_scale=price_scale,
         output_format=output_format,
+        profile=profile,
+        timezone=timezone,
+        custom_columns=custom_columns,
+        resume=resume,
+        parallelism=parallelism,
+        partition=partition,
+        fill_gaps=fill_gaps
     )

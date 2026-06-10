@@ -86,6 +86,10 @@ func runSync(args []string, stdout io.Writer, stderr io.Writer) error {
 	var resume bool
 
 	if exists {
+		if strings.HasSuffix(strings.ToLower(targetPath), ".parquet") {
+			return errors.New("syncing parquet files is not supported; use partition mode for durable long-range parquet downloads")
+		}
+
 		// Target file exists! Inspect it to get the last timestamp
 		state, err := csvout.InspectExistingCSV(targetPath)
 		if err != nil {

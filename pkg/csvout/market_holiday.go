@@ -47,6 +47,10 @@ func holidayClosureWindow(timestamp time.Time, profile string) (time.Time, time.
 			start := dayStart
 			end := dayStart.Add(17 * time.Hour)
 			return start.UTC(), end.UTC(), true
+		case MarketProfileEquity:
+			start := dayStart.Add(9*time.Hour + 30*time.Minute)
+			end := dayStart.Add(16 * time.Hour)
+			return start.UTC(), end.UTC(), true
 		}
 	case marketHolidayEarlyClose:
 		switch profile {
@@ -57,6 +61,10 @@ func holidayClosureWindow(timestamp time.Time, profile string) (time.Time, time.
 		case MarketProfileFX24x5:
 			start := time.Date(local.Year(), local.Month(), local.Day(), 13, 0, 0, 0, local.Location())
 			end := time.Date(local.Year(), local.Month(), local.Day(), 17, 0, 0, 0, local.Location())
+			return start.UTC(), end.UTC(), true
+		case MarketProfileEquity:
+			start := time.Date(local.Year(), local.Month(), local.Day(), 13, 0, 0, 0, local.Location())
+			end := time.Date(local.Year(), local.Month(), local.Day(), 16, 0, 0, 0, local.Location())
 			return start.UTC(), end.UTC(), true
 		}
 	}

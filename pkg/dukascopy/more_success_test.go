@@ -9,7 +9,10 @@ import (
 func TestDownloadBarsAdditionalGranularities(t *testing.T) {
 	server := newDukascopyTestServer()
 	defer server.Close()
-	client := NewClient(server.URL, time.Second)
+	client, err := NewClient(server.URL, time.Second)
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
 	instrument := Instrument{Code: "XAU-USD"}
 	minuteFrom := time.Date(2024, 1, 2, 0, 0, 0, 0, time.UTC)
 	minuteTo := time.Date(2024, 1, 2, 1, 0, 0, 0, time.UTC)

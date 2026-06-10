@@ -68,6 +68,7 @@ const (
 	MarketProfileOTC24x5    = "otc-24x5"
 	MarketProfileCrypto24x7 = "crypto-24x7"
 	MarketProfileAlways     = "always"
+	MarketProfileEquity     = "equity-24x5"
 )
 
 func AuditCSV(path string) (FileAudit, error) {

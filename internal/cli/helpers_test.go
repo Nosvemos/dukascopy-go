@@ -457,7 +457,10 @@ func TestLoadBidAskBarsAndManifestUtilityLogic(t *testing.T) {
 	server := newCLITestServer()
 	defer server.Close()
 
-	client := dukascopy.NewClient(server.URL, time.Second)
+	client, err := dukascopy.NewClient(server.URL, time.Second)
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
 	ctx := context.Background()
 	request := dukascopy.DownloadRequest{
 		Symbol:      "xauusd",
@@ -621,7 +624,10 @@ func TestRunManifestRouterAndLoadBidAskFallback(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := dukascopy.NewClient(server.URL, time.Second)
+	client, err := dukascopy.NewClient(server.URL, time.Second)
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
 	_, bidBars, askBars, err := loadBidAskBars(context.Background(), client, dukascopy.DownloadRequest{
 		Symbol:      "xauusd",
 		Granularity: dukascopy.GranularityM1,

@@ -178,6 +178,7 @@ func runDownload(args []string, stdout io.Writer, stderr io.Writer) error {
 		loc = time.UTC
 	}
 
+	csvout.ConfigMutex.Lock()
 	csvout.OutputLocation = loc
 
 	if *timestampFormat != "" {
@@ -189,6 +190,7 @@ func runDownload(args []string, stdout io.Writer, stderr io.Writer) error {
 	if *csvDelimiter != "" {
 		runes := []rune(*csvDelimiter)
 		if len(runes) != 1 {
+			csvout.ConfigMutex.Unlock()
 			return fmt.Errorf("--csv-delimiter must be a single character, got %q", *csvDelimiter)
 		}
 		csvout.CSVDelimiter = runes[0]
@@ -198,6 +200,7 @@ func runDownload(args []string, stdout io.Writer, stderr io.Writer) error {
 
 	csvout.HideCSVHeader = *noHeader
 	csvout.FillGaps = strings.ToLower(strings.TrimSpace(*fillGaps))
+	csvout.ConfigMutex.Unlock()
 
 	if strings.TrimSpace(*symbol) == "" {
 		return errors.New("--symbol is required")
@@ -377,7 +380,11 @@ func runDownload(args []string, stdout io.Writer, stderr io.Writer) error {
 		progressEnabled = true
 	}
 
-	client := dukascopy.NewClient(*baseURL, defaultHTTPTimeout).
+	client, err := dukascopy.NewClient(*baseURL, defaultHTTPTimeout)
+	if err != nil {
+		return err
+	}
+	client = client.
 		WithEngine(engineVal).
 		WithRetries(*retries).
 		WithBackoff(*retryBackoff).

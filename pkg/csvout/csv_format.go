@@ -9,6 +9,34 @@ import (
 	"github.com/Nosvemos/dukascopy-go/pkg/dukascopy"
 )
 
+// pow10Table provides fast power-of-10 lookup without math.Pow10 overhead.
+// Indices 0..15 cover all realistic price scales (forex=5, crypto=2, etc.).
+var pow10Table = [...]float64{
+	1,
+	10,
+	100,
+	1000,
+	10000,
+	100000,
+	1000000,
+	10000000,
+	100000000,
+	1000000000,
+	10000000000,
+	100000000000,
+	1000000000000,
+	10000000000000,
+	100000000000000,
+	1000000000000000,
+}
+
+func fastPow10(scale int) float64 {
+	if scale < 0 || scale >= len(pow10Table) {
+		return math.Pow10(scale)
+	}
+	return pow10Table[scale]
+}
+
 func (c *Config) formatTime(t time.Time) string {
 	loc := c.Location
 	if loc == nil {
@@ -57,54 +85,40 @@ func formatPrimaryBarColumn(column string, scale int, bar dukascopy.Bar) (string
 }
 
 func (c *Config) formatBarColumn(column string, scale int, bid dukascopy.Bar, ask dukascopy.Bar) (string, error) {
-	roundedBidOpen := roundToScale(bid.Open, scale)
-	roundedBidHigh := roundToScale(bid.High, scale)
-	roundedBidLow := roundToScale(bid.Low, scale)
-	roundedBidClose := roundToScale(bid.Close, scale)
-	roundedAskOpen := roundToScale(ask.Open, scale)
-	roundedAskHigh := roundToScale(ask.High, scale)
-	roundedAskLow := roundToScale(ask.Low, scale)
-	roundedAskClose := roundToScale(ask.Close, scale)
-
+	// Lazy evaluation: only compute the values needed for this specific column
 	switch column {
 	case "timestamp":
 		return c.formatTime(bid.Time), nil
-	case "open":
-		return formatMidPrice(midpoint(roundedBidOpen, roundedAskOpen), scale), nil
-	case "high":
-		return formatMidPrice(midpoint(roundedBidHigh, roundedAskHigh), scale), nil
-	case "low":
-		return formatMidPrice(midpoint(roundedBidLow, roundedAskLow), scale), nil
-	case "close":
-		return formatMidPrice(midpoint(roundedBidClose, roundedAskClose), scale), nil
+	case "open", "high", "low", "close":
+		return formatMidColumn(column, scale, bid, ask), nil
 	case "mid_open":
-		return formatMidPrice(midpoint(roundedBidOpen, roundedAskOpen), scale), nil
+		return formatMidColumn("open", scale, bid, ask), nil
 	case "mid_high":
-		return formatMidPrice(midpoint(roundedBidHigh, roundedAskHigh), scale), nil
+		return formatMidColumn("high", scale, bid, ask), nil
 	case "mid_low":
-		return formatMidPrice(midpoint(roundedBidLow, roundedAskLow), scale), nil
+		return formatMidColumn("low", scale, bid, ask), nil
 	case "mid_close":
-		return formatMidPrice(midpoint(roundedBidClose, roundedAskClose), scale), nil
+		return formatMidColumn("close", scale, bid, ask), nil
 	case "spread":
-		return formatPrice(roundedAskClose-roundedBidClose, scale), nil
+		return formatPrice(roundToScale(ask.Close, scale)-roundToScale(bid.Close, scale), scale), nil
 	case "volume":
 		return formatVolume(bid.Volume), nil
 	case "bid_open":
-		return formatPrice(roundedBidOpen, scale), nil
+		return formatPrice(roundToScale(bid.Open, scale), scale), nil
 	case "bid_high":
-		return formatPrice(roundedBidHigh, scale), nil
+		return formatPrice(roundToScale(bid.High, scale), scale), nil
 	case "bid_low":
-		return formatPrice(roundedBidLow, scale), nil
+		return formatPrice(roundToScale(bid.Low, scale), scale), nil
 	case "bid_close":
-		return formatPrice(roundedBidClose, scale), nil
+		return formatPrice(roundToScale(bid.Close, scale), scale), nil
 	case "ask_open":
-		return formatPrice(roundedAskOpen, scale), nil
+		return formatPrice(roundToScale(ask.Open, scale), scale), nil
 	case "ask_high":
-		return formatPrice(roundedAskHigh, scale), nil
+		return formatPrice(roundToScale(ask.High, scale), scale), nil
 	case "ask_low":
-		return formatPrice(roundedAskLow, scale), nil
+		return formatPrice(roundToScale(ask.Low, scale), scale), nil
 	case "ask_close":
-		return formatPrice(roundedAskClose, scale), nil
+		return formatPrice(roundToScale(ask.Close, scale), scale), nil
 	default:
 		return "", fmt.Errorf("unsupported bar column %q", column)
 	}
@@ -149,7 +163,7 @@ func formatMidPrice(value float64, scale int) string {
 	if precision < 0 {
 		precision = -1
 	}
-	factor := math.Pow10(precision)
+	factor := fastPow10(precision)
 	rounded := math.Round(value*factor) / factor
 	return strconv.FormatFloat(rounded, 'f', -1, 64)
 }
@@ -166,8 +180,22 @@ func roundToScale(value float64, scale int) float64 {
 	if scale < 0 {
 		return value
 	}
-	factor := math.Pow10(scale)
+	factor := fastPow10(scale)
 	return math.Round(value*factor) / factor
+}
+
+// formatMidColumn lazily computes a single mid-price column without pre-computing all 8 rounded values.
+func formatMidColumn(column string, scale int, bid dukascopy.Bar, ask dukascopy.Bar) string {
+	switch column {
+	case "open":
+		return formatMidPrice(midpoint(roundToScale(bid.Open, scale), roundToScale(ask.Open, scale)), scale)
+	case "high":
+		return formatMidPrice(midpoint(roundToScale(bid.High, scale), roundToScale(ask.High, scale)), scale)
+	case "low":
+		return formatMidPrice(midpoint(roundToScale(bid.Low, scale), roundToScale(ask.Low, scale)), scale)
+	default: // "close"
+		return formatMidPrice(midpoint(roundToScale(bid.Close, scale), roundToScale(ask.Close, scale)), scale)
+	}
 }
 
 type combinedBarRow struct {

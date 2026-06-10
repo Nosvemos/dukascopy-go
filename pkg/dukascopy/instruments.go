@@ -101,14 +101,57 @@ func IsMarketClosed(symbol string, t time.Time) bool {
 	weekday := t.Weekday()
 	hour := t.Hour()
 
-	if weekday == time.Friday {
-		return hour >= 22
+	if weekday == time.Friday && hour >= 22 {
+		return true
 	}
 	if weekday == time.Saturday {
 		return true
 	}
-	if weekday == time.Sunday {
-		return hour < 22
+	if weekday == time.Sunday && hour < 22 {
+		return true
+	}
+
+	if looksLikeEquitySymbol(symbol) {
+		loc, err := time.LoadLocation("America/New_York")
+		if err == nil {
+			local := t.In(loc)
+			localWeekday := local.Weekday()
+			if localWeekday == time.Saturday || localWeekday == time.Sunday {
+				return true
+			}
+			localHour := local.Hour()
+			localMin := local.Minute()
+			if localHour < 9 || (localHour == 9 && localMin < 30) || localHour >= 16 {
+				return true
+			}
+		} else {
+			// Fallback to UTC range 13:00 - 21:00
+			if hour < 13 || hour >= 21 {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
+func looksLikeEquitySymbol(symbol string) bool {
+	symbol = strings.ToUpper(strings.TrimSpace(symbol))
+	replacer := strings.NewReplacer("/", "", "-", "", "_", "", " ", "", ".", "")
+	symbol = replacer.Replace(symbol)
+	if symbol == "" {
+		return false
+	}
+	if strings.Contains(symbol, "IDX") {
+		return true
+	}
+	suffixes := []string{
+		"USUSD", "DEEUR", "FREUR", "GBRGBP", "JPNJPY", "CHECHF", "NLDEUR", "ITAEUR", "SWESEK", "ZAFZAR", "SGPSGD",
+	}
+	for _, suffix := range suffixes {
+		if strings.HasSuffix(symbol, suffix) {
+			return true
+		}
 	}
 	return false
 }

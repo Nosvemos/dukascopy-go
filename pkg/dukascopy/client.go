@@ -1,6 +1,7 @@
 package dukascopy
 
 import (
+	"fmt"
 	"net/http"
 	"net/url"
 	"strings"
@@ -122,15 +123,22 @@ type Client struct {
 	engine       Engine
 }
 
-func NewClient(rawBaseURL string, timeout time.Duration) *Client {
+func NewClient(rawBaseURL string, timeout time.Duration) (*Client, error) {
 	parsed, err := url.Parse(strings.TrimRight(strings.TrimSpace(rawBaseURL), "/"))
 	if err != nil {
-		panic(err)
+		return nil, fmt.Errorf("dukascopy: parse base url %q: %w", rawBaseURL, err)
 	}
 
 	pool := &ProxyPool{}
 	transport := &http.Transport{
-		Proxy: pool.GetNextProxy,
+		Proxy:                 pool.GetNextProxy,
+		MaxIdleConnsPerHost:   16,
+		MaxConnsPerHost:       32,
+		IdleConnTimeout:       90 * time.Second,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
+		DisableCompression:    false,
+		ForceAttemptHTTP2:     true,
 	}
 
 	return &Client{
@@ -143,7 +151,7 @@ func NewClient(rawBaseURL string, timeout time.Duration) *Client {
 		maxRetries: 3,
 		backoff:    500 * time.Millisecond,
 		engine:     EngineJetta,
-	}
+	}, nil
 }
 
 func (c *Client) WithEngine(engine Engine) *Client {

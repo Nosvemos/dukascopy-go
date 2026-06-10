@@ -9,7 +9,7 @@ import (
 	"github.com/Nosvemos/dukascopy-go/pkg/dukascopy"
 )
 
-func writeTicksJSONL(outputPath string, instrument dukascopy.Instrument, columns []string, ticks []dukascopy.Tick) error {
+func writeTicksJSONL(outputPath string, instrument dukascopy.Instrument, columns []string, ticks []dukascopy.Tick) (retErr error) {
 	if err := ensureParentDir(outputPath); err != nil {
 		return err
 	}
@@ -17,7 +17,11 @@ func writeTicksJSONL(outputPath string, instrument dukascopy.Instrument, columns
 	if err != nil {
 		return err
 	}
-	defer file.Close()
+	defer func() {
+		if err := file.Close(); err != nil && retErr == nil {
+			retErr = err
+		}
+	}()
 	return WriteTicksJSONLToWriter(file, instrument, columns, ticks)
 }
 
@@ -40,7 +44,7 @@ func WriteTicksJSONLToWriter(w io.Writer, instrument dukascopy.Instrument, colum
 	return nil
 }
 
-func writeBarsJSONL(outputPath string, instrument dukascopy.Instrument, columns []string, primaryBars []dukascopy.Bar, bidBars []dukascopy.Bar, askBars []dukascopy.Bar) error {
+func writeBarsJSONL(outputPath string, instrument dukascopy.Instrument, columns []string, primaryBars []dukascopy.Bar, bidBars []dukascopy.Bar, askBars []dukascopy.Bar) (retErr error) {
 	if err := ensureParentDir(outputPath); err != nil {
 		return err
 	}
@@ -48,7 +52,11 @@ func writeBarsJSONL(outputPath string, instrument dukascopy.Instrument, columns 
 	if err != nil {
 		return err
 	}
-	defer file.Close()
+	defer func() {
+		if err := file.Close(); err != nil && retErr == nil {
+			retErr = err
+		}
+	}()
 	return WriteBarsJSONLToWriter(file, instrument, columns, primaryBars, bidBars, askBars)
 }
 

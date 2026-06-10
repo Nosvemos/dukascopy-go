@@ -60,7 +60,11 @@ func TestClientDatafeedEngine(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewClient(server.URL, 5*time.Second).WithEngine(EngineDatafeed)
+	client, err := NewClient(server.URL, 5*time.Second)
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	client = client.WithEngine(EngineDatafeed)
 
 	// 1. Download ticks
 	ctx := context.Background()

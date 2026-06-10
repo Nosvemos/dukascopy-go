@@ -59,12 +59,15 @@ func TestClientErrorBranches(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewClient(server.URL, time.Second)
+	client, err := NewClient(server.URL, time.Second)
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
 	if err := client.getJSON(context.Background(), []string{"v1", "bad"}, &map[string]any{}); err == nil {
 		t.Fatal("expected non-retryable HTTP error")
 	}
 
-	_, err := client.Download(context.Background(), DownloadRequest{
+	_, err = client.Download(context.Background(), DownloadRequest{
 		Symbol:      "xauusd",
 		Granularity: GranularityM1,
 		Side:        PriceSide("wat"),

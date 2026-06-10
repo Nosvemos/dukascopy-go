@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"compress/gzip"
 	"context"
 	"database/sql"
 	"encoding/csv"
@@ -25,8 +26,9 @@ func ingestPostgres(
 	createHypertable bool,
 	chunkInterval string,
 ) error {
-	if !strings.HasSuffix(strings.ToLower(inputPath), ".csv") {
-		return fmt.Errorf("postgres ingestion currently only supports .csv files")
+	lower := strings.ToLower(inputPath)
+	if !strings.HasSuffix(lower, ".csv") && !strings.HasSuffix(lower, ".csv.gz") {
+		return fmt.Errorf("unsupported file type for postgres ingestion: %q (supported: .csv, .csv.gz)", inputPath)
 	}
 
 	db, err := sql.Open("postgres", dbURL)
@@ -74,7 +76,17 @@ func ingestPostgres(
 	info, _ := f.Stat()
 	sizeMB := float64(info.Size()) / (1024 * 1024)
 
-	reader := csv.NewReader(f)
+	var r io.Reader = f
+	if strings.HasSuffix(lower, ".gz") {
+		gz, err := gzip.NewReader(f)
+		if err != nil {
+			return fmt.Errorf("failed to open gzip reader: %w", err)
+		}
+		defer gz.Close()
+		r = gz
+	}
+
+	reader := csv.NewReader(r)
 	header, err := reader.Read()
 	if err != nil {
 		return fmt.Errorf("failed to read CSV header: %w", err)

@@ -26,6 +26,11 @@ go test ./tests/e2e -v
 go test ./...
 ```
 
+For concurrency and thread-safety validation (recommended after SDK or global config changes):
+```bash
+go test -race ./...
+```
+
 ## Coverage
 
 ```bash

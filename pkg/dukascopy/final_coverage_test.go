@@ -11,13 +11,11 @@ import (
 )
 
 func TestClientAdditionalBranches(t *testing.T) {
-	t.Run("new client panics on bad URL", func(t *testing.T) {
-		defer func() {
-			if recover() == nil {
-				t.Fatal("expected NewClient panic for invalid URL")
-			}
-		}()
-		_ = NewClient("http://[::1", time.Second)
+	t.Run("new client returns error on bad URL", func(t *testing.T) {
+		_, err := NewClient("http://[::1", time.Second)
+		if err == nil {
+			t.Fatal("expected NewClient error for invalid URL")
+		}
 	})
 
 	t.Run("invalid json and symbol branches", func(t *testing.T) {
@@ -32,7 +30,10 @@ func TestClientAdditionalBranches(t *testing.T) {
 		}))
 		defer server.Close()
 
-		client := NewClient(server.URL, time.Second)
+		client, err := NewClient(server.URL, time.Second)
+		if err != nil {
+			t.Fatalf("NewClient: %v", err)
+		}
 		if _, err := client.ListInstruments(context.Background()); err == nil {
 			t.Fatal("expected invalid JSON error")
 		}
@@ -49,8 +50,11 @@ func TestClientAdditionalBranches(t *testing.T) {
 		}))
 		defer server.Close()
 
-		client := NewClient(server.URL, time.Second)
-		_, err := client.Download(context.Background(), DownloadRequest{
+		client, err := NewClient(server.URL, time.Second)
+		if err != nil {
+			t.Fatalf("NewClient: %v", err)
+		}
+		_, err = client.Download(context.Background(), DownloadRequest{
 			Symbol:      "eurusd",
 			Granularity: GranularityM1,
 			Side:        PriceSideBid,
@@ -73,14 +77,21 @@ func TestClientAdditionalBranches(t *testing.T) {
 	})
 
 	t.Run("waitForRateLimit no wait branch", func(t *testing.T) {
-		client := NewClient("https://example.test", time.Second).WithRateLimit(5 * time.Millisecond)
+		client, err := NewClient("https://example.test", time.Second)
+		if err != nil {
+			t.Fatalf("NewClient: %v", err)
+		}
+		client = client.WithRateLimit(5 * time.Millisecond)
 		if err := client.waitForRateLimit(context.Background()); err != nil {
 			t.Fatalf("waitForRateLimit returned error: %v", err)
 		}
 	})
 
 	t.Run("client options and proxy loader", func(t *testing.T) {
-		client := NewClient("https://example.test", time.Second)
+		client, err := NewClient("https://example.test", time.Second)
+		if err != nil {
+			t.Fatalf("NewClient: %v", err)
+		}
 		client.WithForceUpdate(true)
 		client.WithEngine(EngineJetta)
 		client.WithEngine("")
@@ -120,4 +131,3 @@ func TestClientAdditionalBranches(t *testing.T) {
 		}
 	})
 }
-

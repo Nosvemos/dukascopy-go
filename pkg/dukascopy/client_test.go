@@ -44,7 +44,11 @@ func TestClientGetJSONRetriesTransientStatus(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewClient(server.URL, time.Second).WithRetries(1).WithBackoff(time.Millisecond)
+	client, err := NewClient(server.URL, time.Second)
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	client = client.WithRetries(1).WithBackoff(time.Millisecond)
 	var payload instrumentsResponse
 	if err := client.getJSON(context.Background(), []string{"v1", "instruments"}, &payload); err != nil {
 		t.Fatalf("getJSON returned error: %v", err)
@@ -71,7 +75,11 @@ func TestClientGetJSONRetriesWrappedServerErrorBody(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewClient(server.URL, time.Second).WithRetries(1).WithBackoff(time.Millisecond)
+	client, err := NewClient(server.URL, time.Second)
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	client = client.WithRetries(1).WithBackoff(time.Millisecond)
 	var payload instrumentsResponse
 	if err := client.getJSON(context.Background(), []string{"v1", "instruments"}, &payload); err != nil {
 		t.Fatalf("getJSON returned error: %v", err)
@@ -82,14 +90,17 @@ func TestClientGetJSONRetriesWrappedServerErrorBody(t *testing.T) {
 }
 
 func TestWaitForRateLimitHonorsContextCancellation(t *testing.T) {
-	client := NewClient("https://example.test", time.Second).WithRateLimit(50 * time.Millisecond)
+	client, err := NewClient("https://example.test", time.Second)
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	client = client.WithRateLimit(50 * time.Millisecond)
 	client.nextSlot = time.Now().Add(100 * time.Millisecond)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	err := client.waitForRateLimit(ctx)
-	if err == nil {
+	if err := client.waitForRateLimit(ctx); err == nil {
 		t.Fatal("expected context cancellation error")
 	}
 }
@@ -136,6 +147,27 @@ func TestIsMarketClosed(t *testing.T) {
 			t.Errorf("IsMarketClosed(EURUSD, %s) = %v, want %v", tc.time.Format(time.RFC3339), got, tc.want)
 		}
 	}
+
+	// Test Equity symbol market hours (AAPLUSUSD)
+	// Open hours on Monday: 09:30 - 16:00 EST.
+	// Since May 25, 2026 is a Monday:
+	// 09:30 EST on May 25, 2026 is 13:30 UTC.
+	// 16:00 EST on May 25, 2026 is 20:00 UTC.
+	equityTests := []struct {
+		time time.Time
+		want bool
+	}{
+		{time: time.Date(2026, 5, 25, 13, 29, 0, 0, time.UTC), want: true},  // Mon 09:29 EST - closed
+		{time: time.Date(2026, 5, 25, 13, 31, 0, 0, time.UTC), want: false}, // Mon 09:31 EST - open
+		{time: time.Date(2026, 5, 25, 19, 59, 0, 0, time.UTC), want: false}, // Mon 15:59 EST - open
+		{time: time.Date(2026, 5, 25, 20, 01, 0, 0, time.UTC), want: true},  // Mon 16:01 EST - closed
+		{time: time.Date(2026, 5, 24, 15, 0, 0, 0, time.UTC), want: true},   // Sun 11:00 EST - closed
+	}
+	for _, tc := range equityTests {
+		if got := IsMarketClosed("AAPLUSUSD", tc.time); got != tc.want {
+			t.Errorf("IsMarketClosed(AAPLUSUSD, %s) = %v, want %v", tc.time.Format(time.RFC3339), got, tc.want)
+		}
+	}
 }
 
 func TestProxyPool(t *testing.T) {
@@ -152,7 +184,7 @@ func TestProxyPool(t *testing.T) {
 	}
 
 	req, _ := http.NewRequest("GET", "https://example.com", nil)
-	
+
 	// First proxy: 127.0.0.1:8080 (inferred http://)
 	u1, err := pool.GetNextProxy(req)
 	if err != nil || u1 == nil || u1.Host != "127.0.0.1:8080" || u1.Scheme != "http" {
@@ -190,5 +222,3 @@ func TestLocalCache(t *testing.T) {
 		t.Fatalf("failed to load fresh cached instruments: %+v, ok: %t", cached, ok)
 	}
 }
-
-

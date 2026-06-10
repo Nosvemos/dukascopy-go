@@ -156,7 +156,10 @@ func TestDownloadAndResumeGapBranches(t *testing.T) {
 	t.Run("loadBidAskBars fallback errors", func(t *testing.T) {
 		server := newCLITestServer()
 		defer server.Close()
-		client := dukascopy.NewClient(server.URL, time.Second)
+		client, err := dukascopy.NewClient(server.URL, time.Second)
+		if err != nil {
+			t.Fatalf("NewClient: %v", err)
+		}
 		request := dukascopy.DownloadRequest{
 			Symbol:      "xauusd",
 			Granularity: dukascopy.GranularityTick,
@@ -168,7 +171,11 @@ func TestDownloadAndResumeGapBranches(t *testing.T) {
 			t.Fatal("expected bid/ask fallback aggregation error")
 		}
 
-		badClient := dukascopy.NewClient("http://127.0.0.1:1", time.Second).WithRetries(0)
+		badClient, err := dukascopy.NewClient("http://127.0.0.1:1", time.Second)
+		if err != nil {
+			t.Fatalf("NewClient: %v", err)
+		}
+		badClient = badClient.WithRetries(0)
 		request.Granularity = dukascopy.GranularityM1
 		if _, _, _, err := loadBidAskBars(context.Background(), badClient, request); err == nil {
 			t.Fatal("expected fallback download error")

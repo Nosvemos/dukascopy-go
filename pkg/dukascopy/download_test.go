@@ -14,7 +14,10 @@ func TestListInstrumentsAndDownloadFlows(t *testing.T) {
 	server := newDukascopyTestServer()
 	defer server.Close()
 
-	client := NewClient(server.URL, time.Second)
+	client, err := NewClient(server.URL, time.Second)
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
 	ctx := context.Background()
 
 	instruments, err := client.ListInstruments(ctx)
@@ -96,7 +99,11 @@ func TestListInstrumentsAndDownloadFlows(t *testing.T) {
 }
 
 func TestEmitProgressAndOptionSetters(t *testing.T) {
-	client := NewClient("https://example.test", time.Second).
+	client, err := NewClient("https://example.test", time.Second)
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	client = client.
 		WithRetries(-1).
 		WithBackoff(0).
 		WithRateLimit(-1)
@@ -154,7 +161,10 @@ func TestListInstrumentsCachesSuccessfulResponses(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewClient(server.URL, time.Second)
+	client, err := NewClient(server.URL, time.Second)
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
 	ctx := context.Background()
 
 	for range 3 {

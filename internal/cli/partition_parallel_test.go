@@ -58,7 +58,10 @@ func TestPartitionedDownloadParallelReuseAndReassemble(t *testing.T) {
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
-	client := dukascopy.NewClient(server.URL, time.Second)
+	client, err := dukascopy.NewClient(server.URL, time.Second)
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
 	if err := runPartitionedDownload(
 		context.Background(),
 		client,
