@@ -15,9 +15,11 @@ const (
 	dbClickHouse = "clickhouse"
 	dbInfluxDB   = "influxdb"
 	dbPostgres   = "postgres"
+	dbQuestDB    = "questdb"
 
 	defaultClickHouseBatchRows = 10000
 	defaultInfluxDBBatchRows   = 5000
+	defaultQuestDBBatchRows    = 5000
 )
 
 // runDBLoad is the CLI entry-point for the `db-load` command.
@@ -25,24 +27,27 @@ func runDBLoad(args []string, stdout io.Writer, stderr io.Writer) error {
 	fs := flag.NewFlagSet("db-load", flag.ContinueOnError)
 	fs.SetOutput(stdout)
 	fs.Usage = func() {
-		fmt.Fprintf(stdout, "%sdb-load:%s Ingest a CSV or Parquet file directly into ClickHouse or InfluxDB\n\n", colorize(colorCyan), colorize(colorReset))
+		fmt.Fprintf(stdout, "%sdb-load:%s Ingest a CSV or Parquet file directly into ClickHouse, InfluxDB, PostgreSQL, or QuestDB\n\n", colorize(colorCyan), colorize(colorReset))
 		fmt.Fprint(stdout, "Usage:\n  dukascopy-go db-load [options]\n\nOptions:\n")
 		fs.PrintDefaults()
-		fmt.Fprint(stdout, "\nExamples:\n  dukascopy-go db-load --input ./eurusd_m1.csv --db clickhouse --url http://localhost:8123 --table eurusd_m1\n  dukascopy-go db-load --input ./eurusd_tick.csv --db influxdb --url http://localhost:8086 --org myorg --bucket mybucket --token mytoken --table eurusd_tick --symbol eurusd\n")
+		fmt.Fprint(stdout, "\nExamples:\n  dukascopy-go db-load --input ./eurusd_m1.csv --db clickhouse --url http://localhost:8123 --table eurusd_m1\n  dukascopy-go db-load --input ./eurusd_tick.csv --db influxdb --url http://localhost:8086 --org myorg --bucket mybucket --token mytoken --table eurusd_tick --symbol eurusd\n  dukascopy-go db-load --input ./xauusd.csv --db questdb --url tcp://localhost:9009 --table xauusd\n  dukascopy-go db-load --input ./eurusd_m1.csv --db postgres --url postgres://user:pass@localhost:5432/db --table eurusd_m1 --create-hypertable\n")
 	}
 
 	input := fs.String("input", "", "path to the local CSV or Parquet file to ingest (required)")
-	dbType := fs.String("db", "", "target database: clickhouse, influxdb, or postgres (required)")
-	dbURL := fs.String("url", "", "database URL, e.g. http://localhost:8123 or postgres://user:pass@localhost:5432/dbname (required)")
-	table := fs.String("table", "", "target table or InfluxDB measurement name (required)")
+	dbType := fs.String("db", "", "target database: clickhouse, influxdb, postgres, or questdb (required)")
+	dbURL := fs.String("url", "", "database URL, e.g. http://localhost:8123 or tcp://localhost:9009 or postgres://user:pass@localhost:5432/dbname (required)")
+	table := fs.String("table", "", "target table or measurement name (required)")
 	user := fs.String("user", "default", "ClickHouse user (optional)")
 	password := fs.String("password", "", "ClickHouse password or InfluxDB token (optional)")
 	token := fs.String("token", "", "InfluxDB API token (takes precedence over --password)")
 	org := fs.String("org", "", "InfluxDB organization (required for InfluxDB)")
 	bucket := fs.String("bucket", "", "InfluxDB bucket (required for InfluxDB)")
-	symbol := fs.String("symbol", "", "instrument symbol hint for tagging InfluxDB rows")
+	symbol := fs.String("symbol", "", "instrument symbol hint for tagging rows (InfluxDB, QuestDB)")
 	batch := fs.Int("batch", 0, "rows per HTTP batch (0 = use default for target db)")
 	timeout := fs.Duration("timeout", 120*time.Second, "HTTP request timeout for each batch")
+	ilpPort := fs.Int("ilp-port", 0, "QuestDB ILP TCP port override (0 = auto; default 9009 for TCP, 9000 for HTTP)")
+	createHypertable := fs.Bool("create-hypertable", true, "auto-create TimescaleDB hypertable when detected in PostgreSQL")
+	chunkInterval := fs.String("chunk-interval", "", "TimescaleDB hypertable chunk interval override (e.g. '1 day', '7 days'; empty = auto-detect)")
 
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -53,7 +58,7 @@ func runDBLoad(args []string, stdout io.Writer, stderr io.Writer) error {
 		return errors.New("--input is required")
 	}
 	if strings.TrimSpace(*dbType) == "" {
-		return errors.New("--db is required (clickhouse or influxdb)")
+		return errors.New("--db is required (clickhouse, influxdb, postgres, or questdb)")
 	}
 	if strings.TrimSpace(*dbURL) == "" {
 		return errors.New("--url is required")
@@ -63,8 +68,8 @@ func runDBLoad(args []string, stdout io.Writer, stderr io.Writer) error {
 	}
 
 	dbTypeLower := strings.ToLower(strings.TrimSpace(*dbType))
-	if dbTypeLower != dbClickHouse && dbTypeLower != dbInfluxDB && dbTypeLower != dbPostgres {
-		return fmt.Errorf("unknown --db %q (supported: clickhouse, influxdb, postgres)", *dbType)
+	if dbTypeLower != dbClickHouse && dbTypeLower != dbInfluxDB && dbTypeLower != dbPostgres && dbTypeLower != dbQuestDB {
+		return fmt.Errorf("unknown --db %q (supported: clickhouse, influxdb, postgres, questdb)", *dbType)
 	}
 
 	inputPath := strings.TrimSpace(*input)
@@ -79,9 +84,12 @@ func runDBLoad(args []string, stdout io.Writer, stderr io.Writer) error {
 	// Choose batch size
 	batchSize := *batch
 	if batchSize <= 0 {
-		if dbTypeLower == dbClickHouse {
+		switch dbTypeLower {
+		case dbClickHouse:
 			batchSize = defaultClickHouseBatchRows
-		} else {
+		case dbQuestDB:
+			batchSize = defaultQuestDBBatchRows
+		default:
 			batchSize = defaultInfluxDBBatchRows
 		}
 	}
@@ -93,7 +101,7 @@ func runDBLoad(args []string, stdout io.Writer, stderr io.Writer) error {
 	case dbClickHouse:
 		return ingestClickHouse(ctx, stdout, stderr, inputPath, *dbURL, *table, *user, *password, *timeout)
 	case dbPostgres:
-		return ingestPostgres(ctx, stdout, stderr, inputPath, *dbURL, *table)
+		return ingestPostgres(ctx, stdout, stderr, inputPath, *dbURL, *table, *createHypertable, *chunkInterval)
 	case dbInfluxDB:
 		authToken := strings.TrimSpace(*token)
 		if authToken == "" {
@@ -109,6 +117,8 @@ func runDBLoad(args []string, stdout io.Writer, stderr io.Writer) error {
 			return errors.New("--bucket is required for InfluxDB")
 		}
 		return ingestInfluxDB(ctx, stdout, stderr, inputPath, *dbURL, *table, *org, *bucket, authToken, *symbol, batchSize, *timeout)
+	case dbQuestDB:
+		return ingestQuestDB(ctx, stdout, stderr, inputPath, *dbURL, *table, *ilpPort, *symbol, batchSize, *timeout)
 	}
 	return nil
 }
@@ -123,18 +133,21 @@ func buildColumnIndex(header []string) map[string]int {
 }
 
 type DBLoadOptions struct {
-	DBType    string
-	DBURL     string
-	Table     string
-	InputPath string
-	User      string
-	Password  string
-	Token     string
-	Org       string
-	Bucket    string
-	SymbolTag string
-	BatchSize int
-	Timeout   time.Duration
+	DBType           string
+	DBURL            string
+	Table            string
+	InputPath        string
+	User             string
+	Password         string
+	Token            string
+	Org              string
+	Bucket           string
+	SymbolTag        string
+	BatchSize        int
+	Timeout          time.Duration
+	ILPPort          int
+	CreateHypertable bool
+	ChunkInterval    string
 }
 
 func DBLoad(ctx context.Context, stdout io.Writer, stderr io.Writer, opt DBLoadOptions) error {
@@ -143,14 +156,16 @@ func DBLoad(ctx context.Context, stdout io.Writer, stderr io.Writer, opt DBLoadO
 	case "clickhouse":
 		return ingestClickHouse(ctx, stdout, stderr, opt.InputPath, opt.DBURL, opt.Table, opt.User, opt.Password, opt.Timeout)
 	case "postgres":
-		return ingestPostgres(ctx, stdout, stderr, opt.InputPath, opt.DBURL, opt.Table)
+		return ingestPostgres(ctx, stdout, stderr, opt.InputPath, opt.DBURL, opt.Table, opt.CreateHypertable, opt.ChunkInterval)
 	case "influxdb":
 		authToken := strings.TrimSpace(opt.Token)
 		if authToken == "" {
 			authToken = strings.TrimSpace(opt.Password)
 		}
 		return ingestInfluxDB(ctx, stdout, stderr, opt.InputPath, opt.DBURL, opt.Table, opt.Org, opt.Bucket, authToken, opt.SymbolTag, opt.BatchSize, opt.Timeout)
+	case "questdb":
+		return ingestQuestDB(ctx, stdout, stderr, opt.InputPath, opt.DBURL, opt.Table, opt.ILPPort, opt.SymbolTag, opt.BatchSize, opt.Timeout)
 	default:
-		return fmt.Errorf("unknown --db %q (supported: clickhouse, influxdb, postgres)", opt.DBType)
+		return fmt.Errorf("unknown --db %q (supported: clickhouse, influxdb, postgres, questdb)", opt.DBType)
 	}
 }

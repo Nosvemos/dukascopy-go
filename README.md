@@ -17,173 +17,141 @@
 
 ## ⚡ Why `dukascopy-go`?
 
-Compared to Node.js or Python alternatives (like `dukascopy-node`), `dukascopy-go` is built for **speed, scale, and extreme reliability**.
-
 | Feature | `dukascopy-go` | Node.js Alternatives |
 |---|---|---|
-| **Speed** | 🚀 Native Go + 64KB Sequential Buffering (~100x Faster) | 🐢 Slower V8/Node.js execution |
-| **Parities (Assets)**| 🌍 **170+ Offline Fallback database** + Online Catalog Hot-Reloading | ⚠️ Requires full online resolution |
-| **Multi-Symbol** | ✅ Comma-separated list with automatic path formatting | ❌ Single symbol only |
-| **Dependencies** | ✨ Zero (Standalone single binary) | 📦 Requires Node.js, NPM, and modules |
+| **Speed** | 🚀 Native Go + 64KB Sequential Buffering (~100× Faster) | 🐢 Slower V8/Node.js execution |
+| **Parities** | 🌍 170+ Offline Fallback Database + Online Hot-Reload | ⚠️ Requires full online resolution |
+| **Multi-Symbol** | ✅ Comma-separated batch with automatic path formatting | ❌ Single symbol only |
+| **Dependencies** | ✨ Zero — standalone single binary | 📦 Requires Node.js, NPM, modules |
 | **Delta Sync** | ✅ In-place sync to append missing slices | ❌ Restarts from scratch |
-| **Gap Filling** | ✅ Quant-grade forward-filling during market open hours | ❌ Messer gap data left as-is |
-| **Throttling** | ✅ AIMD Token-Bucket Adaptive Throttling (handles 429) | ❌ Standard fixed rate limits |
-| **Resumability** | ✅ Automatic manifest checkpoints & auto-resume | ❌ Often restarts from scratch |
-| **Real-time Stream**| ✅ Native WebSocket & Stdout (JSONL/CSV) | ⚠️ Node.js API only |
-| **SDK Support** | ✅ Public importable `pkg/`, Go library, Python wrapper | ⚠️ Node.js only |
-| **Deduplication** | ✅ In-place atomic duplicate/gap repair | ❌ Often requires Pandas/external tools |
+| **Gap Filling** | ✅ Quant-grade forward-filling with weekend/holiday awareness | ❌ Leaves gaps as-is |
+| **Throttling** | ✅ AIMD Adaptive Rate Limiting (self-corrects on 429) | ❌ Fixed rate limits |
+| **Resumability** | ✅ SHA-256 manifest checkpoints & auto-resume | ❌ Restarts from scratch |
+| **Real-time** | ✅ Native WebSocket & Stdout (JSONL/CSV) | ⚠️ Node.js API only |
+| **SDK** | ✅ Go library, Python + C wrapper | ⚠️ Node.js only |
+| **Deduplication** | ✅ In-place atomic duplicate/gap repair | ❌ Requires external tools |
 
 ---
 
 ## 🚀 Installation
 
-You don't need Go installed to run the pre-built binaries. Just grab the latest `.exe`, macOS binary, or Linux binary from the **[Releases page](https://github.com/Nosvemos/dukascopy-go/releases)**.
+Pre-built binaries are available on the **[Releases page](https://github.com/Nosvemos/dukascopy-go/releases)** — no Go required.
 
-If you have **Go 1.22+**, you can install or run it directly:
+With **Go 1.22+**:
 
 ```bash
-# Install globally
 go install github.com/Nosvemos/dukascopy-go/cmd/dukascopy-go@latest
-
-# Or run without installing
-go run github.com/Nosvemos/dukascopy-go/cmd/dukascopy-go@latest --help
-
-# Build from source
-go build -o dukascopy-go ./cmd/dukascopy-go
 ```
 
 ---
 
 ## 📖 Quick Start
 
-### 🪄 Interactive Wizard (Zero Config!)
-Don't want to learn CLI flags? Just run the binary without arguments to launch the **Interactive Setup Wizard**:
+Run without arguments to launch the **Interactive Setup Wizard**:
+
 ```bash
 dukascopy-go
 ```
 
-### 🔍 Find Instruments (170+ Supported!)
-Search for a specific instrument, or list them all. Supports live catalog hot-reloading:
+Or jump straight to the CLI:
+
 ```bash
-# Search for Turkish Lira crosses
-dukascopy-go instruments --query try
+# Search instruments
+dukascopy-go instruments --query gold
 
-# Lists all available instruments (showing up to 20 by default)
-dukascopy-go instruments
+# Download 30 days of 1-minute bars
+dukascopy-go download --symbol xauusd --timeframe m1 --last 30d --output ./xauusd.csv
 
-# Force hot-reload instruments cache online and show ALL 170+ parities
-dukascopy-go instruments --limit 0 --update
-```
+# Multi-year tick data with resume (OOM-free)
+dukascopy-go download --symbol xauusd --timeframe tick --from 2020-01-01 --to 2024-01-01 \
+  --output ./xauusd.parquet --resume --progress
 
-### 📉 Download Historical Data
-Download 1-minute gold bars to CSV using a **flexible duration** (`--last 30d`) or exact dates:
-```bash
-# Download the last 30 days of 1-minute data
-dukascopy-go download --symbol xauusd --timeframe m1 --last 30d --output ./data/xauusd-m1.csv
-
-# Multi-symbol batch downloading to directory
+# Batch-download multiple symbols
 dukascopy-go download --symbol EUR/USD,GBP/USD,BTC/USD --timeframe d1 --last 1y --output ./data/
-```
 
-**Need a massive dataset?** Use the chunked cache & resume system to download multi-year tick data with a constant, OOM-free memory footprint:
-```bash
-# Download 4 years of XAUUSD ticks — streams to disk in chunks, auto-resumes on interruption
-dukascopy-go download \
-  --symbol xauusd \
-  --timeframe tick \
-  --from 2020-01-01 \
-  --to 2024-01-01 \
-  --output ./data/xauusd_ticks.parquet \
-  --resume
-```
-
-Interrupted? Just re-run the exact same command. The manifest will detect which chunks are already on disk and skip them automatically.
-
-For parallel OHLCV bars with partitioned output:
-```bash
-dukascopy-go download \
-  --symbol xauusd \
-  --timeframe m1 \
-  --from 2020-01-01 \
-  --to 2024-01-01 \
-  --output ./data/xauusd.parquet \
-  --partition auto \
-  --parallelism 8
+# Parallel partitioned download
+dukascopy-go download --symbol xauusd --timeframe m1 --from 2020-01-01 --to 2024-01-01 \
+  --output ./xauusd.parquet --partition auto --parallelism 8
 ```
 
 ---
 
-### 📋 CLI Command Reference
-
-Below is a detailed guide to all options supported by `dukascopy-go download`:
+## 📋 Download Flags
 
 | Flag | Type | Default | Description |
 |---|---|---|---|
-| `--symbol` | `string` | *(required)* | Instrument code (e.g., `eurusd`, `xauusd`). Supports comma-separated batch lists: `eurusd,gbpusd`. |
-| `--timeframe` | `string` | `m1` | Granularity layout: `tick`, `m1`, `m3`, `m5`, `m15`, `m30`, `h1`, `h4`, `d1`, `w1`, `mn1`. |
-| `--side` | `string` | `bid` | Price side to target: `bid` or `ask`. |
-| `--output` | `string` | *(required)* | Output file or directory path. Use `.parquet` for Parquet, `.csv` for CSV, `.csv.gz` for compressed CSV, `.jsonl` for JSONL. |
-| `--last` | `duration` | `""` | Duration to download relative to now (e.g. `30d`, `6mo`, `1y`). Overrides `--from`/`--to`. |
-| `--from` | `string` | `""` | Start timestamp in `YYYY-MM-DD`, `YYYY-MM-DD HH:MM`, or ISO `RFC3339` format. |
-| `--to` | `string` | `""` | End timestamp in `YYYY-MM-DD`, `YYYY-MM-DD HH:MM`, or ISO `RFC3339` format. |
-| `--resume` | `bool` | `false` | Enable the chunked cache & resume system. Splits the range into daily chunks, writes `.part` files to `.dukascopy_cache/`, and auto-resumes from the last valid checkpoint on re-run. Ideal for multi-year tick datasets to avoid OOM. |
-| `--simple` | `bool` | `false` | Export basic columns only (reduced CSV footprint). |
-| `--full` | `bool` | `false` | Export complete Bid and Ask candlestick fields. |
-| `--fused` | `bool` | `false` | Export fused Bid and Ask fields complete with dynamic spread calculations (no mid fields). |
-| `--custom-columns` | `string` | `""` | Explicit comma-separated custom column projection list. |
-| `--progress` | `bool` | `false` | Force-enable the interactive progress TUI dashboard. |
-| `--tui-theme` | `string` | `default` | Dashboard theme: `default`, `catppuccin`, `nord`, `gruvbox`, or `dracula`. |
-| `--partition` | `string` | `none` | Partitions range into multiple files: `none`, `auto`, `hour`, `day`, `week`, `month`, `year`. |
-| `--parallelism` | `int` | `1` | Number of concurrent downloading partition workers. |
-| `--fill-gaps` | `string` | `none` | Gap filling: `none` or `forward` (forward-fills during active market sessions). |
-| `--timezone` | `string` | `UTC` | Target output timezone (e.g. `Europe/London`, `EST`, `MT4`, `MT5`). |
-| `--preset` | `string` | `""` | Custom format mappings matching backtest engines: `mt4`, `mt5`, `backtrader`, `ninjatrader`. |
-| `--engine` | `string` | `jetta` | Underlying data source: `jetta` (JSON) or `datafeed` (binary `.bi5` archives). |
+| `--symbol` | `string` | *(required)* | Instrument code. Comma-separated for batches: `eurusd,gbpusd` |
+| `--timeframe` | `string` | `m1` | `tick`, `m1`, `m3`, `m5`, `m15`, `m30`, `h1`, `h4`, `d1`, `w1`, `mn1` |
+| `--side` | `string` | `bid` | `bid` or `ask` |
+| `--output` | `string` | *(required)* | `.csv`, `.csv.gz`, `.parquet`, or `.jsonl` |
+| `--last` | `duration` | — | Relative window: `30d`, `6mo`, `1y`. Overrides `--from`/`--to` |
+| `--from` | `string` | — | `YYYY-MM-DD`, `YYYY-MM-DD HH:MM`, or RFC3339 |
+| `--to` | `string` | — | Same formats as `--from` |
+| `--resume` | `bool` | `false` | Chunked cache & resume. Splits range into daily `.part` chunks; auto-skips completed on re-run |
+| `--simple` | `bool` | `false` | Reduced column set |
+| `--full` | `bool` | `false` | Full Bid + Ask candlestick fields |
+| `--fused` | `bool` | `false` | Fused Bid/Ask with dynamic spread (no mid fields) |
+| `--custom-columns` | `string` | — | Explicit comma-separated column projection |
+| `--progress` | `bool` | auto | Force-enable interactive progress TUI |
+| `--tui-theme` | `string` | `default` | `default`, `catppuccin`, `nord`, `gruvbox`, `dracula` |
+| `--partition` | `string` | `none` | `auto`, `hour`, `day`, `week`, `month`, `year` |
+| `--parallelism` | `int` | `1` | Concurrent partition download workers |
+| `--fill-gaps` | `string` | `none` | `forward` — forward-fills during active market sessions |
+| `--timezone` | `string` | `UTC` | `Europe/London`, `EST`, `MT4`, `MT5` |
+| `--preset` | `string` | — | `mt4`, `mt5`, `backtrader`, `ninjatrader` |
+| `--engine` | `string` | `jetta` | `jetta` (JSON) or `datafeed` (`.bi5` binary) |
 
 ---
 
-## 💎 Elite Quant Enhancements
+## 💎 Core Features
 
-### 🔄 In-Place Smart Delta Sync (`sync`)
-Keep your downloaded historical files completely up to date in-place with zero duplicate or out-of-order records:
+### 🔄 Smart Delta Sync
+Keep datasets current without re-downloading. Inspects the last timestamp in-place and appends only missing data:
+
 ```bash
 dukascopy-go sync --symbol EUR/USD --output ./data/eur_usd.csv
 ```
-The sync command inspects the target file, extracts the last written timestamp, and automatically queries the missing slices up to the present moment, appending them in-place safely.
 
-### 📊 Quant-Grade Gap Filling (`--fill-gaps`)
-Unexpected liquidity gaps can corrupt backtesting results. Enable smart forward-filling to keep timeframe intervals uniform:
+### 💾 Chunked Cache & Resume
+Multi-year tick datasets stay O(1) memory. Daily `.part` chunks with SHA-256 manifests survive any interruption:
+
 ```bash
-dukascopy-go download --symbol EUR/USD --timeframe m1 --last 7d --output ./data/eur_usd.csv --fill-gaps forward
-```
-- **Forward-Fill Loop**: Missing bars are forward-filled with the previous Close price and Volume `0`.
-- **Weekend Filter**: Weekends and holiday closures are automatically detected and skipped to avoid injecting synthetic bars during expected market closures.
-
-### 🛡️ Token-Bucket Adaptive Throttling
-We designed a highly resilient AIMD-based (Additive Increase / Multiplicative Decrease) rate limiting system that self-corrects based on response status codes:
-- **Instant Backoff**: If hit with `429 Too Many Requests`, the adaptive rate limit instantly doubles (up to `5s`) to completely clear connection queues.
-- **Slow Recovery**: On successful requests, it slowly decreases the delay by `10ms` per response back to your defined base rate limit.
-
-### 💾 Chunked Cache & Resume (`--resume`)
-Downloading years of tick data no longer risks an OOM crash. Add `--resume` to split any download into daily `.part` chunks written to a local `.dukascopy_cache/` directory. A SHA-256 manifest tracks which chunks are complete, so any interruption is automatically recovered on re-run:
-```bash
-# First run — downloads chunks and writes manifest
-dukascopy-go download --symbol xauusd --timeframe tick --from 2020-01-01 --to 2024-01-01 --output ./xauusd.parquet --resume
-
-# Interrupted? Re-run the same command — already-valid chunks are skipped
-dukascopy-go download --symbol xauusd --timeframe tick --from 2020-01-01 --to 2024-01-01 --output ./xauusd.parquet --resume
+dukascopy-go download --symbol xauusd --timeframe tick --from 2020-01-01 --to 2024-01-01 \
+  --output ./xauusd.parquet --resume
 ```
 
-Manage the cache with the `manifest` subcommands:
+Manage with `manifest` subcommands: `inspect`, `verify`, `repair`, `clean-duplicates`.
+
+### 📊 Gap Filling
+Forward-fills liquidity gaps while automatically skipping weekends and holidays:
+
 ```bash
-dukascopy-go manifest inspect --symbol xauusd   # show chunk states
-dukascopy-go manifest verify  --symbol xauusd   # re-validate SHA-256 hashes
-dukascopy-go manifest repair  --symbol xauusd   # re-download corrupt/missing chunks
-dukascopy-go manifest clean   --symbol xauusd   # remove orphaned .part files
+dukascopy-go download --symbol EUR/USD --timeframe m1 --last 7d --output ./data.csv --fill-gaps forward
 ```
 
-### 🗄️ Direct Database Ingestion (`db-load`)
-Stream a downloaded CSV or Parquet file directly into your time-series database with zero intermediary drivers:
+### 🛡️ Adaptive Throttling
+AIMD rate limiter: backs off instantly on `429` (doubles up to 5s), recovers by 10ms per success.
+
+### 📈 Real-Time Streaming
+High-frequency polling engine with built-in RFC-6455 WebSocket server:
+
+```bash
+dukascopy-go live --symbol eurusd --timeframe tick --format jsonl --port 8080
+```
+
+---
+
+## 🗄️ Direct Database Ingestion
+
+Stream CSV or Parquet files into your time-series database — millions of rows/second, zero intermediary drivers:
+
+| Database | Engine | Write Path |
+|---|---|---|
+| **ClickHouse** | Native HTTP stream | CSVWithNames / Parquet |
+| **InfluxDB v2** | Line Protocol gzip batches | `/api/v2/write` |
+| **PostgreSQL / TimescaleDB** | `COPY FROM` CSV | Auto-detects TimescaleDB, creates hypertables |
+| **QuestDB** | ILP over TCP & HTTP | TCP port 9009 (recommended) or HTTP 9000 |
+
 ```bash
 # ClickHouse
 dukascopy-go db-load --input ./xauusd.csv --db clickhouse --url http://localhost:8123 --table xauusd
@@ -195,126 +163,79 @@ dukascopy-go db-load --input ./xauusd.csv --db influxdb --url http://localhost:8
 # PostgreSQL / TimescaleDB
 dukascopy-go db-load --input ./xauusd.csv --db postgres \
   --url postgres://user:pass@localhost:5432/marketdata --table xauusd
+
+# QuestDB (TCP ILP — lowest latency)
+dukascopy-go db-load --input ./xauusd.csv --db questdb --url tcp://localhost:9009 --table xauusd
 ```
+
+**TimescaleDB** extension is auto-detected; hypertables are created with inferred chunk intervals from the filename (`m1` → 1 day, `h1` → 7 days, `d1` → 30 days). Override with `--chunk-interval`, disable with `--create-hypertable=false`.
+
+**QuestDB ILP** defaults to TCP (`tcp://host:9009`) with `TCP_NODELAY` for minimal latency. HTTP fallback via `http://host:9000`. Override port with `--ilp-port`.
+
+`db-load` flags: `--input` (required), `--db` (required), `--url` (required), `--table` (required), `--user`, `--password`, `--token`, `--org`, `--bucket`, `--symbol`, `--batch`, `--timeout`, `--ilp-port`, `--create-hypertable`, `--chunk-interval`.
 
 ---
 
-## 🐹 Go Library SDK (Public `pkg/`)
-
-Since `dukascopy-go` places its core client and CSV exporter packages under the public `pkg/` folder, you can seamlessly import them as a library in your own Go applications!
+## 🐹 Go SDK
 
 ```go
-package main
+import "github.com/Nosvemos/dukascopy-go/pkg/dukascopy"
 
-import (
-	"context"
-	"fmt"
-	"time"
-
-	"github.com/Nosvemos/dukascopy-go/pkg/dukascopy"
-)
-
-func main() {
-	// Initialize the public SDK client
-	client := dukascopy.NewClient("https://jetta.dukascopy.com", 30*time.Second)
-
-	req := dukascopy.DownloadRequest{
-		Symbol:      "EUR/USD",
-		Granularity: dukascopy.GranularityD1,
-		Side:        dukascopy.PriceSideBid,
-		From:        time.Now().AddDate(0, 0, -5),
-		To:          time.Now(),
-	}
-
-	result, err := client.Download(context.Background(), req)
-	if err != nil {
-		panic(err)
-	}
-
-	fmt.Printf("Downloaded %d bars for symbol: %s\n", len(result.Bars), result.Instrument.Name)
-	for _, bar := range result.Bars {
-		fmt.Printf("Time: %s, Open: %f, Close: %f\n", bar.Time, bar.Open, bar.Close)
-	}
-}
+client := dukascopy.NewClient("https://jetta.dukascopy.com", 30*time.Second)
+result, _ := client.Download(context.Background(), dukascopy.DownloadRequest{
+    Symbol:      "EUR/USD",
+    Granularity: dukascopy.GranularityD1,
+    Side:        dukascopy.PriceSideBid,
+    From:        time.Now().AddDate(0, 0, -5),
+    To:          time.Now(),
+})
+fmt.Printf("Downloaded %d bars: %s\n", len(result.Bars), result.Instrument.Name)
 ```
+
+Full Go reference: [pkg.go.dev](https://pkg.go.dev/github.com/Nosvemos/dukascopy-go)
 
 ---
 
-## 💻 Python & C SDK 
+## 🐍 Python SDK
 
-Not using the CLI? `dukascopy-go` compiles to a C shared library (`.so`, `.dll`, `.dylib`) which can be wrapped in almost any language. We provide a **high-performance Python SDK** out of the box!
-
-### 📥 1. Download Historical Data
 ```python
 import dukascopy_go as dukascopy
 from datetime import datetime
 
-# Download EURUSD candles straight to CSV or Parquet
-dukascopy.download(
-    symbol="EURUSD",
-    timeframe="m1",
+# Download data
+dukascopy.download(symbol="EURUSD", timeframe="m1",
     output_path="./eurusd_m1.csv",
     from_date=datetime(2026, 5, 18, 10, 0),
-    to_date=datetime(2026, 5, 18, 11, 0)
-)
+    to_date=datetime(2026, 5, 18, 11, 0))
+
+# Stream into database
+dukascopy.db_load(db_type="postgres", db_url="postgres://user:pass@localhost:5432/marketdata",
+    table_name="eurusd_m1", input_path="./eurusd_m1.csv")
 ```
 
-### ⚡ 2. Stream File Directly into Database
-Stream the local file into ClickHouse, PostgreSQL, InfluxDB, or TimescaleDB at millions of rows/second natively using the Go loader:
-```python
-# ClickHouse
-dukascopy.db_load(
-    db_type="clickhouse",
-    db_url="http://localhost:8123",
-    table_name="eurusd_m1",
-    input_path="./eurusd_m1.csv"
-)
-
-# PostgreSQL / TimescaleDB
-dukascopy.db_load(
-    db_type="postgres",
-    db_url="postgres://user:pass@localhost:5432/marketdata",
-    table_name="eurusd_m1",
-    input_path="./eurusd_m1.csv"
-)
-```
-*(Check the `sdk/python` directory for full usage examples and installation guides)*
-
----
-
-## 🤝 Contributing
-
-Contributions are what make the open source community such an amazing place to learn, inspire, and create. Any contributions you make are **greatly appreciated**.
-
-1. Fork the Project
-2. Create your Feature Branch (`git checkout -b feature/AmazingFeature`)
-3. Commit your Changes (`git commit -m 'Add some AmazingFeature'`)
-4. Push to the Branch (`git push origin feature/AmazingFeature`)
-5. Open a Pull Request
+See `sdk/python/` for full examples and installation guide.
 
 ---
 
 ## 🛠️ Development
 
-If you want to build and test the project locally, follow these steps:
+```bash
+git clone https://github.com/Nosvemos/dukascopy-go.git
+cd dukascopy-go
+go mod download
+go test ./...
+go build -o dukascopy-go ./cmd/dukascopy-go
+```
 
-1. Clone the repository:
-   ```bash
-   git clone https://github.com/Nosvemos/dukascopy-go.git
-   cd dukascopy-go
-   ```
-2. Install dependencies:
-   ```bash
-   go mod download
-   ```
-3. Run tests:
-   ```bash
-   go test ./...
-   ```
-4. Build the binary:
-   ```bash
-   go build -o dukascopy-go ./cmd/dukascopy-go
-   ```
+---
+
+## 🤝 Contributing
+
+1. Fork the project
+2. Create a feature branch (`git checkout -b feature/AmazingFeature`)
+3. Commit your changes (`git commit -m 'Add some AmazingFeature'`)
+4. Push to the branch (`git push origin feature/AmazingFeature`)
+5. Open a Pull Request
 
 ---
 
