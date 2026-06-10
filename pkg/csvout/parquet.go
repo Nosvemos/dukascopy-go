@@ -30,8 +30,18 @@ type parquetRecordReader interface {
 	Close() error
 }
 
+// parquetCompression is the codec applied to every parquet file we write.
+// Dukascopy tick/bar data compresses heavily (near-monotonic timestamps, tiny
+// price deltas, repetitive volumes); zstd cuts uncompressed output ~5-6x.
+// Previously the writer used no codec, so every column was stored raw.
+var parquetCompression = parquet.Compression(&parquet.Zstd)
+
+func newParquetWriter(file *os.File, schema *parquet.Schema) parquetRecordWriter {
+	return parquet.NewGenericWriter[map[string]any](file, schema, parquetCompression)
+}
+
 var defaultParquetWriterFactory = func(file *os.File, schema *parquet.Schema) parquetRecordWriter {
-	return parquet.NewGenericWriter[map[string]any](file, schema)
+	return newParquetWriter(file, schema)
 }
 
 var parquetWriterFactory = defaultParquetWriterFactory
@@ -46,7 +56,7 @@ func (c *Config) parquetWriterFactory(file *os.File, schema *parquet.Schema) par
 	if c.ParquetWriterFactory != nil {
 		return c.ParquetWriterFactory(file, schema)
 	}
-	return parquet.NewGenericWriter[map[string]any](file, schema)
+	return newParquetWriter(file, schema)
 }
 
 func (c *Config) parquetReaderFactory(file *os.File, schema *parquet.Schema) parquetRecordReader {
