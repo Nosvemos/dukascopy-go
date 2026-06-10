@@ -8,10 +8,26 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 )
 
-var localCacheFilePath string = ""
+var (
+	localCacheFilePath string = ""
+	cachePathMu        sync.RWMutex
+)
+
+func setLocalCacheFilePath(path string) {
+	cachePathMu.Lock()
+	defer cachePathMu.Unlock()
+	localCacheFilePath = path
+}
+
+func getLocalCacheFilePath() string {
+	cachePathMu.RLock()
+	defer cachePathMu.RUnlock()
+	return localCacheFilePath
+}
 
 type localCachePayload struct {
 	Timestamp   time.Time    `json:"timestamp"`
@@ -157,8 +173,9 @@ func looksLikeEquitySymbol(symbol string) bool {
 }
 
 func getLocalCachePath() string {
-	if localCacheFilePath != "" {
-		return localCacheFilePath
+	path := getLocalCacheFilePath()
+	if path != "" {
+		return path
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -170,7 +187,7 @@ func getLocalCachePath() string {
 }
 
 func loadLocalCache() ([]Instrument, bool) {
-	if localCacheFilePath == "" && (flag.Lookup("test.v") != nil || os.Getenv("DUKASCOPY_TEST_ENV") == "true") {
+	if getLocalCacheFilePath() == "" && (flag.Lookup("test.v") != nil || os.Getenv("DUKASCOPY_TEST_ENV") == "true") {
 		return nil, false
 	}
 	path := getLocalCachePath()
@@ -201,7 +218,7 @@ func loadLocalCache() ([]Instrument, bool) {
 }
 
 func saveLocalCache(instruments []Instrument) {
-	if localCacheFilePath == "" && (flag.Lookup("test.v") != nil || os.Getenv("DUKASCOPY_TEST_ENV") == "true") {
+	if getLocalCacheFilePath() == "" && (flag.Lookup("test.v") != nil || os.Getenv("DUKASCOPY_TEST_ENV") == "true") {
 		return
 	}
 	path := getLocalCachePath()

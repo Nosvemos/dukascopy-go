@@ -185,6 +185,9 @@ func questDBTCPWrite(
 				_ = tcpConn.SetNoDelay(true)
 			}
 
+			var skippedRows int
+			var warnCount int
+
 			for {
 				if ctx.Err() != nil {
 					return ctx.Err()
@@ -195,16 +198,26 @@ func questDBTCPWrite(
 					break
 				}
 				if readErr != nil {
-					return fmt.Errorf("CSV read error at row %d: %w", totalRows+2, readErr)
+					return fmt.Errorf("CSV read error at row %d: %w", totalRows+skippedRows+2, readErr)
 				}
 
 				line, lineErr := buildQuestDBLineProtocol(row, colIndex, table, symbolTag)
 				if lineErr != nil || line == "" {
+					skippedRows++
+					if warnCount < 10 {
+						warnCount++
+						reason := "empty protocol line"
+						if lineErr != nil {
+							reason = lineErr.Error()
+						}
+						fmt.Fprintf(stderr, "%sdb-load%s warning: skipping malformed row %d: %s\n",
+							colorize(colorYellow), colorize(colorReset), totalRows+skippedRows+1, reason)
+					}
 					continue
 				}
 
 				if _, writeError := fmt.Fprintf(conn, "%s\n", line); writeError != nil {
-					return fmt.Errorf("questdb tcp write error at row %d: %w", totalRows+2, writeError)
+					return fmt.Errorf("questdb tcp write error at row %d: %w", totalRows+skippedRows+1, writeError)
 				}
 				totalRows++
 				batchCount++
@@ -212,6 +225,10 @@ func questDBTCPWrite(
 				if batchCount%batchSize == 0 {
 					fmt.Fprintf(stderr, "  ... %d rows written\n", totalRows)
 				}
+			}
+			if skippedRows > 0 {
+				fmt.Fprintf(stderr, "%sdb-load%s warning: skipped %d malformed rows during QuestDB TCP ingestion\n",
+					colorize(colorYellow), colorize(colorReset), skippedRows)
 			}
 			return nil
 		}()
@@ -280,6 +297,9 @@ func questDBHTTPWrite(
 		return nil
 	}
 
+	var skippedRows int
+	var warnCount int
+
 	for {
 		if ctx.Err() != nil {
 			return 0, ctx.Err()
@@ -290,11 +310,21 @@ func questDBHTTPWrite(
 			break
 		}
 		if readErr != nil {
-			return 0, fmt.Errorf("CSV read error at row %d: %w", totalRows+batchRows+2, readErr)
+			return 0, fmt.Errorf("CSV read error at row %d: %w", totalRows+batchRows+skippedRows+2, readErr)
 		}
 
 		line, lineErr := buildQuestDBLineProtocol(row, colIndex, table, symbolTag)
 		if lineErr != nil || line == "" {
+			skippedRows++
+			if warnCount < 10 {
+				warnCount++
+				reason := "empty protocol line"
+				if lineErr != nil {
+					reason = lineErr.Error()
+				}
+				fmt.Fprintf(stderr, "%sdb-load%s warning: skipping malformed row %d: %s\n",
+					colorize(colorYellow), colorize(colorReset), totalRows+batchRows+skippedRows+1, reason)
+			}
 			continue
 		}
 
@@ -312,6 +342,11 @@ func questDBHTTPWrite(
 
 	if err := flushHTTPBatch(); err != nil {
 		return 0, err
+	}
+
+	if skippedRows > 0 {
+		fmt.Fprintf(stderr, "%sdb-load%s warning: skipped %d malformed rows during QuestDB HTTP ingestion\n",
+			colorize(colorYellow), colorize(colorReset), skippedRows)
 	}
 
 	return totalRows, nil

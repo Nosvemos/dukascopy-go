@@ -101,7 +101,15 @@ func ingestPostgres(
 	}
 	defer txn.Rollback()
 
-	stmt, err := txn.Prepare(pq.CopyIn(table, header...))
+	var stmt *sql.Stmt
+	parts := strings.Split(table, ".")
+	if len(parts) == 2 {
+		schema := strings.Trim(strings.TrimSpace(parts[0]), `"`)
+		tbl := strings.Trim(strings.TrimSpace(parts[1]), `"`)
+		stmt, err = txn.Prepare(pq.CopyInSchema(schema, tbl, header...))
+	} else {
+		stmt, err = txn.Prepare(pq.CopyIn(table, header...))
+	}
 	if err != nil {
 		return fmt.Errorf("failed to prepare COPY statement: %w", err)
 	}

@@ -78,7 +78,7 @@ func newDownloadContext() (context.Context, context.CancelFunc) {
 	return signal.NotifyContext(context.Background(), os.Interrupt)
 }
 
-func parseFlexibleTime(value string) (time.Time, error) {
+func ParseFlexibleTime(value string) (time.Time, error) {
 	if t, err := time.Parse(time.RFC3339, value); err == nil {
 		return t, nil
 	}

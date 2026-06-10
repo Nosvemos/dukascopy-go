@@ -55,11 +55,11 @@ func DownloadData(
 	partVal := C.GoString(partition)
 	fg := C.GoString(fillGaps)
 
-	from, err := time.Parse(time.RFC3339, fromStr)
+	from, err := cli.ParseFlexibleTime(fromStr)
 	if err != nil {
 		return C.CString(fmt.Sprintf("invalid from date: %v", err))
 	}
-	to, err := time.Parse(time.RFC3339, toStr)
+	to, err := cli.ParseFlexibleTime(toStr)
 	if err != nil {
 		return C.CString(fmt.Sprintf("invalid to date: %v", err))
 	}

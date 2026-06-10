@@ -114,8 +114,8 @@ func TestClientAdditionalBranches(t *testing.T) {
 
 	t.Run("instruments cache test", func(t *testing.T) {
 		tempFile := filepath.Join(t.TempDir(), "instruments.json")
-		localCacheFilePath = tempFile
-		defer func() { localCacheFilePath = "" }()
+		setLocalCacheFilePath(tempFile)
+		defer func() { setLocalCacheFilePath("") }()
 
 		insts := []Instrument{{ID: 1, Name: "EUR/USD", Code: "EURUSD", PriceScale: 5}}
 		saveLocalCache(insts)

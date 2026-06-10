@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"bufio"
 	"context"
 	"crypto/sha1"
 	"encoding/base64"
@@ -157,6 +156,9 @@ func wsWriteTextFrame(conn net.Conn, payload []byte) error {
 		}
 	}
 	_ = conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
+	defer func() {
+		_ = conn.SetWriteDeadline(time.Time{})
+	}()
 	if _, err := conn.Write(header); err != nil {
 		return err
 	}
@@ -164,14 +166,4 @@ func wsWriteTextFrame(conn net.Conn, payload []byte) error {
 		return err
 	}
 	return nil
-}
-
-func wsClientWriter(conn net.Conn, ch <-chan []byte) {
-	bw := bufio.NewWriter(conn)
-	for msg := range ch {
-		if err := wsWriteTextFrame(conn, msg); err != nil {
-			_ = bw.Flush()
-			return
-		}
-	}
 }

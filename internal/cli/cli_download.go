@@ -223,7 +223,7 @@ func runDownload(args []string, stdout io.Writer, stderr io.Writer) error {
 	if strings.TrimSpace(*lastValue) != "" {
 		to = time.Now().UTC()
 		if !*live && strings.TrimSpace(*toValue) != "" {
-			to, err = parseFlexibleTime(*toValue)
+			to, err = ParseFlexibleTime(*toValue)
 			if err != nil {
 				return fmt.Errorf("--to %w", err)
 			}
@@ -233,13 +233,13 @@ func runDownload(args []string, stdout io.Writer, stderr io.Writer) error {
 			return fmt.Errorf("--last %w", err)
 		}
 	} else {
-		from, err = parseFlexibleTime(*fromValue)
+		from, err = ParseFlexibleTime(*fromValue)
 		if err != nil {
 			return fmt.Errorf("--from %w", err)
 		}
 		to = from
 		if !*live {
-			to, err = parseFlexibleTime(*toValue)
+			to, err = ParseFlexibleTime(*toValue)
 			if err != nil {
 				return fmt.Errorf("--to %w", err)
 			}

@@ -205,10 +205,10 @@ func TestProxyPool(t *testing.T) {
 }
 
 func TestLocalCache(t *testing.T) {
-	origPath := localCacheFilePath
-	localCacheFilePath = filepath.Join(t.TempDir(), "test_cache.json")
+	origPath := getLocalCacheFilePath()
+	setLocalCacheFilePath(filepath.Join(t.TempDir(), "test_cache.json"))
 	defer func() {
-		localCacheFilePath = origPath
+		setLocalCacheFilePath(origPath)
 	}()
 
 	instruments := []Instrument{

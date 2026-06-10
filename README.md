@@ -103,6 +103,42 @@ dukascopy-go download --symbol xauusd --timeframe m1 --from 2020-01-01 --to 2024
 
 ---
 
+## ⚙️ Configuration File Support
+
+You can configure global defaults for `dukascopy-go` using a JSON, YAML, or TOML configuration file.
+
+Specify the configuration file using either the `--config` flag or the `DUKASCOPY_CONFIG` environment variable:
+
+```bash
+# Using the CLI flag
+dukascopy-go --config ./config.yaml download --symbol xauusd --output ./xauusd.csv
+
+# Using the environment variable
+export DUKASCOPY_CONFIG=./config.toml
+dukascopy-go download --symbol xauusd --output ./xauusd.csv
+```
+
+### Configuration Schema (YAML Example)
+
+Here is a sample YAML configuration file showing the available options:
+
+```yaml
+base_url: "https://jetta.dukascopy.com"
+instruments:
+  limit: 100
+download:
+  timeframe: "m1"
+  side: "bid"
+  simple: true
+  retries: 3
+  retry_backoff: "100ms"
+  rate_limit: "50ms"
+  resume: true
+  parallelism: 4
+```
+
+---
+
 ## 💎 Core Features
 
 ### 🔄 Smart Delta Sync
