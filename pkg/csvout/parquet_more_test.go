@@ -142,3 +142,59 @@ func TestCleanParquetDuplicates(t *testing.T) {
 	}
 }
 
+func TestParquetStreamWriter(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "stream.parquet")
+
+	columns := []string{"timestamp", "mid_close"}
+	writer, err := CreateParquetStreamWriter(path, columns)
+	if err != nil {
+		t.Fatalf("CreateParquetStreamWriter failed: %v", err)
+	}
+
+	batch1 := []map[string]any{
+		{"timestamp": "2024-01-02T00:00:00Z", "mid_close": 100.0},
+	}
+	if err := writer.WriteBatch(batch1); err != nil {
+		t.Fatalf("WriteBatch 1 failed: %v", err)
+	}
+
+	batch2 := []map[string]any{
+		{"timestamp": "2024-01-02T00:01:00Z", "mid_close": 101.0},
+	}
+	if err := writer.WriteBatch(batch2); err != nil {
+		t.Fatalf("WriteBatch 2 failed: %v", err)
+	}
+
+	if err := writer.WriteBatch(nil); err != nil {
+		t.Fatalf("WriteBatch nil failed: %v", err)
+	}
+
+	if err := writer.Close(); err != nil {
+		t.Fatalf("writer.Close failed: %v", err)
+	}
+
+	file, pf, closeFile, err := openParquetFile(path)
+	if err != nil {
+		t.Fatalf("openParquetFile failed: %v", err)
+	}
+	defer closeFile()
+
+	reader := parquetReaderFactory(file, pf.Schema())
+	defer reader.Close()
+
+	rows := make([]map[string]any, 10)
+	for i := range rows {
+		rows[i] = make(map[string]any)
+	}
+	count, err := reader.Read(rows)
+	if err != nil && err != os.ErrNotExist {
+		// EOF is fine
+	}
+
+	if count != 2 {
+		t.Errorf("expected 2 rows written via stream writer, got %d", count)
+	}
+}
+
+

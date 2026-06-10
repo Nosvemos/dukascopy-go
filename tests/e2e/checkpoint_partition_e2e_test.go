@@ -132,6 +132,23 @@ func TestPartitionedDownloadResumesFromCheckpoint(t *testing.T) {
 		dayTwoAttempts.Add(1)
 		http.Error(w, "simulated upstream outage", http.StatusBadGateway)
 	})
+	firstMux.HandleFunc("/v1/candles/minute/XAU-USD/BID/2024/1/4", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, map[string]any{
+			"timestamp":  1704326400000,
+			"multiplier": 1.0,
+			"open":       104.0,
+			"high":       105.0,
+			"low":        103.0,
+			"close":      104.5,
+			"shift":      60000,
+			"times":      []int{0, 1, 1},
+			"opens":      []float64{0, 0.5, 0.75},
+			"highs":      []float64{0, 0.25, 0.75},
+			"lows":       []float64{0, 0.5, 1.25},
+			"closes":     []float64{0, 0.25, 0.75},
+			"volumes":    []float64{0.0016, 0.0013, 0.0011},
+		})
+	})
 	firstServer := httptest.NewServer(firstMux)
 	defer firstServer.Close()
 

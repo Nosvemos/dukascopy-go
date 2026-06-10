@@ -626,3 +626,28 @@ func TestRunDBLoad_InfluxDBE2E(t *testing.T) {
 		t.Errorf("expected bucket and measurement in output, got: %q", out)
 	}
 }
+
+func TestIngestPostgres_ValidationAndFailure(t *testing.T) {
+	dir := t.TempDir()
+	var stdout, stderr bytes.Buffer
+
+	// Test non-csv path validation
+	txtPath := filepath.Join(dir, "data.txt")
+	_ = os.WriteFile(txtPath, []byte("some text"), 0o644)
+	err := ingestPostgres(context.Background(), &stdout, &stderr, txtPath, "postgres://localhost/db", "t")
+	if err == nil {
+		t.Fatal("expected error for non-csv file in postgres ingestion")
+	}
+	if !strings.Contains(err.Error(), "only supports .csv") {
+		t.Errorf("unexpected error: %v", err)
+	}
+
+	// Test connection failure with invalid URL
+	csvPath := filepath.Join(dir, "data.csv")
+	_ = os.WriteFile(csvPath, []byte("timestamp,bid,ask\n"), 0o644)
+	err2 := ingestPostgres(context.Background(), &stdout, &stderr, csvPath, "postgres://127.0.0.1:1/invalid_db_non_existent", "t")
+	if err2 == nil {
+		t.Fatal("expected connection failure error")
+	}
+}
+

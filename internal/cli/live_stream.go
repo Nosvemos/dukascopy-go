@@ -1,10 +1,7 @@
 package cli
 
 import (
-	"bufio"
 	"context"
-	"crypto/sha1"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -22,10 +19,6 @@ import (
 
 	_ "time/tzdata"
 )
-
-// ---------------------------------------------------------------------------
-// Public types
-// ---------------------------------------------------------------------------
 
 // LiveTick is the JSON envelope streamed to stdout / WebSocket clients.
 type LiveTick struct {
@@ -50,146 +43,7 @@ type LiveBar struct {
 	Side      string  `json:"side"`
 }
 
-// ---------------------------------------------------------------------------
-// WebSocket broadcast hub (zero external dependencies)
-// ---------------------------------------------------------------------------
-
-type wsHub struct {
-	mu      sync.RWMutex
-	clients map[chan []byte]struct{}
-}
-
-func newWSHub() *wsHub {
-	return &wsHub{clients: make(map[chan []byte]struct{})}
-}
-
-func (h *wsHub) register(ch chan []byte) {
-	h.mu.Lock()
-	h.clients[ch] = struct{}{}
-	h.mu.Unlock()
-}
-
-func (h *wsHub) unregister(ch chan []byte) {
-	h.mu.Lock()
-	delete(h.clients, ch)
-	h.mu.Unlock()
-	// drain channel so sender never blocks
-	for len(ch) > 0 {
-		<-ch
-	}
-}
-
-func (h *wsHub) broadcast(msg []byte) {
-	h.mu.RLock()
-	defer h.mu.RUnlock()
-	for ch := range h.clients {
-		select {
-		case ch <- msg:
-		default: // slow client — drop frame rather than block
-		}
-	}
-}
-
-func (h *wsHub) count() int {
-	h.mu.RLock()
-	defer h.mu.RUnlock()
-	return len(h.clients)
-}
-
-// ---------------------------------------------------------------------------
-// Minimal RFC-6455 WebSocket server (pure net/http + hijack)
-// ---------------------------------------------------------------------------
-
-// wsHandshakeGUID is the fixed magic string from RFC 6455 §1.3.
-const wsHandshakeGUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
-
-func wsComputeAcceptKey(clientKey string) string {
-	h := sha1.New()
-	h.Write([]byte(clientKey + wsHandshakeGUID))
-	return base64.StdEncoding.EncodeToString(h.Sum(nil))
-}
-
-func wsHandler(hub *wsHub) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		// Validate upgrade request
-		if !strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
-			http.Error(w, "not a websocket handshake", http.StatusBadRequest)
-			return
-		}
-		clientKey := r.Header.Get("Sec-Websocket-Key")
-		if clientKey == "" {
-			http.Error(w, "missing Sec-WebSocket-Key", http.StatusBadRequest)
-			return
-		}
-
-		acceptKey := wsComputeAcceptKey(clientKey)
-
-		// Hijack the connection
-		hj, ok := w.(http.Hijacker)
-		if !ok {
-			http.Error(w, "server does not support hijacking", http.StatusInternalServerError)
-			return
-		}
-		conn, bufrw, err := hj.Hijack()
-		if err != nil {
-			return
-		}
-
-		// Send 101 Switching Protocols
-		resp := "HTTP/1.1 101 Switching Protocols\r\n" +
-			"Upgrade: websocket\r\n" +
-			"Connection: Upgrade\r\n" +
-			"Sec-WebSocket-Accept: " + acceptKey + "\r\n\r\n"
-		_, _ = bufrw.WriteString(resp)
-		_ = bufrw.Flush()
-
-		// Register client channel
-		ch := make(chan []byte, 64)
-		hub.register(ch)
-		defer func() {
-			hub.unregister(ch)
-			conn.Close()
-		}()
-
-		// Write frames to client until channel is closed or write fails
-		for msg := range ch {
-			if err := wsWriteTextFrame(conn, msg); err != nil {
-				return
-			}
-		}
-	}
-}
-
-// wsWriteTextFrame writes a minimal RFC-6455 text frame (server→client, no masking).
-func wsWriteTextFrame(conn net.Conn, payload []byte) error {
-	l := len(payload)
-	var header []byte
-	switch {
-	case l <= 125:
-		header = []byte{0x81, byte(l)}
-	case l <= 65535:
-		header = []byte{0x81, 126, byte(l >> 8), byte(l & 0xff)}
-	default:
-		header = []byte{
-			0x81, 127,
-			0, 0, 0, 0,
-			byte(l >> 24), byte((l >> 16) & 0xff), byte((l >> 8) & 0xff), byte(l & 0xff),
-		}
-	}
-	_ = conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
-	if _, err := conn.Write(header); err != nil {
-		return err
-	}
-	if _, err := conn.Write(payload); err != nil {
-		return err
-	}
-	return nil
-}
-
-// ---------------------------------------------------------------------------
 // runLiveStream — the main `live` command implementation
-// ---------------------------------------------------------------------------
-
 func runLiveStream(args []string, stdout io.Writer, stderr io.Writer) error {
 	fs := flag.NewFlagSet("live", flag.ContinueOnError)
 	fs.SetOutput(stdout)
@@ -200,14 +54,14 @@ func runLiveStream(args []string, stdout io.Writer, stderr io.Writer) error {
 		fmt.Fprint(stdout, "\nExamples:\n  dukascopy-go live --symbol eurusd --timeframe tick --format jsonl\n  dukascopy-go live --symbol eurusd --timeframe m1 --side bid --port 8080\n")
 	}
 
-	symbol       := fs.String("symbol", "", "instrument symbol such as eurusd or xauusd (required)")
-	timeframe    := fs.String("timeframe", "tick", "tick, m1, m3, m5, m15, m30, h1, h4, d1")
-	side         := fs.String("side", "bid", "bid or ask (used for bar streaming)")
-	format       := fs.String("format", "jsonl", "output format: jsonl, csv, json")
-	port         := fs.Int("port", 0, "if > 0, start a local WebSocket server on this port")
+	symbol := fs.String("symbol", "", "instrument symbol such as eurusd or xauusd (required)")
+	timeframe := fs.String("timeframe", "tick", "tick, m1, m3, m5, m15, m30, h1, h4, d1")
+	side := fs.String("side", "bid", "bid or ask (used for bar streaming)")
+	format := fs.String("format", "jsonl", "output format: jsonl, csv, json")
+	port := fs.Int("port", 0, "if > 0, start a local WebSocket server on this port")
 	pollInterval := fs.Duration("poll-interval", 1*time.Second, "polling interval for new ticks/bars")
-	baseURL      := fs.String("base-url", readBaseURL(), "Dukascopy API base URL")
-	output       := fs.String("output", "-", "output file path, - for stdout only")
+	baseURL := fs.String("base-url", readBaseURL(), "Dukascopy API base URL")
+	output := fs.String("output", "-", "output file path, - for stdout only")
 
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -445,18 +299,4 @@ func runLiveStream(args []string, stdout io.Writer, stderr io.Writer) error {
 
 	fmt.Fprintf(stderr, "%slive%s stopped\n", colorize(colorCyan), colorize(colorReset))
 	return nil
-}
-
-// ---------------------------------------------------------------------------
-// wsClientWriter — helper used in tests to drain a WebSocket client channel
-// ---------------------------------------------------------------------------
-
-func wsClientWriter(conn net.Conn, ch <-chan []byte) {
-	bw := bufio.NewWriter(conn)
-	for msg := range ch {
-		if err := wsWriteTextFrame(conn, msg); err != nil {
-			_ = bw.Flush()
-			return
-		}
-	}
 }

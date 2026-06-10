@@ -4,6 +4,8 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -76,4 +78,46 @@ func TestClientAdditionalBranches(t *testing.T) {
 			t.Fatalf("waitForRateLimit returned error: %v", err)
 		}
 	})
+
+	t.Run("client options and proxy loader", func(t *testing.T) {
+		client := NewClient("https://example.test", time.Second)
+		client.WithForceUpdate(true)
+		client.WithEngine(EngineJetta)
+		client.WithEngine("")
+
+		tmpProxy := filepath.Join(t.TempDir(), "proxies.txt")
+		if err := os.WriteFile(tmpProxy, []byte("http://127.0.0.1:8080\n# comment\n"), 0o644); err != nil {
+			t.Fatalf("failed to write tmp proxy file: %v", err)
+		}
+
+		if err := client.LoadProxies(tmpProxy); err != nil {
+			t.Fatalf("LoadProxies returned error: %v", err)
+		}
+	})
+
+	t.Run("decoder granularity normalization", func(t *testing.T) {
+		if NormalizeGranularity(GranularityTick) != GranularityTick {
+			t.Errorf("NormalizeGranularity failed")
+		}
+	})
+
+	t.Run("instruments cache test", func(t *testing.T) {
+		tempFile := filepath.Join(t.TempDir(), "instruments.json")
+		localCacheFilePath = tempFile
+		defer func() { localCacheFilePath = "" }()
+
+		insts := []Instrument{{ID: 1, Name: "EUR/USD", Code: "EURUSD", PriceScale: 5}}
+		saveLocalCache(insts)
+		loaded, ok := loadLocalCache()
+		if !ok || len(loaded) != 1 || loaded[0].Name != "EUR/USD" {
+			t.Fatalf("failed to load saved local cache: %v, ok=%v", loaded, ok)
+		}
+
+		// test getLocalCachePath branch
+		path := getLocalCachePath()
+		if path != tempFile {
+			t.Errorf("expected cache path %s, got %s", tempFile, path)
+		}
+	})
 }
+
