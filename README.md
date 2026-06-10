@@ -85,7 +85,21 @@ dukascopy-go download --symbol xauusd --timeframe m1 --last 30d --output ./data/
 dukascopy-go download --symbol EUR/USD,GBP/USD,BTC/USD --timeframe d1 --last 1y --output ./data/
 ```
 
-**Need a massive dataset?** Use parallel downloading and Parquet output:
+**Need a massive dataset?** Use the chunked cache & resume system to download multi-year tick data with a constant, OOM-free memory footprint:
+```bash
+# Download 4 years of XAUUSD ticks — streams to disk in chunks, auto-resumes on interruption
+dukascopy-go download \
+  --symbol xauusd \
+  --timeframe tick \
+  --from 2020-01-01 \
+  --to 2024-01-01 \
+  --output ./data/xauusd_ticks.parquet \
+  --resume
+```
+
+Interrupted? Just re-run the exact same command. The manifest will detect which chunks are already on disk and skip them automatically.
+
+For parallel OHLCV bars with partitioned output:
 ```bash
 dukascopy-go download \
   --symbol xauusd \
@@ -108,10 +122,11 @@ Below is a detailed guide to all options supported by `dukascopy-go download`:
 | `--symbol` | `string` | *(required)* | Instrument code (e.g., `eurusd`, `xauusd`). Supports comma-separated batch lists: `eurusd,gbpusd`. |
 | `--timeframe` | `string` | `m1` | Granularity layout: `tick`, `m1`, `m3`, `m5`, `m15`, `m30`, `h1`, `h4`, `d1`, `w1`, `mn1`. |
 | `--side` | `string` | `bid` | Price side to target: `bid` or `ask`. |
-| `--output` | `string` | *(required)* | Output file or directory path. Use `.parquet` for Parquet, `.csv` for CSV, `.csv.gz` for compressed CSV. |
+| `--output` | `string` | *(required)* | Output file or directory path. Use `.parquet` for Parquet, `.csv` for CSV, `.csv.gz` for compressed CSV, `.jsonl` for JSONL. |
 | `--last` | `duration` | `""` | Duration to download relative to now (e.g. `30d`, `6mo`, `1y`). Overrides `--from`/`--to`. |
 | `--from` | `string` | `""` | Start timestamp in `YYYY-MM-DD`, `YYYY-MM-DD HH:MM`, or ISO `RFC3339` format. |
 | `--to` | `string` | `""` | End timestamp in `YYYY-MM-DD`, `YYYY-MM-DD HH:MM`, or ISO `RFC3339` format. |
+| `--resume` | `bool` | `false` | Enable the chunked cache & resume system. Splits the range into daily chunks, writes `.part` files to `.dukascopy_cache/`, and auto-resumes from the last valid checkpoint on re-run. Ideal for multi-year tick datasets to avoid OOM. |
 | `--simple` | `bool` | `false` | Export basic columns only (reduced CSV footprint). |
 | `--full` | `bool` | `false` | Export complete Bid and Ask candlestick fields. |
 | `--fused` | `bool` | `false` | Export fused Bid and Ask fields complete with dynamic spread calculations (no mid fields). |
@@ -148,6 +163,39 @@ dukascopy-go download --symbol EUR/USD --timeframe m1 --last 7d --output ./data/
 We designed a highly resilient AIMD-based (Additive Increase / Multiplicative Decrease) rate limiting system that self-corrects based on response status codes:
 - **Instant Backoff**: If hit with `429 Too Many Requests`, the adaptive rate limit instantly doubles (up to `5s`) to completely clear connection queues.
 - **Slow Recovery**: On successful requests, it slowly decreases the delay by `10ms` per response back to your defined base rate limit.
+
+### 💾 Chunked Cache & Resume (`--resume`)
+Downloading years of tick data no longer risks an OOM crash. Add `--resume` to split any download into daily `.part` chunks written to a local `.dukascopy_cache/` directory. A SHA-256 manifest tracks which chunks are complete, so any interruption is automatically recovered on re-run:
+```bash
+# First run — downloads chunks and writes manifest
+dukascopy-go download --symbol xauusd --timeframe tick --from 2020-01-01 --to 2024-01-01 --output ./xauusd.parquet --resume
+
+# Interrupted? Re-run the same command — already-valid chunks are skipped
+dukascopy-go download --symbol xauusd --timeframe tick --from 2020-01-01 --to 2024-01-01 --output ./xauusd.parquet --resume
+```
+
+Manage the cache with the `manifest` subcommands:
+```bash
+dukascopy-go manifest inspect --symbol xauusd   # show chunk states
+dukascopy-go manifest verify  --symbol xauusd   # re-validate SHA-256 hashes
+dukascopy-go manifest repair  --symbol xauusd   # re-download corrupt/missing chunks
+dukascopy-go manifest clean   --symbol xauusd   # remove orphaned .part files
+```
+
+### 🗄️ Direct Database Ingestion (`db-load`)
+Stream a downloaded CSV or Parquet file directly into your time-series database with zero intermediary drivers:
+```bash
+# ClickHouse
+dukascopy-go db-load --input ./xauusd.csv --db clickhouse --url http://localhost:8123 --table xauusd
+
+# InfluxDB v2
+dukascopy-go db-load --input ./xauusd.csv --db influxdb --url http://localhost:8086 \
+  --org myorg --bucket marketdata --token <token> --table xauusd --symbol xauusd
+
+# PostgreSQL / TimescaleDB
+dukascopy-go db-load --input ./xauusd.csv --db postgres \
+  --url postgres://user:pass@localhost:5432/marketdata --table xauusd
+```
 
 ---
 
@@ -212,11 +260,20 @@ dukascopy.download(
 ```
 
 ### ⚡ 2. Stream File Directly into Database
-Stream the local file into ClickHouse, PostgreSQL, or InfluxDB at millions of rows/second natively using the Go loader:
+Stream the local file into ClickHouse, PostgreSQL, InfluxDB, or TimescaleDB at millions of rows/second natively using the Go loader:
 ```python
+# ClickHouse
 dukascopy.db_load(
     db_type="clickhouse",
     db_url="http://localhost:8123",
+    table_name="eurusd_m1",
+    input_path="./eurusd_m1.csv"
+)
+
+# PostgreSQL / TimescaleDB
+dukascopy.db_load(
+    db_type="postgres",
+    db_url="postgres://user:pass@localhost:5432/marketdata",
     table_name="eurusd_m1",
     input_path="./eurusd_m1.csv"
 )
