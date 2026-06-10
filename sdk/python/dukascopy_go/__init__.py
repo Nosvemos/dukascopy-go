@@ -1,7 +1,13 @@
+import asyncio
 import ctypes
 import os
 import sys
+import tempfile
 from datetime import datetime
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import pandas as pd
 
 # Define custom exception
 class DukascopyError(Exception):
@@ -98,7 +104,7 @@ def download(
 ):
     """
     Downloads historical market data from Dukascopy using the high-speed Go downloader engine.
-    
+
     Parameters:
         symbol (str): Instrument symbol, e.g., 'EURUSD', 'GBPUSD'.
         timeframe (str): Granularity/Timeframe, e.g., 'tick', 'm1', 'h1', 'd1'.
@@ -108,7 +114,7 @@ def download(
         side (str): Price side, either 'BID' or 'ASK'. Default is 'BID'.
         engine (str): Downloader engine, either 'jetta' or 'datafeed'. Default is 'jetta'.
         price_scale (int): Decimal price scale/pip scale of the instrument. Default is 5.
-        
+
     Raises:
         DukascopyError: If the download fails or parameter validation fails.
     """
@@ -177,10 +183,10 @@ def db_load(
 ):
     """
     Ingests market data from a local CSV or Parquet file directly into the target database.
-    Supported databases: ClickHouse, PostgreSQL, InfluxDB.
-    
+    Supported databases: ClickHouse, PostgreSQL, InfluxDB, QuestDB.
+
     Parameters:
-        db_type (str): Target database, 'clickhouse', 'postgres', or 'influxdb'.
+        db_type (str): Target database, 'clickhouse', 'postgres', 'influxdb', or 'questdb'.
         db_url (str): Connection URL, e.g. 'http://localhost:8123', 'postgres://user:pass@localhost:5432/dbname'.
         table_name (str): Target table or measurement name.
         input_path (str): Path to local CSV or Parquet file to ingest.
@@ -192,7 +198,7 @@ def db_load(
         symbol_tag (str): Symbol tag hint for InfluxDB records (optional).
         batch_size (int): Batch size of rows to ingest. Default 0 uses database defaults.
         timeout_sec (int): Request/query timeout in seconds. Default is 120.
-        
+
     Raises:
         DukascopyError: If the ingestion fails or parameter validation fails.
     """
@@ -237,3 +243,210 @@ def db_load(
         # Free the Go C.CString memory to avoid leak
         _lib.FreeString(err_ptr)
         raise DukascopyError(err_msg)
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Async wrappers (Python 3.9+ asyncio.to_thread)
+# ═══════════════════════════════════════════════════════════════════════
+
+def _ensure_pandas():
+    """
+    Lazily imports pandas and returns the module.
+    Raises a helpful ImportError if pandas is not installed.
+    """
+    try:
+        import pandas as _pd
+        return _pd
+    except ImportError:
+        raise ImportError(
+            "pandas is required for to_dataframe() and to_dataframe_async(). "
+            "Install it with:\n"
+            "    pip install pandas pyarrow\n"
+            "or:\n"
+            "    pip install 'dukascopy-go[pandas]'"
+        )
+
+
+async def download_async(
+    symbol: str,
+    timeframe: str,
+    output_path: str,
+    from_date,
+    to_date,
+    side: str = 'BID',
+    engine: str = 'jetta',
+    price_scale: int = 5
+) -> None:
+    """
+    Async wrapper around download().
+    Runs the blocking CGO DownloadData call in a thread pool so the event loop
+    is not blocked.
+
+    Parameters and behavior are identical to download().
+
+    Raises:
+        DukascopyError: If the download fails or parameter validation fails.
+    """
+    return await asyncio.to_thread(
+        download,
+        symbol=symbol,
+        timeframe=timeframe,
+        output_path=output_path,
+        from_date=from_date,
+        to_date=to_date,
+        side=side,
+        engine=engine,
+        price_scale=price_scale,
+    )
+
+
+async def db_load_async(
+    db_type: str,
+    db_url: str,
+    table_name: str,
+    input_path: str,
+    user: str = "",
+    password: str = "",
+    token: str = "",
+    org: str = "",
+    bucket: str = "",
+    symbol_tag: str = "",
+    batch_size: int = 0,
+    timeout_sec: int = 120
+) -> None:
+    """
+    Async wrapper around db_load().
+    Runs the blocking CGO DBLoadData call in a thread pool so the event loop
+    is not blocked.
+
+    Parameters and behavior are identical to db_load().
+
+    Raises:
+        DukascopyError: If the ingestion fails or parameter validation fails.
+    """
+    return await asyncio.to_thread(
+        db_load,
+        db_type=db_type,
+        db_url=db_url,
+        table_name=table_name,
+        input_path=input_path,
+        user=user,
+        password=password,
+        token=token,
+        org=org,
+        bucket=bucket,
+        symbol_tag=symbol_tag,
+        batch_size=batch_size,
+        timeout_sec=timeout_sec,
+    )
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Pandas DataFrame integration (requires pandas + pyarrow)
+# ═══════════════════════════════════════════════════════════════════════
+
+def to_dataframe(
+    symbol: str,
+    timeframe: str,
+    from_date,
+    to_date,
+    side: str = 'BID',
+    engine: str = 'jetta',
+    price_scale: int = 5,
+    output_format: str = 'parquet'
+):
+    """
+    Downloads market data and returns it as a pandas.DataFrame directly,
+    without requiring the user to manage intermediate files.
+
+    Parameters:
+        symbol (str): Instrument symbol, e.g., 'EURUSD', 'GBPUSD'.
+        timeframe (str): Granularity/Timeframe, e.g., 'tick', 'm1', 'h1', 'd1'.
+        from_date (datetime or str): Start date/time.
+        to_date (datetime or str): End date/time.
+        side (str): Price side, either 'BID' or 'ASK'. Default is 'BID'.
+        engine (str): Downloader engine, either 'jetta' or 'datafeed'. Default is 'jetta'.
+        price_scale (int): Decimal price scale/pip scale of the instrument. Default is 5.
+        output_format (str): 'parquet' (default, recommended for type preservation)
+                             or 'csv'.
+
+    Returns:
+        pandas.DataFrame with the downloaded market data.
+
+    Raises:
+        ImportError: If pandas is not installed.
+        DukascopyError: If the download fails or parameter validation fails.
+    """
+    pd_mod = _ensure_pandas()
+
+    suffix = '.parquet' if output_format == 'parquet' else '.csv'
+    # Create a named temp file and immediately close the Python file handle
+    # so the Go shared library can write to it without Windows file-locking issues.
+    tmp = tempfile.NamedTemporaryFile(suffix=suffix, delete=False)
+    tmp_path = tmp.name
+    tmp.close()
+
+    try:
+        download(
+            symbol=symbol,
+            timeframe=timeframe,
+            output_path=tmp_path,
+            from_date=from_date,
+            to_date=to_date,
+            side=side,
+            engine=engine,
+            price_scale=price_scale,
+        )
+
+        # Read the downloaded data into a DataFrame
+        if output_format == 'parquet':
+            df = pd_mod.read_parquet(tmp_path)
+        else:
+            df = pd_mod.read_csv(tmp_path)
+
+        return df
+
+    finally:
+        # Always clean up the temp file, even if download or pandas fails
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass  # Best-effort cleanup
+
+
+async def to_dataframe_async(
+    symbol: str,
+    timeframe: str,
+    from_date,
+    to_date,
+    side: str = 'BID',
+    engine: str = 'jetta',
+    price_scale: int = 5,
+    output_format: str = 'parquet'
+):
+    """
+    Async wrapper around to_dataframe().
+    Runs the blocking download and pandas I/O in a thread pool.
+
+    Parameters and behavior are identical to to_dataframe().
+
+    Returns:
+        pandas.DataFrame with the downloaded market data.
+
+    Raises:
+        ImportError: If pandas is not installed.
+        DukascopyError: If the download fails or parameter validation fails.
+    """
+    _ensure_pandas()  # Fail-fast on import error before entering the thread pool
+
+    return await asyncio.to_thread(
+        to_dataframe,
+        symbol=symbol,
+        timeframe=timeframe,
+        from_date=from_date,
+        to_date=to_date,
+        side=side,
+        engine=engine,
+        price_scale=price_scale,
+        output_format=output_format,
+    )

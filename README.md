@@ -202,15 +202,37 @@ Full Go reference: [pkg.go.dev](https://pkg.go.dev/github.com/Nosvemos/dukascopy
 import dukascopy_go as dukascopy
 from datetime import datetime
 
-# Download data
+# Sync download
 dukascopy.download(symbol="EURUSD", timeframe="m1",
     output_path="./eurusd_m1.csv",
+    from_date=datetime(2026, 5, 18, 10, 0),
+    to_date=datetime(2026, 5, 18, 11, 0))
+
+# Async download (does not block the event loop)
+await dukascopy.download_async(symbol="EURUSD", timeframe="m1",
+    output_path="./eurusd_m1.parquet",
+    from_date=datetime(2026, 5, 18, 10, 0),
+    to_date=datetime(2026, 5, 18, 11, 0))
+
+# Directly into a pandas DataFrame (no file management needed)
+df = dukascopy.to_dataframe(symbol="EURUSD", timeframe="m1",
+    from_date=datetime(2026, 5, 18, 10, 0),
+    to_date=datetime(2026, 5, 18, 11, 0))
+
+# Async DataFrame
+df = await dukascopy.to_dataframe_async(symbol="EURUSD", timeframe="m1",
     from_date=datetime(2026, 5, 18, 10, 0),
     to_date=datetime(2026, 5, 18, 11, 0))
 
 # Stream into database
 dukascopy.db_load(db_type="postgres", db_url="postgres://user:pass@localhost:5432/marketdata",
     table_name="eurusd_m1", input_path="./eurusd_m1.csv")
+```
+
+**Requirements:** Python 3.9+ (for `asyncio.to_thread()`). Install with:
+```bash
+pip install dukascopy-go           # core (no pandas)
+pip install 'dukascopy-go[pandas]' # with pandas + pyarrow for to_dataframe()
 ```
 
 See `sdk/python/` for full examples and installation guide.

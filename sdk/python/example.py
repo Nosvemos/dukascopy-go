@@ -6,6 +6,7 @@ from datetime import datetime
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 import dukascopy_go as dukascopy
 
+
 def main():
     print("=" * 60)
     print("Dukascopy Go Python SDK - Professional Demo")
@@ -32,7 +33,7 @@ def main():
             os.remove(path)
 
     # 2. Download as CSV
-    print(f"\n[1/3] Downloading {symbol} {timeframe} candles to CSV...")
+    print(f"\n[1/4] Downloading {symbol} {timeframe} candles to CSV...")
     print(f"Time Range: {from_date} to {to_date}")
     try:
         dukascopy.download(
@@ -60,7 +61,7 @@ def main():
         sys.exit(1)
 
     # 3. Download as Parquet
-    print(f"\n[2/3] Downloading {symbol} {timeframe} candles to PARQUET...")
+    print(f"\n[2/4] Downloading {symbol} {timeframe} candles to PARQUET...")
     try:
         dukascopy.download(
             symbol=symbol,
@@ -76,25 +77,35 @@ def main():
         if os.path.exists(parquet_output):
             size = os.path.getsize(parquet_output)
             print(f"  File size: {size / 1024:.2f} KB")
-            
-            # If pandas & pyarrow are installed, let's read it
-            try:
-                import pandas as pd
-                df = pd.read_parquet(parquet_output)
-                print("\n  Ingested into Pandas DataFrame:")
-                print(df.head())
-            except ImportError:
-                print("  (Install pandas and pyarrow/fastparquet to view dataframe preview)")
     except Exception as e:
         print(f"ERROR: Parquet Download failed: {e}")
         sys.exit(1)
 
-    # 4. Integration Guidelines Demo & CGO DB Loader Verification
+    # 4. DataFrame demo
+    print(f"\n[3/4] DataFrame Demo: to_dataframe()")
+    try:
+        df = dukascopy.to_dataframe(
+            symbol=symbol,
+            timeframe=timeframe,
+            from_date=from_date,
+            to_date=to_date
+        )
+        print(f"SUCCESS: DataFrame with {len(df)} rows")
+        print(f"  Columns: {list(df.columns)}")
+        print(f"  Dtypes:\n{df.dtypes}")
+        print(f"\n  First 5 rows:")
+        print(df.head())
+    except ImportError:
+        print("  SKIPPED: Install pandas + pyarrow to use to_dataframe()")
+    except Exception as e:
+        print(f"DataFrame download failed: {e}")
+
+    # 5. DB Loader Verification
     print("\n" + "=" * 60)
-    print("High-Performance SDK DB Loader Verification")
+    print("[4/4] High-Performance SDK DB Loader Verification")
     print("=" * 60)
     print("Testing Python SDK 'db_load' with ClickHouse (expecting connection refusal error)...")
-    
+
     try:
         dukascopy.db_load(
             db_type="clickhouse",
@@ -144,8 +155,76 @@ dukascopy.db_load(
     token="mytoken",
     symbol_tag="EURUSD"
 )
+
+# Ingest CSV into QuestDB (TCP ILP)
+dukascopy.db_load(
+    db_type="questdb",
+    db_url="tcp://localhost:9009",
+    table_name="eurusd_m1",
+    input_path="./eurusd_m1.csv"
+)
+
+# Async download (non-blocking event loop)
+await dukascopy.download_async(symbol="EURUSD", timeframe="m1",
+    output_path="./eurusd_m1.parquet",
+    from_date=datetime(2026, 5, 18, 10, 0),
+    to_date=datetime(2026, 5, 18, 11, 0))
+
+# Direct DataFrame access (no file management)
+df = dukascopy.to_dataframe(symbol="EURUSD", timeframe="m1",
+    from_date=datetime(2026, 5, 18, 10, 0),
+    to_date=datetime(2026, 5, 18, 11, 0))
 """)
     print("Demo complete!")
 
+
+async def main_async():
+    """Demonstrates async download and async DataFrame usage."""
+    symbol = "EURUSD"
+    timeframe = "m1"
+    from_date = datetime(2026, 5, 18, 10, 0, 0)
+    to_date = datetime(2026, 5, 18, 11, 0, 0)
+
+    print("\n" + "=" * 60)
+    print("ASYNC DEMO: download_async")
+    print("=" * 60)
+    output_path = os.path.join(os.path.dirname(__file__), "eurusd_m1_async.parquet")
+    try:
+        await dukascopy.download_async(
+            symbol=symbol,
+            timeframe=timeframe,
+            output_path=output_path,
+            from_date=from_date,
+            to_date=to_date
+        )
+        print(f"Async download complete: {output_path}")
+    except Exception as e:
+        print(f"Async download failed: {e}")
+    finally:
+        if os.path.exists(output_path):
+            os.remove(output_path)
+
+    print("\n" + "=" * 60)
+    print("ASYNC DEMO: to_dataframe_async")
+    print("=" * 60)
+    try:
+        df = await dukascopy.to_dataframe_async(
+            symbol=symbol,
+            timeframe=timeframe,
+            from_date=from_date,
+            to_date=to_date
+        )
+        print(f"Async DataFrame shape: {df.shape}")
+        print(df.head())
+    except ImportError:
+        print("  SKIPPED: Install pandas + pyarrow to use to_dataframe_async()")
+    except Exception as e:
+        print(f"to_dataframe_async failed: {e}")
+
+    print("\nAsync demo complete!")
+
+
 if __name__ == "__main__":
     main()
+    import asyncio
+    asyncio.run(main_async())

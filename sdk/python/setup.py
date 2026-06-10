@@ -23,9 +23,12 @@ setup(
         "Operating System :: OS Independent",
         "Topic :: Office/Business :: Financial :: Investment",
     ],
-    python_requires=">=3.7",
+    python_requires=">=3.9",
     package_data={
         "": ["libdukascopy.so", "libdukascopy.dll", "libdukascopy.dylib"],
     },
     include_package_data=True,
+    extras_require={
+        "pandas": ["pandas>=1.0.0", "pyarrow>=1.0.0"],
+    },
 )
