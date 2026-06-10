@@ -38,7 +38,7 @@ func TestDownloadWithGapFillingE2E(t *testing.T) {
 	if !strings.Contains(content, "timestamp,open,high,low,close,volume") {
 		t.Fatalf("missing simple header: %s", content)
 	}
-	
+
 	// Check that we can run with gap-filling without errors.
 	if !strings.Contains(content, "2024-01-02T00:02:00Z") {
 		t.Fatalf("missing expected simple row with gap-filling: %s", content)

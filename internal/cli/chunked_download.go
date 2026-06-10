@@ -35,6 +35,7 @@ func runChunkedDownload(
 	keepCache bool,
 	resumeState *csvout.ResumeState,
 	dedupeRecord []string,
+	hive bool,
 ) (int, error) {
 	progress, _ := stderr.(*progressPrinter)
 
@@ -275,7 +276,7 @@ func runChunkedDownload(
 		mergePath = outputPath + ".resume-tmp"
 	}
 
-	totalRows, err := mergeChunks(stdout, mergePath, partPaths, request.From, request.To, partitionMode, resultKind, barColumns, tickColumns)
+	totalRows, err := mergeChunks(stdout, mergePath, partPaths, request.From, request.To, partitionMode, resultKind, barColumns, tickColumns, hive)
 	if err != nil {
 		if isResume {
 			_ = os.Remove(mergePath)

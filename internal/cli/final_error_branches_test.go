@@ -150,7 +150,13 @@ func TestPartitionAndDownloadAdditionalBranches(t *testing.T) {
 	if err := checkpoint.Save(manifestPath, badManifest); err != nil {
 		t.Fatalf("Save returned error: %v", err)
 	}
-	if err := runPartitionedDownload(context.Background(), func() *dukascopy.Client { c, err := dukascopy.NewClient(server.URL, time.Second); if err != nil { t.Fatalf("NewClient: %v", err) }; return c }(), &bytes.Buffer{}, &bytes.Buffer{}, filepath.Join(dir, "dataset.csv"), manifestPath, request, dukascopy.ResultKindBar, []string{"timestamp", "open"}, nil, partitionHour, 1); err == nil {
+	if err := runPartitionedDownload(context.Background(), func() *dukascopy.Client {
+		c, err := dukascopy.NewClient(server.URL, time.Second)
+		if err != nil {
+			t.Fatalf("NewClient: %v", err)
+		}
+		return c
+	}(), &bytes.Buffer{}, &bytes.Buffer{}, filepath.Join(dir, "dataset.csv"), manifestPath, request, dukascopy.ResultKindBar, []string{"timestamp", "open"}, nil, partitionHour, 1); err == nil {
 		t.Fatal("expected incompatible manifest error")
 	}
 

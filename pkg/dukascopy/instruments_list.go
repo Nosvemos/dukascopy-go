@@ -117,7 +117,7 @@ var DefaultInstruments = []Instrument{
 	{ID: 88, Name: "SOYENTS.CMD/USD", Code: "SOYENTSCMDUSD", PriceScale: 3, Description: "Soybeans"},
 	{ID: 89, Name: "CORN.CMD/USD", Code: "CORNCMDUSD", PriceScale: 3, Description: "Corn"},
 	{ID: 90, Name: "WHEAT.CMD/USD", Code: "WHEATCMDUSD", PriceScale: 3, Description: "Wheat"},
-	
+
 	// Additional Commodities
 	{ID: 140, Name: "DIESEL.CMD/USD", Code: "DIESELCMDUSD", PriceScale: 3, Description: "Gasoil / Diesel"},
 	{ID: 141, Name: "GASOLINE.CMD/USD", Code: "GASOLINECMDUSD", PriceScale: 3, Description: "Gasoline"},
@@ -173,7 +173,7 @@ var DefaultInstruments = []Instrument{
 	{ID: 117, Name: "ESP.IDX/EUR", Code: "ESPIDXEUR", PriceScale: 1, Description: "Spain 35 Index"},
 	{ID: 118, Name: "AUS.IDX/AUD", Code: "AUSIDXAUD", PriceScale: 1, Description: "Australia 200 Index"},
 	{ID: 119, Name: "EUS.IDX/EUR", Code: "EUSIDXEUR", PriceScale: 1, Description: "Europe 50 Index"},
-	
+
 	// Additional Global Indices
 	{ID: 180, Name: "CHE.IDX/CHF", Code: "CHEIDXCHF", PriceScale: 1, Description: "Switzerland 20 Index"},
 	{ID: 181, Name: "HKG.IDX/HKD", Code: "HKGIDXHKD", PriceScale: 1, Description: "Hong Kong 50 Index"},

@@ -257,7 +257,9 @@ func TestCSVGapAssemblyAndExtractBranches(t *testing.T) {
 
 	t.Run("assembly writer and reader failures", func(t *testing.T) {
 		restore := withCSVFactories(
-			func(io.Writer) csvRecordWriter { return &stubCSVWriter{failWriteAt: 0, writeErr: errors.New("header write")} },
+			func(io.Writer) csvRecordWriter {
+				return &stubCSVWriter{failWriteAt: 0, writeErr: errors.New("header write")}
+			},
 			nil,
 		)
 		defer restore()
@@ -268,7 +270,9 @@ func TestCSVGapAssemblyAndExtractBranches(t *testing.T) {
 
 	t.Run("assembly row write and flush failures", func(t *testing.T) {
 		restore := withCSVFactories(
-			func(io.Writer) csvRecordWriter { return &stubCSVWriter{failWriteAt: 1, writeErr: errors.New("row write")} },
+			func(io.Writer) csvRecordWriter {
+				return &stubCSVWriter{failWriteAt: 1, writeErr: errors.New("row write")}
+			},
 			nil,
 		)
 		defer restore()
@@ -319,7 +323,9 @@ func TestCSVGapAssemblyAndExtractBranches(t *testing.T) {
 		}
 
 		restore := withCSVFactories(
-			func(io.Writer) csvRecordWriter { return &stubCSVWriter{failWriteAt: 0, writeErr: errors.New("header write")} },
+			func(io.Writer) csvRecordWriter {
+				return &stubCSVWriter{failWriteAt: 0, writeErr: errors.New("header write")}
+			},
 			nil,
 		)
 		defer restore()
@@ -328,7 +334,9 @@ func TestCSVGapAssemblyAndExtractBranches(t *testing.T) {
 		}
 
 		restore = withCSVFactories(
-			func(io.Writer) csvRecordWriter { return &stubCSVWriter{failWriteAt: 1, writeErr: errors.New("row write")} },
+			func(io.Writer) csvRecordWriter {
+				return &stubCSVWriter{failWriteAt: 1, writeErr: errors.New("row write")}
+			},
 			nil,
 		)
 		defer restore()

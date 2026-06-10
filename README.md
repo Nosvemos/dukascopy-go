@@ -83,7 +83,7 @@ dukascopy-go download --symbol xauusd --timeframe m1 --from 2020-01-01 --to 2024
 | `--symbol` | `string` | *(required)* | Instrument code. Comma-separated for batches: `eurusd,gbpusd` |
 | `--timeframe` | `string` | `m1` | `tick`, `m1`, `m3`, `m5`, `m15`, `m30`, `h1`, `h4`, `d1`, `w1`, `mn1` |
 | `--side` | `string` | `bid` | `bid` or `ask` |
-| `--output` | `string` | *(required)* | `.csv`, `.csv.gz`, `.parquet`, or `.jsonl` |
+| `--output` | `string` | *(required)* | `.csv`, `.csv.gz`, `.parquet`, `.jsonl`, `.arrow`, `.ipc`, `.feather` |
 | `--last` | `duration` | — | Relative window: `30d`, `6mo`, `1y`. Overrides `--from`/`--to` |
 | `--from` | `string` | — | `YYYY-MM-DD`, `YYYY-MM-DD HH:MM`, or RFC3339 |
 | `--to` | `string` | — | Same formats as `--from` |
@@ -95,6 +95,7 @@ dukascopy-go download --symbol xauusd --timeframe m1 --from 2020-01-01 --to 2024
 | `--progress` | `bool` | auto | Force-enable interactive progress TUI |
 | `--tui-theme` | `string` | `default` | `default`, `catppuccin`, `nord`, `gruvbox`, `dracula` |
 | `--partition` | `string` | `none` | `auto`, `hour`, `day`, `week`, `month`, `year` |
+| `--hive` | `bool` | `false` | Enable Hive-style directory partitioning (e.g. `year=YYYY/month=MM/day=DD/`) |
 | `--parallelism` | `int` | `1` | Concurrent partition download workers |
 | `--fill-gaps` | `string` | `none` | `forward` — forward-fills during active market sessions |
 | `--timezone` | `string` | `UTC` | `Europe/London`, `EST`, `MT4`, `MT5` |

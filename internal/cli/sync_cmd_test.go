@@ -58,7 +58,7 @@ func TestSyncHelpRequested(t *testing.T) {
 func TestSyncWithEmptyExistingCSV(t *testing.T) {
 	dir := t.TempDir()
 	outputPath := filepath.Join(dir, "empty.csv")
-	
+
 	// Create an empty file
 	f, err := os.Create(outputPath)
 	if err != nil {
@@ -79,7 +79,7 @@ func TestSyncWithEmptyExistingCSV(t *testing.T) {
 func TestSyncWithParquetError(t *testing.T) {
 	dir := t.TempDir()
 	outputPath := filepath.Join(dir, "test.parquet")
-	
+
 	f, err := os.Create(outputPath)
 	if err != nil {
 		t.Fatalf("failed to create temp file: %v", err)

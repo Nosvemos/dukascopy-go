@@ -16,11 +16,11 @@ import (
 func TestClientDatafeedEngine(t *testing.T) {
 	// Create mock lzma bytes for ticks
 	var rawTicks bytes.Buffer
-	binary.Write(&rawTicks, binary.BigEndian, uint32(100))               // 100ms
-	binary.Write(&rawTicks, binary.BigEndian, uint32(100050))             // ask
-	binary.Write(&rawTicks, binary.BigEndian, uint32(100000))             // bid
-	binary.Write(&rawTicks, binary.BigEndian, math.Float32bits(1.5))      // ask volume
-	binary.Write(&rawTicks, binary.BigEndian, math.Float32bits(1.0))      // bid volume
+	binary.Write(&rawTicks, binary.BigEndian, uint32(100))           // 100ms
+	binary.Write(&rawTicks, binary.BigEndian, uint32(100050))        // ask
+	binary.Write(&rawTicks, binary.BigEndian, uint32(100000))        // bid
+	binary.Write(&rawTicks, binary.BigEndian, math.Float32bits(1.5)) // ask volume
+	binary.Write(&rawTicks, binary.BigEndian, math.Float32bits(1.0)) // bid volume
 
 	var compressedTicks bytes.Buffer
 	w1, _ := lzma.NewWriter(&compressedTicks)
@@ -29,12 +29,12 @@ func TestClientDatafeedEngine(t *testing.T) {
 
 	// Create mock lzma bytes for minute candles
 	var rawCandles bytes.Buffer
-	binary.Write(&rawCandles, binary.BigEndian, uint32(60))               // 60s
-	binary.Write(&rawCandles, binary.BigEndian, uint32(100000))            // open
-	binary.Write(&rawCandles, binary.BigEndian, uint32(100050))            // close
-	binary.Write(&rawCandles, binary.BigEndian, uint32(99990))             // low
-	binary.Write(&rawCandles, binary.BigEndian, uint32(100080))            // high
-	binary.Write(&rawCandles, binary.BigEndian, math.Float32bits(100.5))   // volume
+	binary.Write(&rawCandles, binary.BigEndian, uint32(60))              // 60s
+	binary.Write(&rawCandles, binary.BigEndian, uint32(100000))          // open
+	binary.Write(&rawCandles, binary.BigEndian, uint32(100050))          // close
+	binary.Write(&rawCandles, binary.BigEndian, uint32(99990))           // low
+	binary.Write(&rawCandles, binary.BigEndian, uint32(100080))          // high
+	binary.Write(&rawCandles, binary.BigEndian, math.Float32bits(100.5)) // volume
 
 	var compressedCandles bytes.Buffer
 	w2, _ := lzma.NewWriter(&compressedCandles)

@@ -1,9 +1,9 @@
 package csvout
 
 import (
+	"path/filepath"
 	"testing"
 	"time"
-	"path/filepath"
 
 	"github.com/Nosvemos/dukascopy-go/pkg/dukascopy"
 )
@@ -191,5 +191,3 @@ func TestWriteBarsCSVRowsWithForwardGapFilling(t *testing.T) {
 		t.Errorf("expected synthetic volume 0, got %s", row2[3])
 	}
 }
-
-

@@ -31,6 +31,7 @@ type SDKDownloadOptions struct {
 	Parallelism   int
 	Partition     string
 	FillGaps      string
+	Hive          bool
 }
 
 // RunSDKDownload coordinates thread-safe download using the low-memory chunked engine.
@@ -160,6 +161,7 @@ func RunSDKDownload(ctx context.Context, opts SDKDownloadOptions) error {
 		false,
 		resumeState,
 		dedupeRecord,
+		opts.Hive,
 	)
 	return err
 }

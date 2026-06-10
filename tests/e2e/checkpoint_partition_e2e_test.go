@@ -275,3 +275,75 @@ func TestPartitionedDownloadResumesFromCheckpoint(t *testing.T) {
 		t.Fatalf("expected resumed file to contain both days, got: %s", content)
 	}
 }
+
+func TestHiveStylePartitioning(t *testing.T) {
+	server := newMockServer()
+	defer server.Close()
+
+	tempDir := t.TempDir()
+	outputPath := filepath.Join(tempDir, "xauusd.csv")
+	manifestPath := filepath.Join(tempDir, "manifest.json")
+
+	output := runCLI(
+		t,
+		server.URL,
+		"download",
+		"--symbol", "xauusd",
+		"--timeframe", "m1",
+		"--from", "2024-01-02T00:00:00Z",
+		"--to", "2024-01-04T00:00:00Z",
+		"--output", outputPath,
+		"--simple",
+		"--partition", "day",
+		"--hive",
+		"--checkpoint-manifest", manifestPath,
+	)
+
+	if !strings.Contains(output, "wrote 7 bars") {
+		t.Fatalf("unexpected hive output: %s", output)
+	}
+
+	// Verify directory structure:
+	// tempDir/xauusd/year=2024/month=01/day=02/data.csv
+	// tempDir/xauusd/year=2024/month=01/day=03/data.csv
+	dayOnePath := filepath.Join(tempDir, "xauusd", "year=2024", "month=01", "day=02", "data.csv")
+	dayTwoPath := filepath.Join(tempDir, "xauusd", "year=2024", "month=01", "day=03", "data.csv")
+
+	if _, err := os.Stat(dayOnePath); err != nil {
+		t.Fatalf("expected day one hive file, got error: %v", err)
+	}
+	if _, err := os.Stat(dayTwoPath); err != nil {
+		t.Fatalf("expected day two hive file, got error: %v", err)
+	}
+}
+
+func TestArrowDownloadFormat(t *testing.T) {
+	server := newMockServer()
+	defer server.Close()
+
+	outputPath := filepath.Join(t.TempDir(), "xauusd.arrow")
+
+	output := runCLI(
+		t,
+		server.URL,
+		"download",
+		"--symbol", "xauusd",
+		"--timeframe", "m1",
+		"--from", "2024-01-02T00:00:00Z",
+		"--to", "2024-01-02T00:03:00Z",
+		"--output", outputPath,
+		"--simple",
+	)
+
+	if !strings.Contains(output, "wrote 3 bars") {
+		t.Fatalf("unexpected arrow download output: %s", output)
+	}
+
+	info, err := os.Stat(outputPath)
+	if err != nil {
+		t.Fatalf("failed to stat arrow output: %v", err)
+	}
+	if info.Size() == 0 {
+		t.Fatal("expected non-empty arrow output file")
+	}
+}

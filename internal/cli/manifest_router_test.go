@@ -160,4 +160,3 @@ func TestCleanDuplicatesCli(t *testing.T) {
 		t.Errorf("unexpected routed CLI output: %s", out.String())
 	}
 }
-

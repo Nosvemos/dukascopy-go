@@ -66,7 +66,7 @@ func TestDownloadRejectsResumeForParquetOutput(t *testing.T) {
 		"--resume",
 	)
 
-	if !strings.Contains(output, "--resume is not supported for parquet output") {
+	if !strings.Contains(output, "--resume is not supported for parquet/arrow output") {
 		t.Fatalf("unexpected parquet resume validation output: %s", output)
 	}
 }

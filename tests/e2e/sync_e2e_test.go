@@ -95,7 +95,7 @@ func TestE2EDeltaSync(t *testing.T) {
 
 	content := string(data)
 	lines := strings.Split(strings.TrimSpace(content), "\n")
-	
+
 	// Expecting: Header (1 line) + Initial bars (3 lines) + Synced bars (3 lines) = 7 lines total
 	if len(lines) != 7 {
 		t.Fatalf("expected 7 lines in synced CSV, got %d:\n%s", len(lines), content)
