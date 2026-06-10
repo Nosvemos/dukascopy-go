@@ -8,36 +8,39 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	toml "github.com/pelletier/go-toml/v2"
+	yaml "gopkg.in/yaml.v3"
 )
 
 type appConfig struct {
-	BaseURL     string                 `json:"base_url"`
-	Instruments instrumentsConfig      `json:"instruments"`
-	Download    downloadDefaultsConfig `json:"download"`
+	BaseURL     string                 `json:"base_url" yaml:"base_url" toml:"base_url"`
+	Instruments instrumentsConfig      `json:"instruments" yaml:"instruments" toml:"instruments"`
+	Download    downloadDefaultsConfig `json:"download" yaml:"download" toml:"download"`
 }
 
 type instrumentsConfig struct {
-	Limit *int `json:"limit"`
+	Limit *int `json:"limit" yaml:"limit" toml:"limit"`
 }
 
 type downloadDefaultsConfig struct {
-	Timeframe          string `json:"timeframe"`
-	Side               string `json:"side"`
-	Simple             *bool  `json:"simple"`
-	Full               *bool  `json:"full"`
-	CustomColumns      string `json:"custom_columns"`
-	Live               *bool  `json:"live"`
-	PollInterval       string `json:"poll_interval"`
-	Retries            *int   `json:"retries"`
-	RetryBackoff       string `json:"retry_backoff"`
-	RateLimit          string `json:"rate_limit"`
-	Progress           *bool  `json:"progress"`
-	Resume             *bool  `json:"resume"`
-	Partition          string `json:"partition"`
-	Parallelism        *int   `json:"parallelism"`
-	CheckpointManifest string `json:"checkpoint_manifest"`
-	CacheDir           string `json:"cache_dir"`
-	KeepCache          *bool  `json:"keep_cache"`
+	Timeframe          string `json:"timeframe" yaml:"timeframe" toml:"timeframe"`
+	Side               string `json:"side" yaml:"side" toml:"side"`
+	Simple             *bool  `json:"simple" yaml:"simple" toml:"simple"`
+	Full               *bool  `json:"full" yaml:"full" toml:"full"`
+	CustomColumns      string `json:"custom_columns" yaml:"custom_columns" toml:"custom_columns"`
+	Live               *bool  `json:"live" yaml:"live" toml:"live"`
+	PollInterval       string `json:"poll_interval" yaml:"poll_interval" toml:"poll_interval"`
+	Retries            *int   `json:"retries" yaml:"retries" toml:"retries"`
+	RetryBackoff       string `json:"retry_backoff" yaml:"retry_backoff" toml:"retry_backoff"`
+	RateLimit          string `json:"rate_limit" yaml:"rate_limit" toml:"rate_limit"`
+	Progress           *bool  `json:"progress" yaml:"progress" toml:"progress"`
+	Resume             *bool  `json:"resume" yaml:"resume" toml:"resume"`
+	Partition          string `json:"partition" yaml:"partition" toml:"partition"`
+	Parallelism        *int   `json:"parallelism" yaml:"parallelism" toml:"parallelism"`
+	CheckpointManifest string `json:"checkpoint_manifest" yaml:"checkpoint_manifest" toml:"checkpoint_manifest"`
+	CacheDir           string `json:"cache_dir" yaml:"cache_dir" toml:"cache_dir"`
+	KeepCache          *bool  `json:"keep_cache" yaml:"keep_cache" toml:"keep_cache"`
 }
 
 var activeConfig *appConfig
@@ -100,8 +103,26 @@ func readConfigFile(path string) (*appConfig, error) {
 	}
 
 	var config appConfig
-	if err := json.Unmarshal(data, &config); err != nil {
-		return nil, fmt.Errorf("decode config %s: %w", path, err)
+	lower := strings.ToLower(path)
+	if strings.HasSuffix(lower, ".yaml") || strings.HasSuffix(lower, ".yml") {
+		if err := yaml.Unmarshal(data, &config); err != nil {
+			return nil, fmt.Errorf("decode yaml config %s: %w", path, err)
+		}
+	} else if strings.HasSuffix(lower, ".toml") {
+		if err := toml.Unmarshal(data, &config); err != nil {
+			return nil, fmt.Errorf("decode toml config %s: %w", path, err)
+		}
+	} else {
+		// Fallback to JSON, or try YAML/TOML if JSON fails
+		if err := json.Unmarshal(data, &config); err != nil {
+			if errTOML := toml.Unmarshal(data, &config); errTOML == nil {
+				return &config, nil
+			}
+			if errYAML := yaml.Unmarshal(data, &config); errYAML == nil {
+				return &config, nil
+			}
+			return nil, fmt.Errorf("decode config %s: %w", path, err)
+		}
 	}
 	return &config, nil
 }

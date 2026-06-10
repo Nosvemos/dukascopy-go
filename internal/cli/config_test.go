@@ -2,6 +2,7 @@ package cli
 
 import (
 	"flag"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -232,4 +233,71 @@ func boolPtr(value bool) *bool {
 
 func intPtr(value int) *int {
 	return &value
+}
+
+func TestReadConfigFile(t *testing.T) {
+	t.Run("loads JSON config successfully", func(t *testing.T) {
+		tempDir := t.TempDir()
+		path := tempDir + "/config.json"
+		content := `{"base_url": "https://json.test", "download": {"timeframe": "m5"}}`
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatalf("failed to write temp config: %v", err)
+		}
+		config, err := readConfigFile(path)
+		if err != nil {
+			t.Fatalf("readConfigFile returned error: %v", err)
+		}
+		if config.BaseURL != "https://json.test" {
+			t.Errorf("expected base_url https://json.test, got %q", config.BaseURL)
+		}
+		if config.Download.Timeframe != "m5" {
+			t.Errorf("expected timeframe m5, got %q", config.Download.Timeframe)
+		}
+	})
+
+	t.Run("loads YAML config successfully", func(t *testing.T) {
+		tempDir := t.TempDir()
+		path := tempDir + "/config.yaml"
+		content := `
+base_url: https://yaml.test
+download:
+  timeframe: m15
+`
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatalf("failed to write temp config: %v", err)
+		}
+		config, err := readConfigFile(path)
+		if err != nil {
+			t.Fatalf("readConfigFile returned error: %v", err)
+		}
+		if config.BaseURL != "https://yaml.test" {
+			t.Errorf("expected base_url https://yaml.test, got %q", config.BaseURL)
+		}
+		if config.Download.Timeframe != "m15" {
+			t.Errorf("expected timeframe m15, got %q", config.Download.Timeframe)
+		}
+	})
+
+	t.Run("loads TOML config successfully", func(t *testing.T) {
+		tempDir := t.TempDir()
+		path := tempDir + "/config.toml"
+		content := `
+base_url = "https://toml.test"
+[download]
+timeframe = "d1"
+`
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatalf("failed to write temp config: %v", err)
+		}
+		config, err := readConfigFile(path)
+		if err != nil {
+			t.Fatalf("readConfigFile returned error: %v", err)
+		}
+		if config.BaseURL != "https://toml.test" {
+			t.Errorf("expected base_url https://toml.test, got %q", config.BaseURL)
+		}
+		if config.Download.Timeframe != "d1" {
+			t.Errorf("expected timeframe d1, got %q", config.Download.Timeframe)
+		}
+	})
 }

@@ -123,7 +123,7 @@ func runSync(args []string, stdout io.Writer, stderr io.Writer) error {
 	// Determine custom end timestamp or default to now
 	to = time.Now().UTC()
 	if strings.TrimSpace(*toValue) != "" {
-		parsedTo, err := parseFlexibleTime(*toValue)
+		parsedTo, err := ParseFlexibleTime(*toValue)
 		if err != nil {
 			return fmt.Errorf("--to %w", err)
 		}

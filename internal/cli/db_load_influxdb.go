@@ -117,17 +117,30 @@ func ingestInfluxDB(
 		return nil
 	}
 
+	var skippedRows int
+	var warnCount int
+
 	for {
 		row, readErr := csvReader.Read()
 		if readErr == io.EOF {
 			break
 		}
 		if readErr != nil {
-			return fmt.Errorf("CSV read error at row %d: %w", totalRows+batchRows+2, readErr)
+			return fmt.Errorf("CSV read error at row %d: %w", totalRows+batchRows+skippedRows+2, readErr)
 		}
 
 		line, lineErr := buildLineProtocol(row, colIndex, measurement, symbolTag)
 		if lineErr != nil || line == "" {
+			skippedRows++
+			if warnCount < 10 {
+				warnCount++
+				reason := "empty protocol line"
+				if lineErr != nil {
+					reason = lineErr.Error()
+				}
+				fmt.Fprintf(stderr, "%sdb-load%s warning: skipping malformed row %d: %s\n",
+					colorize(colorYellow), colorize(colorReset), totalRows+batchRows+skippedRows+1, reason)
+			}
 			continue // skip malformed rows
 		}
 
@@ -145,6 +158,11 @@ func ingestInfluxDB(
 	// Flush remaining rows
 	if err := flushBatch(); err != nil {
 		return err
+	}
+
+	if skippedRows > 0 {
+		fmt.Fprintf(stderr, "%sdb-load%s warning: skipped %d malformed rows during InfluxDB ingestion\n",
+			colorize(colorYellow), colorize(colorReset), skippedRows)
 	}
 
 	fmt.Fprintf(stdout, "%sdb-load%s InfluxDB: successfully wrote %d rows from %q into bucket %q measurement %q\n",
