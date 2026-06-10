@@ -176,6 +176,58 @@ func writeParquetRecords(outputPath string, columns []string, records []map[stri
 	return DefaultConfig().writeParquetRecords(outputPath, columns, records)
 }
 
+type ParquetStreamWriter struct {
+	file   *os.File
+	writer parquetRecordWriter
+}
+
+func (c *Config) CreateParquetStreamWriter(outputPath string, columns []string) (*ParquetStreamWriter, error) {
+	if err := ensureParentDir(outputPath); err != nil {
+		return nil, err
+	}
+
+	file, err := os.Create(outputPath)
+	if err != nil {
+		return nil, err
+	}
+
+	schema := parquetSchemaForColumns(columns)
+	writer := c.parquetWriterFactory(file, schema)
+	writer.SetKeyValueMetadata(parquetColumnsMetadataKey, strings.Join(columns, ","))
+
+	return &ParquetStreamWriter{
+		file:   file,
+		writer: writer,
+	}, nil
+}
+
+func CreateParquetStreamWriter(outputPath string, columns []string) (*ParquetStreamWriter, error) {
+	return DefaultConfig().CreateParquetStreamWriter(outputPath, columns)
+}
+
+func (w *ParquetStreamWriter) WriteBatch(records []map[string]any) error {
+	if len(records) == 0 {
+		return nil
+	}
+	_, err := w.writer.Write(records)
+	return err
+}
+
+func (w *ParquetStreamWriter) Close() error {
+	var errs []string
+	if err := w.writer.Close(); err != nil {
+		errs = append(errs, err.Error())
+	}
+	if err := w.file.Close(); err != nil {
+		errs = append(errs, err.Error())
+	}
+	if len(errs) > 0 {
+		return fmt.Errorf("parquet stream writer close failed: %s", strings.Join(errs, "; "))
+	}
+	return nil
+}
+
+
 func parquetSchemaForColumns(columns []string) *parquet.Schema {
 	group := make(parquet.Group, len(columns))
 	for _, column := range columns {

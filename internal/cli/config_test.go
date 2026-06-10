@@ -86,6 +86,8 @@ func TestApplyDownloadConfigDefaults(t *testing.T) {
 	parallelism := fs.Int("parallelism", 1, "")
 	checkpointManifest := fs.String("checkpoint-manifest", "", "")
 	baseURL := fs.String("base-url", "https://default.test", "")
+	cacheDir := fs.String("cache-dir", "./.dukascopy_cache", "")
+	keepCache := fs.Bool("keep-cache", false, "")
 
 	if err := fs.Parse([]string{"--side", "bid", "--retries", "9"}); err != nil {
 		t.Fatalf("Parse returned error: %v", err)
@@ -109,6 +111,8 @@ func TestApplyDownloadConfigDefaults(t *testing.T) {
 		parallelism,
 		checkpointManifest,
 		baseURL,
+		cacheDir,
+		keepCache,
 	)
 	if err != nil {
 		t.Fatalf("applyDownloadConfigDefaults returned error: %v", err)
@@ -193,6 +197,8 @@ func TestApplyDownloadConfigDefaultsRejectsInvalidDuration(t *testing.T) {
 	parallelism := fs.Int("parallelism", 1, "")
 	checkpointManifest := fs.String("checkpoint-manifest", "", "")
 	baseURL := fs.String("base-url", "https://default.test", "")
+	cacheDir := fs.String("cache-dir", "./.dukascopy_cache", "")
+	keepCache := fs.Bool("keep-cache", false, "")
 
 	err := applyDownloadConfigDefaults(
 		fs,
@@ -212,6 +218,8 @@ func TestApplyDownloadConfigDefaultsRejectsInvalidDuration(t *testing.T) {
 		parallelism,
 		checkpointManifest,
 		baseURL,
+		cacheDir,
+		keepCache,
 	)
 	if err == nil {
 		t.Fatal("expected invalid duration error")

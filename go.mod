@@ -1,6 +1,6 @@
 module github.com/Nosvemos/dukascopy-go
 
-go 1.26.0
+go 1.24.9
 
 require (
 	github.com/charmbracelet/bubbles v1.0.0
