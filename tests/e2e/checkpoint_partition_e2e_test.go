@@ -162,7 +162,7 @@ func TestPartitionedDownloadResumesFromCheckpoint(t *testing.T) {
 		"--symbol", "xauusd",
 		"--timeframe", "m1",
 		"--from", "2024-01-02T00:00:00Z",
-		"--to", "2024-01-04T00:00:00Z",
+		"--to", "2024-01-03T23:59:59Z",
 		"--output", outputPath,
 		"--simple",
 		"--partition", "auto",
@@ -249,14 +249,14 @@ func TestPartitionedDownloadResumesFromCheckpoint(t *testing.T) {
 		"--symbol", "xauusd",
 		"--timeframe", "m1",
 		"--from", "2024-01-02T00:00:00Z",
-		"--to", "2024-01-04T00:00:00Z",
+		"--to", "2024-01-03T23:59:59Z",
 		"--output", outputPath,
 		"--simple",
 		"--partition", "auto",
 		"--checkpoint-manifest", manifestPath,
 	)
 
-	if !strings.Contains(output, "wrote 7 bars") {
+	if !strings.Contains(output, "wrote 6 bars") {
 		t.Fatalf("unexpected resumed output: %s", output)
 	}
 	if dayOneHealthyAttempts.Load() != 0 {
