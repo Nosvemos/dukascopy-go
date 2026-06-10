@@ -36,6 +36,8 @@ type downloadDefaultsConfig struct {
 	Partition          string `json:"partition"`
 	Parallelism        *int   `json:"parallelism"`
 	CheckpointManifest string `json:"checkpoint_manifest"`
+	CacheDir           string `json:"cache_dir"`
+	KeepCache          *bool  `json:"keep_cache"`
 }
 
 var activeConfig *appConfig
@@ -144,6 +146,8 @@ func applyDownloadConfigDefaults(
 	parallelism *int,
 	checkpointManifest *string,
 	baseURL *string,
+	cacheDir *string,
+	keepCache *bool,
 ) error {
 	if activeConfig == nil {
 		return nil
@@ -209,6 +213,12 @@ func applyDownloadConfigDefaults(
 	}
 	if !flagWasSet(fs, "base-url") && strings.TrimSpace(activeConfig.BaseURL) != "" {
 		*baseURL = strings.TrimSpace(activeConfig.BaseURL)
+	}
+	if !flagWasSet(fs, "cache-dir") && strings.TrimSpace(config.CacheDir) != "" {
+		*cacheDir = strings.TrimSpace(config.CacheDir)
+	}
+	if !flagWasSet(fs, "keep-cache") && config.KeepCache != nil {
+		*keepCache = *config.KeepCache
 	}
 	return nil
 }

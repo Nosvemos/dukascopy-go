@@ -58,6 +58,8 @@ func runDownload(args []string, stdout io.Writer, stderr io.Writer) error {
 	proxyFile := fs.String("proxy-file", "", "optional proxy list file path (HTTP/SOCKS5)")
 	engine := fs.String("engine", "jetta", "downloader engine: jetta or datafeed")
 	fillGaps := fs.String("fill-gaps", "none", "gap filling mode: none, forward")
+	cacheDir := fs.String("cache-dir", "./.dukascopy_cache", "temporary cache directory path")
+	keepCache := fs.Bool("keep-cache", false, "keep temporary cache files after successful download")
 
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -118,6 +120,8 @@ func runDownload(args []string, stdout io.Writer, stderr io.Writer) error {
 		parallelism,
 		checkpointManifest,
 		baseURL,
+		cacheDir,
+		keepCache,
 	); err != nil {
 		return err
 	}
@@ -414,12 +418,14 @@ func runDownload(args []string, stdout io.Writer, stderr io.Writer) error {
 		return runLiveDownload(ctx, client, stdout, progressWriter, *outputPath, storageOutputPath, manifestPath, request, resultKind, barColumns, tickColumns, normalizedPartition, *parallelism, *pollInterval)
 	}
 
-	if normalizedPartition != partitionNone {
-		manifestPath := strings.TrimSpace(*checkpointManifest)
-		if manifestPath == "" {
-			manifestPath = checkpoint.DefaultManifestPath(*outputPath)
-		}
-		return runPartitionedDownload(ctx, client, stdout, progressWriter, *outputPath, manifestPath, request, resultKind, barColumns, tickColumns, normalizedPartition, *parallelism)
+	manifestPath := strings.TrimSpace(*checkpointManifest)
+	if manifestPath == "" {
+		manifestPath = checkpoint.DefaultManifestPath(*outputPath)
+	}
+
+	keepCacheVal := *keepCache
+	if !flagWasSet(fs, "keep-cache") && normalizedPartition != partitionNone {
+		keepCacheVal = true
 	}
 
 	resumeState, dedupeRecord, err := prepareResume(*resume, *outputPath, resultKind, barColumns, tickColumns, &request)
@@ -431,19 +437,35 @@ func runDownload(args []string, stdout io.Writer, stderr io.Writer) error {
 		return nil
 	}
 
-	appended, err := runSingleDownload(ctx, client, stdout, *outputPath, outputToStdout, resumeState, dedupeRecord, request, resultKind, barColumns, tickColumns)
+	appended, err := runChunkedDownload(
+		ctx,
+		client,
+		stdout,
+		progressWriter,
+		*outputPath,
+		manifestPath,
+		request,
+		resultKind,
+		barColumns,
+		tickColumns,
+		normalizedPartition,
+		*parallelism,
+		*cacheDir,
+		keepCacheVal,
+		resumeState,
+		dedupeRecord,
+	)
 	if err != nil {
 		return err
 	}
-	if outputToStdout {
-		return nil
-	}
 
-	label := "bars"
-	if resultKind == dukascopy.ResultKindTick {
-		label = "ticks"
+	if !outputToStdout {
+		label := "bars"
+		if resultKind == dukascopy.ResultKindTick {
+			label = "ticks"
+		}
+		fmt.Fprintf(stdout, "%swrote%s %d %s to %s\n", colorize(colorGreen), colorize(colorReset), appended, label, *outputPath)
 	}
-	fmt.Fprintf(stdout, "%swrote%s %d %s to %s\n", colorize(colorGreen), colorize(colorReset), appended, label, *outputPath)
 	return nil
 }
 
