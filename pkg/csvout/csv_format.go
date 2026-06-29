@@ -102,7 +102,7 @@ func (c *Config) formatBarColumn(column string, scale int, bid dukascopy.Bar, as
 	case "spread":
 		return formatPrice(roundToScale(ask.Close, scale)-roundToScale(bid.Close, scale), scale), nil
 	case "volume":
-		return formatVolume(bid.Volume), nil
+		return formatVolume(bid.Volume + ask.Volume), nil
 	case "bid_open":
 		return formatPrice(roundToScale(bid.Open, scale), scale), nil
 	case "bid_high":
