@@ -94,13 +94,12 @@ func (c *Config) AssembleCSVFromParts(outputPath string, partPaths []string, fro
 				return fmt.Errorf("partition file %s contains a malformed row", partPath)
 			}
 
-			timestamp, err := time.Parse(timestampLayout, record[timestampIndex])
+			timestamp, err := parseFlexibleTimestamp(record[timestampIndex])
 			if err != nil {
 				closeReader()
 				closeWriter()
 				return fmt.Errorf("parse partition timestamp %q: %w", record[timestampIndex], err)
 			}
-			timestamp = timestamp.UTC()
 			if timestamp.Before(from) || !timestamp.Before(to) {
 				continue
 			}
@@ -148,6 +147,14 @@ func (c *Config) CleanDuplicates(path string) (int, error) {
 		return c.cleanParquetDuplicates(path)
 	}
 
+	// Warn about potential high memory usage for very large files
+	if info, statErr := os.Stat(path); statErr == nil {
+		sizeMB := info.Size() / (1024 * 1024)
+		if sizeMB > 500 {
+			fmt.Fprintf(os.Stderr, "warning: CleanDuplicates loads the entire file into memory; %s is %d MB which may cause high memory usage\n", path, sizeMB)
+		}
+	}
+
 	_, readerFactory, closeReader, err := c.openCSVReader(path)
 	if err != nil {
 		return 0, err
@@ -188,12 +195,11 @@ func (c *Config) CleanDuplicates(path string) (int, error) {
 			continue
 		}
 
-		t, err := time.Parse(timestampLayout, record[timestampIndex])
+		t, err := parseFlexibleTimestamp(record[timestampIndex])
 		if err != nil {
 			closeReader()
 			return 0, fmt.Errorf("failed to parse timestamp %q: %w", record[timestampIndex], err)
 		}
-		t = t.UTC()
 
 		stampKey := t.Format(timestampLayout)
 		if seenTimestamps[stampKey] {

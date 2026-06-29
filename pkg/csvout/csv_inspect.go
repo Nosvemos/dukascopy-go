@@ -187,11 +187,10 @@ func InspectCSVWithOptions(path string, options InspectOptions) (CSVStats, error
 			continue
 		}
 
-		timestamp, err := time.Parse(timestampLayout, record[timestampIndex])
+		timestamp, err := parseFlexibleTimestamp(record[timestampIndex])
 		if err != nil {
 			return CSVStats{}, fmt.Errorf("parse CSV timestamp %q: %w", record[timestampIndex], err)
 		}
-		timestamp = timestamp.UTC()
 		if stats.FirstTimestamp.IsZero() || timestamp.Before(stats.FirstTimestamp) {
 			stats.FirstTimestamp = timestamp
 		}

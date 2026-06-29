@@ -67,12 +67,11 @@ func (c *Config) ExtractCSVRange(sourcePath string, outputPath string, from time
 			return fmt.Errorf("source CSV %s contains a malformed row", sourcePath)
 		}
 
-		timestamp, err := time.Parse(timestampLayout, record[timestampIndex])
+		timestamp, err := parseFlexibleTimestamp(record[timestampIndex])
 		if err != nil {
 			closeWriter()
 			return fmt.Errorf("parse source CSV timestamp %q: %w", record[timestampIndex], err)
 		}
-		timestamp = timestamp.UTC()
 		if timestamp.Before(from) || !timestamp.Before(to) {
 			continue
 		}
@@ -147,11 +146,10 @@ func (c *Config) StreamCSVRowsAfter(path string, w io.Writer, after time.Time, i
 			return 0, time.Time{}, fmt.Errorf("source CSV %s contains a malformed row", path)
 		}
 
-		timestamp, err := time.Parse(timestampLayout, record[timestampIndex])
+		timestamp, err := parseFlexibleTimestamp(record[timestampIndex])
 		if err != nil {
 			return 0, time.Time{}, fmt.Errorf("parse source CSV timestamp %q: %w", record[timestampIndex], err)
 		}
-		timestamp = timestamp.UTC()
 		if !after.IsZero() && (!timestamp.After(after)) {
 			continue
 		}
@@ -221,14 +219,14 @@ func (c *Config) InspectExistingCSV(outputPath string) (ResumeState, error) {
 		return ResumeState{}, fmt.Errorf("existing CSV %s has a malformed last row", outputPath)
 	}
 
-	lastTime, err := time.Parse(timestampLayout, lastRecord[timestampIndex])
+	lastTime, err := parseFlexibleTimestamp(lastRecord[timestampIndex])
 	if err != nil {
 		return ResumeState{}, fmt.Errorf("parse existing CSV timestamp %q: %w", lastRecord[timestampIndex], err)
 	}
 
 	state.HasRows = true
 	state.LastRecord = lastRecord
-	state.LastTime = lastTime.UTC()
+	state.LastTime = lastTime
 	return state, nil
 }
 
