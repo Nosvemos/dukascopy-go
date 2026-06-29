@@ -2,9 +2,11 @@ package csvout
 
 import (
 	"encoding/csv"
+	"fmt"
 	"io"
 	"os"
 	"reflect"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -13,6 +15,44 @@ import (
 )
 
 const timestampLayout = time.RFC3339Nano
+
+// flexibleTimestampLayouts lists all known timestamp formats that the tool may
+// produce via --preset or --timestamp-format flags.  They are tried in order
+// from most-specific to least-specific to avoid ambiguous matches.
+var flexibleTimestampLayouts = []string{
+	time.RFC3339Nano,            // default output format
+	time.RFC3339,                // RFC3339 without nanoseconds
+	"2006-01-02T15:04:05Z07:00", // explicit RFC3339 variant
+	"2006-01-02 15:04:05",      // backtrader preset
+	"2006.01.02 15:04:05",      // mt5 preset
+	"2006.01.02 15:04",         // mt4 preset
+	"20060102 150405",          // ninjatrader preset
+	"2006-01-02 15:04",         // common short format
+	"2006-01-02",               // date-only
+}
+
+// parseFlexibleTimestamp tries to parse a timestamp string using all known
+// layouts produced by --preset and --timestamp-format flags.  If all layout
+// attempts fail, it tries to interpret the value as a Unix millisecond integer.
+func parseFlexibleTimestamp(value string) (time.Time, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return time.Time{}, fmt.Errorf("empty timestamp value")
+	}
+
+	for _, layout := range flexibleTimestampLayouts {
+		if t, err := time.Parse(layout, value); err == nil {
+			return t.UTC(), nil
+		}
+	}
+
+	// Fallback: try Unix millisecond integer
+	if ms, err := strconv.ParseInt(value, 10, 64); err == nil {
+		return time.UnixMilli(ms).UTC(), nil
+	}
+
+	return time.Time{}, fmt.Errorf("unrecognized timestamp format: %q", value)
+}
 
 type Profile string
 

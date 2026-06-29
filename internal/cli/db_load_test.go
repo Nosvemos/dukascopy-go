@@ -677,3 +677,68 @@ func TestIngestPostgres_ValidationAndFailure(t *testing.T) {
 		t.Errorf("expected connection failure, not format support error: %v", err2)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// sanitizeMeasurementName tests
+// ---------------------------------------------------------------------------
+
+func TestSanitizeMeasurementName(t *testing.T) {
+	valid := []struct {
+		input string
+		want  string
+	}{
+		{"eurusd_m1", "eurusd_m1"},
+		{"XAUUSD", "XAUUSD"},
+		{"public.eurusd_m1", "public.eurusd_m1"},
+		{"my-table", "my-table"},
+		{"data/2024", "data/2024"},
+		{"  eurusd_m1  ", "eurusd_m1"},
+	}
+	for _, tc := range valid {
+		got, err := sanitizeMeasurementName(tc.input)
+		if err != nil {
+			t.Errorf("sanitizeMeasurementName(%q) unexpected error: %v", tc.input, err)
+		}
+		if got != tc.want {
+			t.Errorf("sanitizeMeasurementName(%q) = %q, want %q", tc.input, got, tc.want)
+		}
+	}
+
+	invalid := []string{
+		"",
+		"   ",
+		"table name",  // space
+		"table,name",  // comma
+		"table\nname", // newline
+		"table\\name", // backslash
+		"table=name",  // equals
+		"table\tname", // tab
+	}
+	for _, tc := range invalid {
+		_, err := sanitizeMeasurementName(tc)
+		if err == nil {
+			t.Errorf("sanitizeMeasurementName(%q) expected error, got nil", tc)
+		}
+	}
+}
+
+func TestRunDBLoad_InvalidTableName(t *testing.T) {
+	dir := t.TempDir()
+	csvPath := filepath.Join(dir, "test.csv")
+	_ = os.WriteFile(csvPath, []byte("timestamp,open,high,low,close,volume\n2024-01-01T00:00:00Z,1.0,1.1,0.9,1.0,100\n"), 0o644)
+
+	var stdout, stderr bytes.Buffer
+	err := runDBLoad([]string{
+		"--input", csvPath,
+		"--db", "clickhouse",
+		"--url", "http://localhost:8123",
+		"--table", "table with spaces",
+	}, &stdout, &stderr)
+
+	if err == nil {
+		t.Fatal("expected error for table name with spaces")
+	}
+	if !strings.Contains(err.Error(), "invalid --table") {
+		t.Errorf("expected 'invalid --table' in error, got: %v", err)
+	}
+}

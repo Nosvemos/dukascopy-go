@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -67,6 +68,11 @@ func runDBLoad(args []string, stdout io.Writer, stderr io.Writer) error {
 		return errors.New("--table is required")
 	}
 
+	sanitizedTable, err := sanitizeMeasurementName(*table)
+	if err != nil {
+		return fmt.Errorf("invalid --table: %w", err)
+	}
+
 	dbTypeLower := strings.ToLower(strings.TrimSpace(*dbType))
 	if dbTypeLower != dbClickHouse && dbTypeLower != dbInfluxDB && dbTypeLower != dbPostgres && dbTypeLower != dbQuestDB {
 		return fmt.Errorf("unknown --db %q (supported: clickhouse, influxdb, postgres, questdb)", *dbType)
@@ -99,9 +105,9 @@ func runDBLoad(args []string, stdout io.Writer, stderr io.Writer) error {
 
 	switch dbTypeLower {
 	case dbClickHouse:
-		return ingestClickHouse(ctx, stdout, stderr, inputPath, *dbURL, *table, *user, *password, *timeout)
+		return ingestClickHouse(ctx, stdout, stderr, inputPath, *dbURL, sanitizedTable, *user, *password, *timeout)
 	case dbPostgres:
-		return ingestPostgres(ctx, stdout, stderr, inputPath, *dbURL, *table, *createHypertable, *chunkInterval)
+		return ingestPostgres(ctx, stdout, stderr, inputPath, *dbURL, sanitizedTable, *createHypertable, *chunkInterval)
 	case dbInfluxDB:
 		authToken := strings.TrimSpace(*token)
 		if authToken == "" {
@@ -116,9 +122,9 @@ func runDBLoad(args []string, stdout io.Writer, stderr io.Writer) error {
 		if strings.TrimSpace(*bucket) == "" {
 			return errors.New("--bucket is required for InfluxDB")
 		}
-		return ingestInfluxDB(ctx, stdout, stderr, inputPath, *dbURL, *table, *org, *bucket, authToken, *symbol, batchSize, *timeout)
+		return ingestInfluxDB(ctx, stdout, stderr, inputPath, *dbURL, sanitizedTable, *org, *bucket, authToken, *symbol, batchSize, *timeout)
 	case dbQuestDB:
-		return ingestQuestDB(ctx, stdout, stderr, inputPath, *dbURL, *table, *ilpPort, *symbol, batchSize, *timeout)
+		return ingestQuestDB(ctx, stdout, stderr, inputPath, *dbURL, sanitizedTable, *ilpPort, *symbol, batchSize, *timeout)
 	}
 	return nil
 }
@@ -151,21 +157,47 @@ type DBLoadOptions struct {
 }
 
 func DBLoad(ctx context.Context, stdout io.Writer, stderr io.Writer, opt DBLoadOptions) error {
+	sanitizedTable, err := sanitizeMeasurementName(opt.Table)
+	if err != nil {
+		return fmt.Errorf("invalid table name: %w", err)
+	}
+
 	dbTypeLower := strings.ToLower(strings.TrimSpace(opt.DBType))
 	switch dbTypeLower {
 	case "clickhouse":
-		return ingestClickHouse(ctx, stdout, stderr, opt.InputPath, opt.DBURL, opt.Table, opt.User, opt.Password, opt.Timeout)
+		return ingestClickHouse(ctx, stdout, stderr, opt.InputPath, opt.DBURL, sanitizedTable, opt.User, opt.Password, opt.Timeout)
 	case "postgres":
-		return ingestPostgres(ctx, stdout, stderr, opt.InputPath, opt.DBURL, opt.Table, opt.CreateHypertable, opt.ChunkInterval)
+		return ingestPostgres(ctx, stdout, stderr, opt.InputPath, opt.DBURL, sanitizedTable, opt.CreateHypertable, opt.ChunkInterval)
 	case "influxdb":
 		authToken := strings.TrimSpace(opt.Token)
 		if authToken == "" {
 			authToken = strings.TrimSpace(opt.Password)
 		}
-		return ingestInfluxDB(ctx, stdout, stderr, opt.InputPath, opt.DBURL, opt.Table, opt.Org, opt.Bucket, authToken, opt.SymbolTag, opt.BatchSize, opt.Timeout)
+		return ingestInfluxDB(ctx, stdout, stderr, opt.InputPath, opt.DBURL, sanitizedTable, opt.Org, opt.Bucket, authToken, opt.SymbolTag, opt.BatchSize, opt.Timeout)
 	case "questdb":
-		return ingestQuestDB(ctx, stdout, stderr, opt.InputPath, opt.DBURL, opt.Table, opt.ILPPort, opt.SymbolTag, opt.BatchSize, opt.Timeout)
+		return ingestQuestDB(ctx, stdout, stderr, opt.InputPath, opt.DBURL, sanitizedTable, opt.ILPPort, opt.SymbolTag, opt.BatchSize, opt.Timeout)
 	default:
 		return fmt.Errorf("unknown --db %q (supported: clickhouse, influxdb, postgres, questdb)", opt.DBType)
 	}
+}
+
+// validMeasurementNameRe allows alphanumeric characters, underscores, hyphens,
+// dots, and forward slashes.  This covers standard table names and
+// schema-qualified names (e.g. "public.eurusd_m1") while rejecting characters
+// that could break InfluxDB/QuestDB Line Protocol (spaces, commas, newlines,
+// backslashes) or SQL queries.
+var validMeasurementNameRe = regexp.MustCompile(`^[a-zA-Z0-9_.\-/]+$`)
+
+// sanitizeMeasurementName validates and trims a table/measurement name.
+// It rejects empty names and names containing characters that could break
+// InfluxDB/QuestDB Line Protocol or SQL queries.
+func sanitizeMeasurementName(name string) (string, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return "", errors.New("table/measurement name cannot be empty")
+	}
+	if !validMeasurementNameRe.MatchString(name) {
+		return "", fmt.Errorf("table/measurement name %q contains invalid characters; only alphanumeric, underscore, hyphen, dot, and forward slash are allowed", name)
+	}
+	return name, nil
 }
