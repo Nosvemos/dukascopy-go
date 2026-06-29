@@ -75,7 +75,7 @@ func TestDownloadMinuteFullCSV(t *testing.T) {
 	if !strings.Contains(content, "timestamp,mid_open,mid_high,mid_low,mid_close,spread,volume,bid_open,bid_high,bid_low,bid_close,ask_open,ask_high,ask_low,ask_close") {
 		t.Fatalf("missing full header: %s", content)
 	}
-	if !strings.Contains(content, "2024-01-02T00:00:00Z,100.1,101.1,99.1,100.6,0.200,1100,100.000,101.000,99.000,100.500,100.200,101.200,99.200,100.700") {
+	if !strings.Contains(content, "2024-01-02T00:00:00Z,100.1,101.1,99.1,100.6,0.200,2200,100.000,101.000,99.000,100.500,100.200,101.200,99.200,100.700") {
 		t.Fatalf("missing expected full row: %s", content)
 	}
 }
@@ -113,7 +113,7 @@ func TestDownloadMinuteFusedCSV(t *testing.T) {
 	if strings.Contains(content, "mid_open") || strings.Contains(content, "mid_high") {
 		t.Fatalf("fused output should not include mid columns: %s", content)
 	}
-	if !strings.Contains(content, "2024-01-02T00:00:00Z,100.000,101.000,99.000,100.500,100.200,101.200,99.200,100.700,0.200,1100") {
+	if !strings.Contains(content, "2024-01-02T00:00:00Z,100.000,101.000,99.000,100.500,100.200,101.200,99.200,100.700,0.200,2200") {
 		t.Fatalf("missing expected fused row: %s", content)
 	}
 }
