@@ -70,6 +70,9 @@ func (c *Client) getJSONWithBytes(ctx context.Context, segments []string, target
 	for attempt := 0; attempt <= c.maxRetries; attempt++ {
 		var attemptBytes int64
 		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, requestURL.String(), nil)
+		req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36")
+		req.Header.Set("Accept", "application/json, text/plain, */*")
+		req.Header.Set("Accept-Language", "en-US,en;q=0.9")
 		if err := c.waitForRateLimit(ctx); err != nil {
 			return 0, err
 		}
@@ -119,6 +122,9 @@ func (c *Client) getJSONWithBytes(ctx context.Context, segments []string, target
 		})
 
 		wait := c.backoff * time.Duration(attempt+1)
+		if lastErr != nil && strings.Contains(lastErr.Error(), "429") {
+			wait = 10 * time.Second * time.Duration(attempt+1)
+		}
 		timer := time.NewTimer(wait)
 		select {
 		case <-ctx.Done():
@@ -141,6 +147,9 @@ func (c *Client) getRawBytes(ctx context.Context, segments []string) ([]byte, er
 	var lastErr error
 	for attempt := 0; attempt <= c.maxRetries; attempt++ {
 		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, requestURL.String(), nil)
+		req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36")
+		req.Header.Set("Accept", "*/*")
+		req.Header.Set("Accept-Language", "en-US,en;q=0.9")
 		if err := c.waitForRateLimit(ctx); err != nil {
 			return nil, err
 		}
@@ -188,6 +197,9 @@ func (c *Client) getRawBytes(ctx context.Context, segments []string) ([]byte, er
 		})
 
 		wait := c.backoff * time.Duration(attempt+1)
+		if lastErr != nil && strings.Contains(lastErr.Error(), "429") {
+			wait = 10 * time.Second * time.Duration(attempt+1)
+		}
 		timer := time.NewTimer(wait)
 		select {
 		case <-ctx.Done():

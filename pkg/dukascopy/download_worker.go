@@ -31,7 +31,7 @@ func downloadParallel[T any](
 	tasks := make(chan int, chunkCount)
 	results := make(chan downloadTask[T], chunkCount)
 
-	workersCount := 8
+	workersCount := 2
 	if chunkCount < workersCount {
 		workersCount = chunkCount
 	}

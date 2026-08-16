@@ -220,9 +220,21 @@ func decodeBars(payload candlePayload) []Bar {
 	for i := 0; i < size; i++ {
 		currentTime += payload.Shift * payload.Times[i]
 		currentOpen += payload.Opens[i] * payload.Multiplier
+		currentClose += payload.Closes[i] * payload.Multiplier
 		currentHigh += payload.Highs[i] * payload.Multiplier
 		currentLow += payload.Lows[i] * payload.Multiplier
-		currentClose += payload.Closes[i] * payload.Multiplier
+		if currentHigh < currentOpen {
+			currentHigh = currentOpen
+		}
+		if currentHigh < currentClose {
+			currentHigh = currentClose
+		}
+		if currentLow > currentOpen {
+			currentLow = currentOpen
+		}
+		if currentLow > currentClose {
+			currentLow = currentClose
+		}
 
 		bars = append(bars, Bar{
 			Time:   time.UnixMilli(currentTime).UTC(),

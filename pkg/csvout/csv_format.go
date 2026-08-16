@@ -205,20 +205,34 @@ type combinedBarRow struct {
 }
 
 func combineBarRows(bidBars []dukascopy.Bar, askBars []dukascopy.Bar) ([]combinedBarRow, error) {
-	if len(bidBars) != len(askBars) {
-		return nil, fmt.Errorf("bid/ask bar length mismatch: %d vs %d", len(bidBars), len(askBars))
+	if len(bidBars) == 0 && len(askBars) == 0 {
+		return nil, nil
+	}
+	if len(bidBars) == 0 || len(askBars) == 0 {
+		return nil, fmt.Errorf("both bid and ask bars are required")
 	}
 
+	i, j := 0, 0
 	rows := make([]combinedBarRow, 0, len(bidBars))
-	for index := range bidBars {
-		if !bidBars[index].Time.Equal(askBars[index].Time) {
-			return nil, fmt.Errorf("bid/ask timestamp mismatch at row %d: %s vs %s", index, bidBars[index].Time.UTC().Format(timestampLayout), askBars[index].Time.UTC().Format(timestampLayout))
+	for i < len(bidBars) && j < len(askBars) {
+		tBid := bidBars[i].Time.Unix()
+		tAsk := askBars[j].Time.Unix()
+		if tBid == tAsk {
+			rows = append(rows, combinedBarRow{
+				Time: bidBars[i].Time,
+				Bid:  bidBars[i],
+				Ask:  askBars[j],
+			})
+			i++
+			j++
+		} else if tBid < tAsk {
+			i++
+		} else {
+			j++
 		}
-		rows = append(rows, combinedBarRow{
-			Time: bidBars[index].Time,
-			Bid:  bidBars[index],
-			Ask:  askBars[index],
-		})
+	}
+	if len(rows) == 0 {
+		return nil, fmt.Errorf("no matching timestamps between bid and ask bars")
 	}
 
 	return rows, nil
