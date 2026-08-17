@@ -16,18 +16,20 @@ import (
 	"time"
 
 	"github.com/Nosvemos/dukascopy-go/pkg/dukascopy"
+	"github.com/Nosvemos/dukascopy-go/pkg/streaming"
 
 	_ "time/tzdata"
 )
 
 // LiveTick is the JSON envelope streamed to stdout / WebSocket clients.
 type LiveTick struct {
-	Timestamp int64   `json:"timestamp"` // Unix milliseconds
-	Symbol    string  `json:"symbol"`
-	Bid       float64 `json:"bid"`
-	Ask       float64 `json:"ask"`
-	BidVolume float64 `json:"bid_volume,omitempty"`
-	AskVolume float64 `json:"ask_volume,omitempty"`
+	Timestamp      int64                            `json:"timestamp"` // Unix milliseconds
+	Symbol         string                           `json:"symbol"`
+	Bid            float64                          `json:"bid"`
+	Ask            float64                          `json:"ask"`
+	BidVolume      float64                          `json:"bid_volume,omitempty"`
+	AskVolume      float64                          `json:"ask_volume,omitempty"`
+	Microstructure *streaming.MicrostructureMetrics `json:"microstructure,omitempty"`
 }
 
 // LiveBar is the JSON envelope for OHLCV bar streaming.
@@ -48,10 +50,10 @@ func runLiveStream(args []string, stdout io.Writer, stderr io.Writer) error {
 	fs := flag.NewFlagSet("live", flag.ContinueOnError)
 	fs.SetOutput(stdout)
 	fs.Usage = func() {
-		fmt.Fprintf(stdout, "%slive:%s Stream real-time ticks/bars to stdout and optional WebSocket server\n\n", colorize(colorCyan), colorize(colorReset))
+		fmt.Fprintf(stdout, "%slive:%s Stream real-time ticks/bars to stdout, WebSocket, Redis, or NATS\n\n", colorize(colorCyan), colorize(colorReset))
 		fmt.Fprint(stdout, "Usage:\n  dukascopy-go live [options]\n\nOptions:\n")
 		fs.PrintDefaults()
-		fmt.Fprint(stdout, "\nExamples:\n  dukascopy-go live --symbol eurusd --timeframe tick --format jsonl\n  dukascopy-go live --symbol eurusd --timeframe m1 --side bid --port 8080\n")
+		fmt.Fprint(stdout, "\nExamples:\n  dukascopy-go live --symbol eurusd --timeframe tick --format jsonl\n  dukascopy-go live --symbol eurusd --timeframe m1 --side bid --port 8080\n  dukascopy-go live --symbol eurusd --redis redis://localhost:6379/market_eurusd\n  dukascopy-go live --symbol eurusd --nats nats://localhost:4222/market.eurusd\n")
 	}
 
 	symbol := fs.String("symbol", "", "instrument symbol such as eurusd or xauusd (required)")
@@ -62,6 +64,9 @@ func runLiveStream(args []string, stdout io.Writer, stderr io.Writer) error {
 	pollInterval := fs.Duration("poll-interval", 1*time.Second, "polling interval for new ticks/bars")
 	baseURL := fs.String("base-url", readBaseURL(), "Dukascopy API base URL")
 	output := fs.String("output", "-", "output file path, - for stdout only")
+	redisURL := fs.String("redis", "", "optional Redis URL to publish live ticks/bars (e.g. redis://localhost:6379/market_eurusd)")
+	natsURL := fs.String("nats", "", "optional NATS URL to publish live ticks/bars (e.g. nats://localhost:4222/market.eurusd)")
+	microstructure := fs.Bool("microstructure", false, "include order flow & microstructure metrics in live tick stream (OFI, effective spread, velocity)")
 
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -122,6 +127,28 @@ func runLiveStream(args []string, stdout io.Writer, stderr io.Writer) error {
 			colorize(colorCyan), colorize(colorReset), *port)
 	}
 
+	var redisPub *streaming.RedisPublisher
+	if strings.TrimSpace(*redisURL) != "" {
+		rp, err := streaming.NewRedisPublisher(*redisURL)
+		if err != nil {
+			return err
+		}
+		defer rp.Close()
+		redisPub = rp
+		fmt.Fprintf(stderr, "%slive%s publishing to Redis: %s\n", colorize(colorCyan), colorize(colorReset), *redisURL)
+	}
+
+	var natsPub *streaming.NATSPublisher
+	if strings.TrimSpace(*natsURL) != "" {
+		np, err := streaming.NewNATSPublisher(*natsURL)
+		if err != nil {
+			return err
+		}
+		defer np.Close()
+		natsPub = np
+		fmt.Fprintf(stderr, "%slive%s publishing to NATS: %s\n", colorize(colorCyan), colorize(colorReset), *natsURL)
+	}
+
 	// Graceful shutdown context
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
@@ -147,7 +174,11 @@ func runLiveStream(args []string, stdout io.Writer, stderr io.Writer) error {
 	// Print CSV header once if format=csv
 	if formatLower == "csv" {
 		if isTick {
-			_, _ = fmt.Fprintln(out, "timestamp,symbol,bid,ask,bid_volume,ask_volume")
+			if *microstructure {
+				_, _ = fmt.Fprintln(out, "timestamp,symbol,bid,ask,bid_volume,ask_volume,spread,mid,ofi,eff_spread,amihud,velocity")
+			} else {
+				_, _ = fmt.Fprintln(out, "timestamp,symbol,bid,ask,bid_volume,ask_volume")
+			}
 		} else {
 			_, _ = fmt.Fprintln(out, "timestamp,symbol,timeframe,side,open,high,low,close,volume")
 		}
@@ -157,10 +188,11 @@ func runLiveStream(args []string, stdout io.Writer, stderr io.Writer) error {
 	var (
 		lastTickTime time.Time
 		lastBarTime  time.Time
+		prevTick     *dukascopy.Tick
 		stateMu      sync.Mutex
 	)
 
-	// emit writes a line to stdout/file and broadcasts to all WebSocket clients.
+	// emit writes a line to stdout/file and broadcasts to all WebSocket/Redis/NATS clients.
 	emit := func(payload []byte) {
 		line := make([]byte, len(payload)+1)
 		copy(line, payload)
@@ -168,6 +200,12 @@ func runLiveStream(args []string, stdout io.Writer, stderr io.Writer) error {
 		_, _ = out.Write(line)
 		if *port > 0 {
 			hub.broadcast(line)
+		}
+		if redisPub != nil {
+			_ = redisPub.Publish(ctx, payload)
+		}
+		if natsPub != nil {
+			_ = natsPub.Publish(ctx, payload)
 		}
 	}
 
@@ -209,18 +247,33 @@ func runLiveStream(args []string, stdout io.Writer, stderr io.Writer) error {
 					stateMu.Unlock()
 					cutoff = tick.Time
 
+					var micro *streaming.MicrostructureMetrics
+					if *microstructure {
+						m := streaming.ComputeMicrostructure(tick, prevTick)
+						micro = &m
+					}
+					currTick := tick
+					prevTick = &currTick
+
 					lt := LiveTick{
-						Timestamp: tick.Time.UnixMilli(),
-						Symbol:    strings.ToUpper(instrument.Name),
-						Bid:       tick.Bid,
-						Ask:       tick.Ask,
-						BidVolume: tick.BidVolume,
-						AskVolume: tick.AskVolume,
+						Timestamp:      tick.Time.UnixMilli(),
+						Symbol:         strings.ToUpper(instrument.Name),
+						Bid:            tick.Bid,
+						Ask:            tick.Ask,
+						BidVolume:      tick.BidVolume,
+						AskVolume:      tick.AskVolume,
+						Microstructure: micro,
 					}
 					switch formatLower {
 					case "csv":
-						emit([]byte(fmt.Sprintf("%d,%s,%.5f,%.5f,%.2f,%.2f",
-							lt.Timestamp, lt.Symbol, lt.Bid, lt.Ask, lt.BidVolume, lt.AskVolume)))
+						if *microstructure && micro != nil {
+							emit([]byte(fmt.Sprintf("%d,%s,%.5f,%.5f,%.2f,%.2f,%.5f,%.5f,%.4f,%.5f,%.6f,%.5f",
+								lt.Timestamp, lt.Symbol, lt.Bid, lt.Ask, lt.BidVolume, lt.AskVolume,
+								micro.Spread, micro.MidPrice, micro.OrderFlowImbalance, micro.EffectiveSpread, micro.AmihudIlliquidity, micro.PriceVelocity)))
+						} else {
+							emit([]byte(fmt.Sprintf("%d,%s,%.5f,%.5f,%.2f,%.2f",
+								lt.Timestamp, lt.Symbol, lt.Bid, lt.Ask, lt.BidVolume, lt.AskVolume)))
+						}
 					default: // jsonl / json
 						b, _ := json.Marshal(lt)
 						emit(b)
