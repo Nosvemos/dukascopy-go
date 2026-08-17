@@ -1,6 +1,6 @@
 <div align="center">
   <h1>dukascopy-go 🚀</h1>
-  <p><b>The fastest, zero-dependency tool to download historical and real-time Dukascopy market data.</b></p>
+  <p><b>The fastest, zero-dependency engine for historical tick/bar downloads, real-time streaming, and quant feature engineering.</b></p>
 
   <img width="800" height="210" alt="download" src="https://github.com/user-attachments/assets/f240008c-5e87-4139-bddb-20b55ac15743" />
   
@@ -10,226 +10,307 @@
     <a href="https://pkg.go.dev/github.com/Nosvemos/dukascopy-go"><img src="https://pkg.go.dev/badge/github.com/Nosvemos/dukascopy-go.svg" alt="Go Reference"></a>
     <a href="https://github.com/Nosvemos/dukascopy-go/releases"><img src="https://img.shields.io/github/v/release/Nosvemos/dukascopy-go" alt="Latest release"></a>
   </p>
-  <p><i>Forex (100+ Pairs) • Metals • Crypto • Commodities • CFDs • Stocks • Indices</i></p>
+  <p><i>Forex (100+ Pairs) • Precious Metals • Cryptocurrencies • Commodities • CFDs • Stocks • Indices</i></p>
 </div>
 
 ---
 
 ## ⚡ Why `dukascopy-go`?
 
-| Feature | `dukascopy-go` | Node.js Alternatives |
+| Feature | `dukascopy-go` | Legacy Node.js / Python Tools |
 |---|---|---|
-| **Speed** | 🚀 Native Go + 64KB Sequential Buffering (~100× Faster) | 🐢 Slower V8/Node.js execution |
-| **Parities** | 🌍 170+ Offline Fallback Database + Online Hot-Reload | ⚠️ Requires full online resolution |
-| **Multi-Symbol** | ✅ Comma-separated batch with automatic path formatting | ❌ Single symbol only |
-| **Dependencies** | ✨ Zero — standalone single binary | 📦 Requires Node.js, NPM, modules |
-| **Delta Sync** | ✅ In-place sync to append missing slices | ❌ Restarts from scratch |
-| **Gap Filling** | ✅ Quant-grade forward-filling with weekend/holiday awareness | ❌ Leaves gaps as-is |
-| **Throttling** | ✅ AIMD Adaptive Rate Limiting (self-corrects on 429) | ❌ Fixed rate limits |
-| **Resumability** | ✅ SHA-256 manifest checkpoints & auto-resume | ❌ Restarts from scratch |
-| **Real-time** | ✅ Native WebSocket & Stdout (JSONL/CSV) | ⚠️ Node.js API only |
-| **SDK** | ✅ Go library, Python + C wrapper | ⚠️ Node.js only |
-| **Deduplication** | ✅ In-place atomic duplicate/gap repair | ❌ Requires external tools |
+| **Speed & Concurrency** | 🚀 Native Go + Multi-Worker Parallelism (~100× Faster) | 🐢 Slow single-threaded scripts |
+| **Quant Features & ML** | 🧠 On-the-fly Indicators (RSI, EMA, ATR, VWAP, Volatility) | ❌ Raw OHLCV only, requires pandas post-processing |
+| **Alternative Bar Sampling** | 📊 Tick, Volume, and Dollar/Nominal Bars | ❌ Time-based bars only |
+| **Data Lake & Cloud** | ☁️ Direct S3 / Cloudflare R2 / GCS / MinIO Streaming Upload | ❌ Local disk only |
+| **Streaming & Trade Bots** | 🤖 Native WebSocket, Redis Streams/PubSub, NATS | ⚠️ Custom wrappers required |
+| **Price & Indicator Watch** | 🔔 `watch` CLI with custom triggers and Webhook POSTs | ❌ Not available |
+| **Microstructure & OFI** | 🔬 Order Flow Imbalance, Effective Spread, Amihud Illiquidity | ❌ Not available |
+| **Database Ingestion** | 🗄️ Zero-driver fast ingest into ClickHouse, QuestDB, TimescaleDB, InfluxDB | ⚠️ Slow python loops / external ETL |
+| **Outlier Scrubbing** | 🛡️ Rolling MAD (Median Absolute Deviation) bad tick scrubber | ❌ Raw noisy ticks |
+| **Zero Dependencies** | ✨ Single static binary — no Python/Node runtime needed | 📦 Heavy dependency trees |
+| **Resumability** | ✅ SHA-256 chunk manifests & automatic delta sync | ❌ Restarts from scratch |
 
 ---
 
 ## 🚀 Installation
 
-Pre-built binaries are available on the **[Releases page](https://github.com/Nosvemos/dukascopy-go/releases)** — no Go required.
+Pre-built standalone binaries for **Windows, Linux, and macOS (Apple Silicon & Intel)** are available on the **[Releases Page](https://github.com/Nosvemos/dukascopy-go/releases)**.
 
-With **Go 1.22+**:
+### Install via Go (1.22+):
 
 ```bash
 go install github.com/Nosvemos/dukascopy-go/cmd/dukascopy-go@latest
+```
+
+### Install Python SDK:
+
+```bash
+pip install dukascopy-go           # Core SDK
+pip install 'dukascopy-go[pandas]' # With Pandas & PyArrow integration
 ```
 
 ---
 
 ## 📖 Quick Start
 
-Run without arguments to launch the **Interactive Setup Wizard**:
-
+### 1. Interactive Setup Wizard
+Run without arguments to launch the interactive terminal UI:
 ```bash
 dukascopy-go
 ```
 
-Or jump straight to the CLI:
-
+### 2. Search Instruments
+Search the offline database and online catalog:
 ```bash
-# Search instruments
 dukascopy-go instruments --query gold
+```
 
-# Download 30 days of 1-minute bars
-dukascopy-go download --symbol xauusd --timeframe m1 --last 30d --output ./xauusd.csv
+### 3. Fast Parallel Download
+Download 1 year of M1 data across 8 parallel workers into Parquet:
+```bash
+dukascopy-go download --symbol eurusd --timeframe m1 --last 1y \
+  --output ./eurusd.parquet --parallelism 8
+```
 
-# Multi-year tick data with resume (OOM-free)
-dukascopy-go download --symbol xauusd --timeframe tick --from 2020-01-01 --to 2024-01-01 \
-  --output ./xauusd.parquet --resume --progress
+### 4. Quant Feature Engineering on Download
+Generate machine learning features directly into your dataset:
+```bash
+dukascopy-go download --symbol eurusd --timeframe m1 --last 30d --output ./eurusd_ml.parquet \
+  --features "returns:log,rsi:14,ema:20,ema:50,atr:14,vwap,volatility:garman-klass"
+```
 
-# Batch-download multiple symbols
-dukascopy-go download --symbol EUR/USD,GBP/USD,BTC/USD --timeframe d1 --last 1y --output ./data/
+### 5. Alternative Bar Sampling (Tick / Volume / Dollar Bars)
+Derive non-time financial bars directly from raw ticks:
+```bash
+# 500-tick bars
+dukascopy-go download --symbol xauusd --bar-type tick --bar-size 500 --last 7d --output ./gold_ticks.csv
 
-# Parallel partitioned download
-dukascopy-go download --symbol xauusd --timeframe m1 --from 2020-01-01 --to 2024-01-01 \
-  --output ./xauusd.parquet --partition auto --parallelism 8
+# 1,000,000-volume bars
+dukascopy-go download --symbol eurusd --bar-type volume --bar-size 1000000 --last 30d --output ./eurusd_vol.parquet
+```
+
+### 6. Direct Cloud Storage Upload
+Stream directly to your AWS S3, Cloudflare R2, Google Cloud Storage, or MinIO bucket:
+```bash
+dukascopy-go download --symbol eurusd --timeframe m1 --from 2024-01-01 --to 2024-04-01 \
+  --output s3://my-quant-data-lake/forex/eurusd_m1.parquet --parallelism 8
 ```
 
 ---
 
-## 📋 Download Flags
+## 📋 CLI Commands & Subcommands
 
+| Subcommand | Description |
+|---|---|
+| `download` | Download historical tick/bar data with optional quant features, partitioning, and formats. |
+| `sync` | Incremental delta synchronization to append only newly available data in-place. |
+| `live` | Real-time tick/bar streaming over Stdout, WebSocket, Redis PubSub/Streams, or NATS. |
+| `watch` | Monitor live prices and indicator thresholds with automated HTTP Webhook alerts. |
+| `db-load` | High-throughput streaming ingestion into ClickHouse, TimescaleDB, QuestDB, or InfluxDB. |
+| `stats` | Inspect dataset integrity, summary statistics, and gap profiles. |
+| `manifest` | Manage chunked cache manifests (`inspect`, `verify`, `repair`, `clean-duplicates`). |
+| `instruments` | Search offline fallback list and online Dukascopy instrument registry. |
+
+---
+
+## 🛠️ Download Flags Reference
+
+```bash
+dukascopy-go download [options]
+```
+
+### Core Parameters
 | Flag | Type | Default | Description |
 |---|---|---|---|
-| `--symbol` | `string` | *(required)* | Instrument code. Comma-separated for batches: `eurusd,gbpusd` |
+| `--symbol` | `string` | *(required)* | Instrument symbol (e.g. `eurusd`, `xauusd`, `btcusd`). Comma-separated for batches: `eurusd,gbpusd` |
 | `--timeframe` | `string` | `m1` | `tick`, `m1`, `m3`, `m5`, `m15`, `m30`, `h1`, `h4`, `d1`, `w1`, `mn1` |
-| `--side` | `string` | `bid` | `bid` or `ask` |
-| `--output` | `string` | *(required)* | `.csv`, `.csv.gz`, `.parquet`, `.jsonl`, `.arrow`, `.ipc`, `.feather` |
-| `--last` | `duration` | — | Relative window: `30d`, `6mo`, `1y`. Overrides `--from`/`--to` |
-| `--from` | `string` | — | `YYYY-MM-DD`, `YYYY-MM-DD HH:MM`, or RFC3339 |
-| `--to` | `string` | — | Same formats as `--from` |
-| `--resume` | `bool` | `false` | Chunked cache & resume. Splits range into daily `.part` chunks; auto-skips completed on re-run |
-| `--simple` | `bool` | `false` | Reduced column set |
+| `--side` | `string` | `bid` | Price side: `bid` or `ask` |
+| `--output` | `string` | *(required)* | Output path (`.csv`, `.csv.gz`, `.parquet`, `.arrow`, `.ipc`, `.jsonl`, or `s3://...`) |
+| `--from` | `string` | — | Start timestamp: `YYYY-MM-DD`, `YYYY-MM-DD HH:MM`, or RFC3339 |
+| `--to` | `string` | — | End timestamp: `YYYY-MM-DD`, `YYYY-MM-DD HH:MM`, or RFC3339 |
+| `--last` | `duration` | — | Relative window: `7d`, `30d`, `6mo`, `1y` (overrides `--from`/`--to`) |
+| `--parallelism` | `int` | `1` | Number of concurrent download workers |
+
+### Quant & Feature Engineering
+| Flag | Type | Default | Description |
+|---|---|---|---|
+| `--features` | `string` | — | Comma-separated list of indicators to compute and append on the fly. |
+| `--bar-type` | `string` | `time` | Bar sampling type: `time`, `tick`, `volume`, `dollar` |
+| `--bar-size` | `float` | `0` | Threshold size for custom bar aggregation (e.g. `500` ticks, `1000000` volume) |
+| `--clean-outliers` | `string` | `none` | Outlier filtering: `auto` or `median:window:threshold` (e.g. `median:7:5.0`) |
+
+### Format & Presets
+| Flag | Type | Default | Description |
+|---|---|---|---|
+| `--preset` | `string` | — | Backtest format preset: `vectorbt`, `nautilus`, `freqtrade`, `lean`, `mt4`, `mt5`, `backtrader`, `ninjatrader` |
 | `--full` | `bool` | `false` | Full Bid + Ask candlestick fields |
-| `--fused` | `bool` | `false` | Fused Bid/Ask with dynamic spread (no mid fields) |
-| `--custom-columns` | `string` | — | Explicit comma-separated column projection |
-| `--progress` | `bool` | auto | Force-enable interactive progress TUI |
-| `--tui-theme` | `string` | `default` | `default`, `catppuccin`, `nord`, `gruvbox`, `dracula` |
-| `--partition` | `string` | `none` | `auto`, `hour`, `day`, `week`, `month`, `year` |
-| `--hive` | `bool` | `false` | Enable Hive-style directory partitioning (e.g. `year=YYYY/month=MM/day=DD/`) |
-| `--parallelism` | `int` | `1` | Concurrent partition download workers |
-| `--fill-gaps` | `string` | `none` | `forward` — forward-fills during active market sessions |
-| `--timezone` | `string` | `UTC` | `Europe/London`, `EST`, `MT4`, `MT5` |
-| `--preset` | `string` | — | `mt4`, `mt5`, `backtrader`, `ninjatrader` |
-| `--engine` | `string` | `jetta` | `jetta` (JSON) or `datafeed` (`.bi5` binary) |
+| `--fused` | `bool` | `false` | Combined Bid/Ask with floating spread |
+| `--simple` | `bool` | `false` | Clean OHLCV column set |
+| `--custom-columns` | `string` | — | Explicit comma-separated column projection (e.g. `timestamp,open,close,volume`) |
+| `--timezone` | `string` | `UTC` | Timezone conversion (`UTC`, `EST`, `EET`, `Europe/London`, etc.) |
+| `--fill-gaps` | `string` | `none` | Forward-fill active market gaps (`forward`) |
+| `--partition` | `string` | `none` | File partitioning: `auto`, `hour`, `day`, `week`, `month`, `year` |
+| `--hive` | `bool` | `false` | Hive-style directory partitioning (e.g. `year=YYYY/month=MM/`) |
 
 ---
 
-## ⚙️ Configuration File Support
+## 🧠 Quant Feature Engineering Engine
 
-You can configure global defaults for `dukascopy-go` using a JSON, YAML, or TOML configuration file.
-
-Specify the configuration file using either the `--config` flag or the `DUKASCOPY_CONFIG` environment variable:
+Calculate high-performance technical indicators on the fly during data download with zero external Python libraries:
 
 ```bash
-# Using the CLI flag
-dukascopy-go --config ./config.yaml download --symbol xauusd --output ./xauusd.csv
-
-# Using the environment variable
-export DUKASCOPY_CONFIG=./config.toml
-dukascopy-go download --symbol xauusd --output ./xauusd.csv
+dukascopy-go download --symbol xauusd --timeframe m1 --last 30d --output ./gold_features.parquet \
+  --features "returns:log,returns:pct,sma:20,ema:50,rsi:14,atr:14,vwap,obv,volatility:garman-klass:14,macd:12:26:9,bollinger:20:2.0"
 ```
 
-### Configuration Schema (YAML Example)
+### Supported Indicators:
+- **Returns**: `returns:log` (Logarithmic Return), `returns:pct` (Percentage Return)
+- **Moving Averages**: `sma:<period>`, `ema:<period>` (e.g. `sma:20`, `ema:50`, `ema:200`)
+- **Momentum**: `rsi:<period>` (e.g. `rsi:14`), `macd:<fast>:<slow>:<signal>` (e.g. `macd:12:26:9`)
+- **Volatility**:
+  - `atr:<period>` (Average True Range)
+  - `bollinger:<period>:<std_dev>` (Upper, Mid, Lower bands)
+  - `volatility:garman-klass:<window>` (OHLC Garman-Klass Volatility)
+  - `volatility:parkinson:<window>` (High-Low Parkinson Volatility)
+- **Volume & Flow**: `vwap` (Volume Weighted Average Price), `obv` (On-Balance Volume)
 
-Here is a sample YAML configuration file showing the available options:
+---
 
-```yaml
-base_url: "https://jetta.dukascopy.com"
-instruments:
-  limit: 100
-download:
-  timeframe: "m1"
-  side: "bid"
-  simple: true
-  retries: 3
-  retry_backoff: "100ms"
-  rate_limit: "50ms"
-  resume: true
-  parallelism: 4
+## 🤖 Production Streaming & Trade Bot Integrations
+
+`dukascopy-go` serves as a high-speed gateway for trading bots, algorithmic execution systems, and data pipelines.
+
+### 1. Redis Pub/Sub & Redis Streams
+Stream real-time market data directly into Redis for sub-millisecond bot consumption:
+```bash
+# Redis Pub/Sub
+dukascopy-go live --symbol eurusd --redis redis://localhost:6379/market_eurusd
+
+# Redis Stream (XADD)
+dukascopy-go live --symbol xauusd --redis redis://:authpass@localhost:6379/stream:gold_ticks
+```
+
+### 2. NATS Messaging
+```bash
+dukascopy-go live --symbol eurusd --nats nats://localhost:4222/market.eurusd
+```
+
+### 3. Built-in WebSocket Server
+```bash
+dukascopy-go live --symbol eurusd --timeframe tick --port 8080
+# Clients connect to ws://localhost:8080/stream
+```
+
+### 4. Microstructure & Order Flow Metrics (`--microstructure`)
+Include real-time high-frequency trading microstructure metrics in the tick stream:
+```bash
+dukascopy-go live --symbol eurusd --timeframe tick --microstructure --format jsonl
+```
+**Streamed Metrics:**
+- `order_flow_imbalance` (OFI): $(\text{BidVol} - \text{AskVol}) / (\text{BidVol} + \text{AskVol})$
+- `effective_spread`: $2 \times |P_{mid} - P_{prev\_mid}|$
+- `amihud_illiquidity`: $|\Delta P| / \text{Volume}$
+- `price_velocity`: Price points per second
+
+---
+
+## 🔔 Real-Time Watch & Webhook Alerts
+
+The `watch` command monitors market conditions in real time and POSTs JSON alert payloads to your webhook or trade bot:
+
+```bash
+# Price threshold trigger
+dukascopy-go watch --symbol xauusd --condition "price > 2500" --webhook http://mybot:8080/signal --cooldown 5m
+
+# Technical indicator trigger
+dukascopy-go watch --symbol eurusd --condition "rsi < 30" --timeframe m1 --webhook http://mybot:8080/rsi-alert
+```
+
+**Delivered Webhook Payload:**
+```json
+{
+  "timestamp": 1704153600000,
+  "symbol": "EURUSD",
+  "condition": "rsi < 30",
+  "current_price": 1.08450,
+  "bid": 1.08450,
+  "ask": 1.08451,
+  "message": "rsi < 30 (current: 27.84)"
+}
 ```
 
 ---
 
-## 💎 Core Features
+## ☁️ Direct Cloud Storage & Data Lake Ingestion
 
-### 🔄 Smart Delta Sync
-Keep datasets current without re-downloading. Inspects the last timestamp in-place and appends only missing data:
-
-```bash
-dukascopy-go sync --symbol EUR/USD --output ./data/eur_usd.csv
-```
-
-### 💾 Chunked Cache & Resume
-Multi-year tick datasets stay O(1) memory. Daily `.part` chunks with SHA-256 manifests survive any interruption:
+Export directly to AWS S3, Cloudflare R2, MinIO, or Google Cloud Storage with **AWS SigV4 authentication** and zero third-party AWS SDK dependencies:
 
 ```bash
-dukascopy-go download --symbol xauusd --timeframe tick --from 2020-01-01 --to 2024-01-01 \
-  --output ./xauusd.parquet --resume
-```
+# Upload directly to S3
+export AWS_ACCESS_KEY_ID="your-access-key"
+export AWS_SECRET_ACCESS_KEY="your-secret-key"
+export AWS_REGION="us-east-1"
 
-Manage with `manifest` subcommands: `inspect`, `verify`, `repair`, `clean-duplicates`.
+dukascopy-go download --symbol eurusd --timeframe m1 --last 30d \
+  --output s3://my-quant-bucket/forex/eurusd_m1.parquet --parallelism 8
 
-### 📊 Gap Filling
-Forward-fills liquidity gaps while automatically skipping weekends and holidays:
-
-```bash
-dukascopy-go download --symbol EUR/USD --timeframe m1 --last 7d --output ./data.csv --fill-gaps forward
-```
-
-### 🛡️ Adaptive Throttling
-AIMD rate limiter: backs off instantly on `429` (doubles up to 5s), recovers by 10ms per success.
-
-### 📈 Real-Time Streaming
-High-frequency polling engine with built-in RFC-6455 WebSocket server:
-
-```bash
-dukascopy-go live --symbol eurusd --timeframe tick --format jsonl --port 8080
+# MinIO / Cloudflare R2 / Custom S3 Endpoint
+export S3_ENDPOINT="https://<account-id>.r2.cloudflarestorage.com"
+dukascopy-go download --symbol xauusd --timeframe tick --last 7d \
+  --output r2://market-data/xauusd_ticks.parquet
 ```
 
 ---
 
-## 🗄️ Direct Database Ingestion
+## 🗄️ Direct Database Ingestion (`db-load`)
 
-Stream CSV or Parquet files into your time-series database — millions of rows/second, zero intermediary drivers:
+Stream massive CSV or Parquet files into high-performance time-series databases with millions of rows per second:
 
-| Database | Engine | Write Path |
+| Database | Protocol / Engine | Command Example |
 |---|---|---|
-| **ClickHouse** | Native HTTP stream | CSVWithNames / Parquet |
-| **InfluxDB v2** | Line Protocol gzip batches | `/api/v2/write` |
-| **PostgreSQL / TimescaleDB** | `COPY FROM` CSV | Auto-detects TimescaleDB, creates hypertables |
-| **QuestDB** | ILP over TCP & HTTP | TCP port 9009 (recommended) or HTTP 9000 |
-
-```bash
-# ClickHouse
-dukascopy-go db-load --input ./xauusd.csv --db clickhouse --url http://localhost:8123 --table xauusd
-
-# InfluxDB v2
-dukascopy-go db-load --input ./xauusd.csv --db influxdb --url http://localhost:8086 \
-  --org myorg --bucket marketdata --token <token> --table xauusd --symbol xauusd
-
-# PostgreSQL / TimescaleDB
-dukascopy-go db-load --input ./xauusd.csv --db postgres \
-  --url postgres://user:pass@localhost:5432/marketdata --table xauusd
-
-# QuestDB (TCP ILP — lowest latency)
-dukascopy-go db-load --input ./xauusd.csv --db questdb --url tcp://localhost:9009 --table xauusd
-```
-
-**TimescaleDB** extension is auto-detected; hypertables are created with inferred chunk intervals from the filename (`m1` → 1 day, `h1` → 7 days, `d1` → 30 days). Override with `--chunk-interval`, disable with `--create-hypertable=false`.
-
-**QuestDB ILP** defaults to TCP (`tcp://host:9009`) with `TCP_NODELAY` for minimal latency. HTTP fallback via `http://host:9000`. Override port with `--ilp-port`.
-
-`db-load` flags: `--input` (required), `--db` (required), `--url` (required), `--table` (required), `--user`, `--password`, `--token`, `--org`, `--bucket`, `--symbol`, `--batch`, `--timeout`, `--ilp-port`, `--create-hypertable`, `--chunk-interval`.
+| **ClickHouse** | Native HTTP Stream | `dukascopy-go db-load --input ./data.csv --db clickhouse --url http://localhost:8123 --table eurusd` |
+| **TimescaleDB / Postgres** | `COPY FROM` Direct Stream | `dukascopy-go db-load --input ./data.csv --db postgres --url postgres://user:pass@localhost:5432/db --table eurusd` |
+| **QuestDB** | Native TCP ILP (Influx Line Protocol) | `dukascopy-go db-load --input ./data.csv --db questdb --url tcp://localhost:9009 --table eurusd` |
+| **InfluxDB v2** | Gzip Batch Line Protocol | `dukascopy-go db-load --input ./data.csv --db influxdb --url http://localhost:8086 --table eurusd --token <tok> --org myorg --bucket market` |
 
 ---
 
 ## 🐹 Go SDK
 
+Use `dukascopy-go` directly within your Go applications:
+
 ```go
-import "github.com/Nosvemos/dukascopy-go/pkg/dukascopy"
+package main
 
-client := dukascopy.NewClient("https://jetta.dukascopy.com", 30*time.Second)
-result, _ := client.Download(context.Background(), dukascopy.DownloadRequest{
-    Symbol:      "EUR/USD",
-    Granularity: dukascopy.GranularityD1,
-    Side:        dukascopy.PriceSideBid,
-    From:        time.Now().AddDate(0, 0, -5),
-    To:          time.Now(),
-})
-fmt.Printf("Downloaded %d bars: %s\n", len(result.Bars), result.Instrument.Name)
+import (
+	"context"
+	"fmt"
+	"time"
+
+	"github.com/Nosvemos/dukascopy-go/pkg/dukascopy"
+)
+
+func main() {
+	client, err := dukascopy.NewClient("https://jetta.dukascopy.com", 30*time.Second)
+	if err != nil {
+		panic(err)
+	}
+
+	result, err := client.Download(context.Background(), dukascopy.DownloadRequest{
+		Symbol:      "EURUSD",
+		Granularity: dukascopy.GranularityM1,
+		Side:        dukascopy.PriceSideBid,
+		From:        time.Now().Add(-24 * time.Hour),
+		To:          time.Now(),
+	})
+	if err != nil {
+		panic(err)
+	}
+
+	fmt.Printf("Downloaded %d bars for %s\n", len(result.Bars), result.Instrument.Name)
+}
 ```
-
-Full Go reference: [pkg.go.dev](https://pkg.go.dev/github.com/Nosvemos/dukascopy-go)
 
 ---
 
@@ -239,65 +320,43 @@ Full Go reference: [pkg.go.dev](https://pkg.go.dev/github.com/Nosvemos/dukascopy
 import dukascopy_go as dukascopy
 from datetime import datetime
 
-# Sync download
-dukascopy.download(symbol="EURUSD", timeframe="m1",
-    output_path="./eurusd_m1.csv",
-    from_date=datetime(2026, 5, 18, 10, 0),
-    to_date=datetime(2026, 5, 18, 11, 0))
+# Download directly to pandas DataFrame
+df = dukascopy.to_dataframe(
+    symbol="EURUSD",
+    timeframe="m1",
+    from_date=datetime(2024, 1, 1, 0, 0),
+    to_date=datetime(2024, 1, 2, 0, 0)
+)
+print(df.head())
 
-# Async download (does not block the event loop)
-await dukascopy.download_async(symbol="EURUSD", timeframe="m1",
-    output_path="./eurusd_m1.parquet",
-    from_date=datetime(2026, 5, 18, 10, 0),
-    to_date=datetime(2026, 5, 18, 11, 0))
-
-# Directly into a pandas DataFrame (no file management needed)
-df = dukascopy.to_dataframe(symbol="EURUSD", timeframe="m1",
-    from_date=datetime(2026, 5, 18, 10, 0),
-    to_date=datetime(2026, 5, 18, 11, 0))
-
-# Async DataFrame
-df = await dukascopy.to_dataframe_async(symbol="EURUSD", timeframe="m1",
-    from_date=datetime(2026, 5, 18, 10, 0),
-    to_date=datetime(2026, 5, 18, 11, 0))
-
-# Stream into database
-dukascopy.db_load(db_type="postgres", db_url="postgres://user:pass@localhost:5432/marketdata",
-    table_name="eurusd_m1", input_path="./eurusd_m1.csv")
+# Async download to Parquet file
+await dukascopy.download_async(
+    symbol="XAUUSD",
+    timeframe="tick",
+    output_path="./gold.parquet",
+    from_date=datetime(2024, 1, 1),
+    to_date=datetime(2024, 1, 2)
+)
 ```
-
-**Requirements:** Python 3.9+ (for `asyncio.to_thread()`). Install with:
-```bash
-pip install dukascopy-go           # core (no pandas)
-pip install 'dukascopy-go[pandas]' # with pandas + pyarrow for to_dataframe()
-```
-
-See `sdk/python/` for full examples and installation guide.
 
 ---
 
-## 🛠️ Development
+## 🛠️ Development & Testing
 
 ```bash
+# Clone the repository
 git clone https://github.com/Nosvemos/dukascopy-go.git
 cd dukascopy-go
-go mod download
-go test ./...
+
+# Run full test suite with Race Detector
+go test -race ./...
+
+# Build binary
 go build -o dukascopy-go ./cmd/dukascopy-go
 ```
 
 ---
 
-## 🤝 Contributing
-
-1. Fork the project
-2. Create a feature branch (`git checkout -b feature/AmazingFeature`)
-3. Commit your changes (`git commit -m 'Add some AmazingFeature'`)
-4. Push to the branch (`git push origin feature/AmazingFeature`)
-5. Open a Pull Request
-
----
-
 ## ⚖️ Legal Disclaimer
 
-`dukascopy-go` is not affiliated with, endorsed by, or vetted by Dukascopy Bank SA. It is an independent open-source tool that works with Dukascopy's publicly accessible endpoints and is intended for research, automation, and data engineering workflows.
+`dukascopy-go` is not affiliated with, endorsed by, or vetted by Dukascopy Bank SA. It is an independent open-source tool that works with Dukascopy's publicly accessible endpoints and is intended for research, data engineering, backtesting, and algorithmic trading workflows.
