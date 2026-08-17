@@ -5,10 +5,13 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/Nosvemos/dukascopy-go/internal/checkpoint"
+	"github.com/Nosvemos/dukascopy-go/pkg/cloud"
 	"github.com/Nosvemos/dukascopy-go/pkg/csvout"
 	"github.com/Nosvemos/dukascopy-go/pkg/dukascopy"
 	"github.com/Nosvemos/dukascopy-go/pkg/features"
@@ -146,9 +149,25 @@ func runDownload(args []string, stdout io.Writer, stderr io.Writer) error {
 				*timestampFormat = "2006.01.02 15:04:05"
 			}
 			*simpleOutput = true
-		case "backtrader":
+		case "backtrader", "vectorbt":
 			if *timestampFormat == "" {
 				*timestampFormat = "2006-01-02 15:04:05"
+			}
+			*simpleOutput = true
+		case "nautilus":
+			if *timestampFormat == "" {
+				*timestampFormat = time.RFC3339Nano
+			}
+			*simpleOutput = true
+		case "freqtrade":
+			if *timestampFormat == "" {
+				*timestampFormat = "2006-01-02 15:04:05"
+			}
+			*simpleOutput = true
+		case "lean":
+			*noHeader = true
+			if *timestampFormat == "" {
+				*timestampFormat = "20060102 15:04"
 			}
 			*simpleOutput = true
 		case "ninjatrader":
@@ -159,7 +178,7 @@ func runDownload(args []string, stdout io.Writer, stderr io.Writer) error {
 			}
 			*simpleOutput = true
 		default:
-			return fmt.Errorf("unknown preset %q (supported: mt4, mt5, backtrader, ninjatrader)", *preset)
+			return fmt.Errorf("unknown preset %q (supported: mt4, mt5, backtrader, vectorbt, nautilus, freqtrade, lean, ninjatrader)", *preset)
 		}
 	}
 
@@ -480,12 +499,24 @@ func runDownload(args []string, stdout io.Writer, stderr io.Writer) error {
 		return fmt.Errorf("invalid --clean-outliers: %w", err)
 	}
 
+	targetLocalPath := *outputPath
+	isCloud := cloud.IsCloudPath(*outputPath)
+	var cloudCfg cloud.S3Config
+	if isCloud {
+		cfg, err := cloud.ParseCloudURI(*outputPath)
+		if err != nil {
+			return err
+		}
+		cloudCfg = cfg
+		targetLocalPath = filepath.Join(*cacheDir, "cloud_upload_tmp_"+filepath.Base(cfg.Key))
+	}
+
 	appended, err := runChunkedDownload(
 		ctx,
 		client,
 		stdout,
 		progressWriter,
-		*outputPath,
+		targetLocalPath,
 		manifestPath,
 		request,
 		resultKind,
@@ -504,14 +535,29 @@ func runDownload(args []string, stdout io.Writer, stderr io.Writer) error {
 		featureSpecs,
 	)
 	if err != nil {
+		if isCloud {
+			_ = os.Remove(targetLocalPath)
+		}
 		return err
 	}
 
-	if !outputToStdout {
-		label := "bars"
-		if resultKind == dukascopy.ResultKindTick {
-			label = "ticks"
+	label := "bars"
+	if resultKind == dukascopy.ResultKindTick {
+		label = "ticks"
+	}
+
+	if isCloud {
+		fmt.Fprintf(stdout, "%suploading%s %d %s to %s...\n", colorize(colorCyan), colorize(colorReset), appended, label, *outputPath)
+		if err := cloud.UploadFile(ctx, cloudCfg, targetLocalPath); err != nil {
+			_ = os.Remove(targetLocalPath)
+			return fmt.Errorf("cloud upload failed: %w", err)
 		}
+		_ = os.Remove(targetLocalPath)
+		fmt.Fprintf(stdout, "%suploaded%s %d %s successfully to %s\n", colorize(colorGreen), colorize(colorReset), appended, label, *outputPath)
+		return nil
+	}
+
+	if !outputToStdout {
 		fmt.Fprintf(stdout, "%swrote%s %d %s to %s\n", colorize(colorGreen), colorize(colorReset), appended, label, *outputPath)
 	}
 	return nil
