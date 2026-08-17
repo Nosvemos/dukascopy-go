@@ -87,3 +87,20 @@ func TestComputeBarFeatures(t *testing.T) {
 		}
 	}
 }
+
+func TestShortSeriesIndicators(t *testing.T) {
+	// Test very short series (fewer bars than period)
+	closes := []float64{1.0800, 1.0805, 1.0810}
+	highs := []float64{1.0810, 1.0815, 1.0820}
+	lows := []float64{1.0790, 1.0795, 1.0800}
+
+	rsi := ComputeRSI(closes, 14)
+	if len(rsi) != 3 {
+		t.Fatalf("expected 3 rsi values, got %d", len(rsi))
+	}
+
+	atr := ComputeATR(highs, lows, closes, 14)
+	if len(atr) != 3 {
+		t.Fatalf("expected 3 atr values, got %d", len(atr))
+	}
+}

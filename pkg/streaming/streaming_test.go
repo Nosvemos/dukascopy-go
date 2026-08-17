@@ -51,7 +51,7 @@ func TestRedisMockPublish(t *testing.T) {
 	}
 	defer ln.Close()
 
-	var received strings.Builder
+	receivedChan := make(chan string, 10)
 	go func() {
 		conn, err := ln.Accept()
 		if err != nil {
@@ -65,7 +65,7 @@ func TestRedisMockPublish(t *testing.T) {
 			if err != nil {
 				return
 			}
-			received.WriteString(line)
+			receivedChan <- line
 			if strings.HasPrefix(line, "*") {
 				_, _ = conn.Write([]byte(":1\r\n"))
 			}
@@ -82,9 +82,17 @@ func TestRedisMockPublish(t *testing.T) {
 		t.Fatalf("Publish failed: %v", err)
 	}
 
-	time.Sleep(50 * time.Millisecond)
-	if !strings.Contains(received.String(), "PUBLISH") {
-		t.Errorf("expected PUBLISH command in stream, got %s", received.String())
+	found := false
+	timer := time.After(1 * time.Second)
+	for !found {
+		select {
+		case line := <-receivedChan:
+			if strings.Contains(line, "PUBLISH") {
+				found = true
+			}
+		case <-timer:
+			t.Fatal("timeout waiting for Redis PUBLISH command")
+		}
 	}
 }
 
@@ -95,7 +103,7 @@ func TestNATSMockPublish(t *testing.T) {
 	}
 	defer ln.Close()
 
-	var received strings.Builder
+	receivedChan := make(chan string, 10)
 	go func() {
 		conn, err := ln.Accept()
 		if err != nil {
@@ -112,7 +120,7 @@ func TestNATSMockPublish(t *testing.T) {
 			if err != nil {
 				return
 			}
-			received.WriteString(line)
+			receivedChan <- line
 		}
 	}()
 
@@ -126,8 +134,16 @@ func TestNATSMockPublish(t *testing.T) {
 		t.Fatalf("Publish failed: %v", err)
 	}
 
-	time.Sleep(50 * time.Millisecond)
-	if !strings.Contains(received.String(), "PUB market.eurusd") {
-		t.Errorf("expected PUB command in stream, got %s", received.String())
+	found := false
+	timer := time.After(1 * time.Second)
+	for !found {
+		select {
+		case line := <-receivedChan:
+			if strings.Contains(line, "PUB market.eurusd") {
+				found = true
+			}
+		case <-timer:
+			t.Fatal("timeout waiting for NATS PUB command")
+		}
 	}
 }

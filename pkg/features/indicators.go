@@ -367,8 +367,13 @@ func ComputeRSI(closes []float64, period int) []float64 {
 		return out
 	}
 
+	limit := period
+	if limit >= n {
+		limit = n - 1
+	}
+
 	var avgGain, avgLoss float64
-	for i := 1; i <= period && i < n; i++ {
+	for i := 1; i <= limit; i++ {
 		diff := closes[i] - closes[i-1]
 		if diff > 0 {
 			avgGain += diff
@@ -376,15 +381,25 @@ func ComputeRSI(closes []float64, period int) []float64 {
 			avgLoss -= diff
 		}
 	}
-	avgGain /= float64(period)
-	avgLoss /= float64(period)
+	avgGain /= float64(limit)
+	avgLoss /= float64(limit)
 
+	var baseRSI float64
 	if avgLoss == 0 {
-		out[period] = 100
+		baseRSI = 100
 	} else {
 		rs := avgGain / avgLoss
-		out[period] = 100 - (100 / (1 + rs))
+		baseRSI = 100 - (100 / (1 + rs))
 	}
+
+	if n <= period {
+		for i := 0; i < n; i++ {
+			out[i] = baseRSI
+		}
+		return out
+	}
+
+	out[period] = baseRSI
 
 	for i := period + 1; i < n; i++ {
 		diff := closes[i] - closes[i-1]
@@ -431,11 +446,24 @@ func ComputeATR(highs, lows, closes []float64, period int) []float64 {
 		tr[i] = math.Max(hl, math.Max(hc, lc))
 	}
 
+	limit := period
+	if limit > n {
+		limit = n
+	}
+
 	var sum float64
-	for i := 0; i < period && i < n; i++ {
+	for i := 0; i < limit; i++ {
 		sum += tr[i]
 	}
-	atr := sum / float64(period)
+	atr := sum / float64(limit)
+
+	if n <= period {
+		for i := 0; i < n; i++ {
+			out[i] = atr
+		}
+		return out
+	}
+
 	out[period-1] = atr
 
 	for i := period; i < n; i++ {
