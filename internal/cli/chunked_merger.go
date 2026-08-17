@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bufio"
 	"compress/gzip"
 	"encoding/csv"
 	"errors"
@@ -45,12 +46,14 @@ func mergeChunks(
 	var currentPartitionKey string
 
 	var mainCsvFileWriter *os.File
+	var mainBufWriter *bufio.Writer
 	var mainGzipWriter *gzip.Writer
 	var mainCsvWriter *csv.Writer
 	var mainParquetWriter *csvout.ParquetStreamWriter
 	var mainArrowWriter *csvout.ArrowStreamWriter
 
 	var partCsvFileWriter *os.File
+	var partBufWriter *bufio.Writer
 	var partGzipWriter *gzip.Writer
 	var partCsvWriter *csv.Writer
 	var partParquetWriter *csvout.ParquetStreamWriter
@@ -82,6 +85,12 @@ func mergeChunks(
 				errs = append(errs, err.Error())
 			}
 			mainGzipWriter = nil
+		}
+		if mainBufWriter != nil {
+			if err := mainBufWriter.Flush(); err != nil {
+				errs = append(errs, err.Error())
+			}
+			mainBufWriter = nil
 		}
 		if mainCsvFileWriter != nil {
 			if err := mainCsvFileWriter.Close(); err != nil {
@@ -127,6 +136,12 @@ func mergeChunks(
 			}
 			partGzipWriter = nil
 		}
+		if partBufWriter != nil {
+			if err := partBufWriter.Flush(); err != nil {
+				errs = append(errs, err.Error())
+			}
+			partBufWriter = nil
+		}
 		if partCsvFileWriter != nil {
 			if err := partCsvFileWriter.Close(); err != nil {
 				errs = append(errs, err.Error())
@@ -171,7 +186,8 @@ func mergeChunks(
 				if err != nil {
 					return err
 				}
-				w = mainCsvFileWriter
+				mainBufWriter = bufio.NewWriterSize(mainCsvFileWriter, 64*1024)
+				w = mainBufWriter
 			}
 			if isGzip {
 				mainGzipWriter = gzip.NewWriter(w)
@@ -222,7 +238,8 @@ func mergeChunks(
 			if err != nil {
 				return err
 			}
-			var w io.Writer = partCsvFileWriter
+			partBufWriter = bufio.NewWriterSize(partCsvFileWriter, 64*1024)
+			var w io.Writer = partBufWriter
 			if isGzip {
 				partGzipWriter = gzip.NewWriter(w)
 				w = partGzipWriter
@@ -268,7 +285,8 @@ func mergeChunks(
 			return 0, err
 		}
 
-		reader := csv.NewReader(file)
+		bufReader := bufio.NewReaderSize(file, 64*1024)
+		reader := csv.NewReader(bufReader)
 		reader.Comma = csvout.CSVDelimiter
 		reader.FieldsPerRecord = -1 // flexible
 

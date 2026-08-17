@@ -86,6 +86,7 @@ func (c *Client) ListInstruments(ctx context.Context) ([]Instrument, error) {
 	})
 
 	c.instruments = cloneInstruments(payload.Instruments)
+	c.resolvedSymbols = make(map[string]Instrument)
 	go saveLocalCache(c.instruments)
 
 	return cloneInstruments(c.instruments), nil

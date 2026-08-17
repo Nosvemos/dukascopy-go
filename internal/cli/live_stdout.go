@@ -18,13 +18,12 @@ func runLiveStdoutCycle(
 	barColumns []string,
 	tickColumns []string,
 ) (int, bool, error) {
-	result, err := client.Download(ctx, request)
-	if err != nil {
-		return 0, headerWritten, err
-	}
-
 	includeHeader := !headerWritten
-	if result.Kind == dukascopy.ResultKindTick {
+	if resultKind == dukascopy.ResultKindTick {
+		result, err := client.Download(ctx, request)
+		if err != nil {
+			return 0, headerWritten, err
+		}
 		if includeHeader {
 			if err := csvout.WriteTicksToWriter(stdout, result.Instrument, tickColumns, result.Ticks); err != nil {
 				return 0, headerWritten, err
@@ -54,6 +53,10 @@ func runLiveStdoutCycle(
 		return len(bidBars), true, nil
 	}
 
+	result, err := client.Download(ctx, request)
+	if err != nil {
+		return 0, headerWritten, err
+	}
 	if includeHeader {
 		if err := csvout.WriteBarsToWriter(stdout, result.Instrument, barColumns, result.Bars, nil, nil); err != nil {
 			return 0, headerWritten, err

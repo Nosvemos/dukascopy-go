@@ -359,9 +359,6 @@ func runDownload(args []string, stdout io.Writer, stderr io.Writer) error {
 			return errors.New("--partition cannot be combined with --output -")
 		}
 	}
-	if *parallelism > 1 && normalizedPartition == partitionNone {
-		return errors.New("--parallelism greater than 1 requires --partition")
-	}
 	if *hive && normalizedPartition == partitionNone {
 		return errors.New("--hive requires --partition")
 	}

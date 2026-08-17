@@ -20,13 +20,36 @@ func countTotalTicks(chunks [][]Tick) int {
 	return total
 }
 
-func (c *Client) Download(ctx context.Context, request DownloadRequest) (DownloadResult, error) {
+func (c *Client) resolveInstrumentForSymbol(ctx context.Context, symbol string) (Instrument, error) {
+	c.cacheMu.RLock()
+	if inst, ok := c.resolvedSymbols[symbol]; ok {
+		c.cacheMu.RUnlock()
+		return inst, nil
+	}
+	c.cacheMu.RUnlock()
+
 	instruments, err := c.ListInstruments(ctx)
 	if err != nil {
-		return DownloadResult{}, err
+		return Instrument{}, err
 	}
 
-	instrument, err := ResolveInstrument(instruments, request.Symbol)
+	instrument, err := ResolveInstrument(instruments, symbol)
+	if err != nil {
+		return Instrument{}, err
+	}
+
+	c.cacheMu.Lock()
+	if c.resolvedSymbols == nil {
+		c.resolvedSymbols = make(map[string]Instrument)
+	}
+	c.resolvedSymbols[symbol] = instrument
+	c.cacheMu.Unlock()
+
+	return instrument, nil
+}
+
+func (c *Client) Download(ctx context.Context, request DownloadRequest) (DownloadResult, error) {
+	instrument, err := c.resolveInstrumentForSymbol(ctx, request.Symbol)
 	if err != nil {
 		return DownloadResult{}, err
 	}
@@ -53,12 +76,7 @@ func (c *Client) Download(ctx context.Context, request DownloadRequest) (Downloa
 }
 
 func (c *Client) DownloadBarsForSide(ctx context.Context, request DownloadRequest, side PriceSide) (Instrument, []Bar, error) {
-	instruments, err := c.ListInstruments(ctx)
-	if err != nil {
-		return Instrument{}, nil, err
-	}
-
-	instrument, err := ResolveInstrument(instruments, request.Symbol)
+	instrument, err := c.resolveInstrumentForSymbol(ctx, request.Symbol)
 	if err != nil {
 		return Instrument{}, nil, err
 	}

@@ -35,24 +35,27 @@ func downloadChunk(
 	var rowsWritten int
 	var err error
 
-	result, err := client.Download(ctx, partRequest)
-	if err == nil {
-		if resultKind == dukascopy.ResultKindTick {
+	if resultKind == dukascopy.ResultKindTick {
+		var result dukascopy.DownloadResult
+		result, err = client.Download(ctx, partRequest)
+		if err == nil {
 			err = cfg.WriteTicksAtomic(tempPath, result.Instrument, tickColumns, result.Ticks)
 			rowsWritten = len(result.Ticks)
-		} else {
-			if csvout.BarColumnsNeedBidAsk(barColumns) {
-				var instrument dukascopy.Instrument
-				var bidBars, askBars []dukascopy.Bar
-				instrument, bidBars, askBars, err = loadBidAskBars(ctx, client, partRequest)
-				if err == nil {
-					err = cfg.WriteBarsAtomic(tempPath, instrument, barColumns, nil, bidBars, askBars)
-					rowsWritten = len(bidBars)
-				}
-			} else {
-				err = cfg.WriteBarsAtomic(tempPath, result.Instrument, barColumns, result.Bars, nil, nil)
-				rowsWritten = len(result.Bars)
-			}
+		}
+	} else if csvout.BarColumnsNeedBidAsk(barColumns) {
+		var instrument dukascopy.Instrument
+		var bidBars, askBars []dukascopy.Bar
+		instrument, bidBars, askBars, err = loadBidAskBars(ctx, client, partRequest)
+		if err == nil {
+			err = cfg.WriteBarsAtomic(tempPath, instrument, barColumns, nil, bidBars, askBars)
+			rowsWritten = len(bidBars)
+		}
+	} else {
+		var result dukascopy.DownloadResult
+		result, err = client.Download(ctx, partRequest)
+		if err == nil {
+			err = cfg.WriteBarsAtomic(tempPath, result.Instrument, barColumns, result.Bars, nil, nil)
+			rowsWritten = len(result.Bars)
 		}
 	}
 

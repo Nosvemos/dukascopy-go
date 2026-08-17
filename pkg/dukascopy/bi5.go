@@ -24,11 +24,11 @@ func DecodeTicksBi5(r io.Reader, baseTime time.Time, priceScale int) ([]Tick, er
 	}
 
 	ticks := make([]Tick, 0, 2048)
-	buf := make([]byte, 20)
+	var buf [20]byte
 	factor := math.Pow10(priceScale)
 
 	for {
-		_, err := io.ReadFull(lzmaReader, buf)
+		_, err := io.ReadFull(lzmaReader, buf[:])
 		if err == io.EOF || errors.Is(err, io.ErrUnexpectedEOF) {
 			break
 		}
@@ -76,11 +76,11 @@ func DecodeBarsBi5(r io.Reader, baseTime time.Time, priceScale int) ([]Bar, erro
 	}
 
 	bars := make([]Bar, 0, 720)
-	buf := make([]byte, 24)
+	var buf [24]byte
 	factor := math.Pow10(priceScale)
 
 	for {
-		_, err := io.ReadFull(lzmaReader, buf)
+		_, err := io.ReadFull(lzmaReader, buf[:])
 		if err == io.EOF || errors.Is(err, io.ErrUnexpectedEOF) {
 			break
 		}

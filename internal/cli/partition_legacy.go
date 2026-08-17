@@ -446,12 +446,11 @@ func downloadPartitionToFile(
 	barColumns []string,
 	tickColumns []string,
 ) (int, error) {
-	result, err := client.Download(ctx, request)
-	if err != nil {
-		return 0, err
-	}
-
 	if resultKind == dukascopy.ResultKindTick {
+		result, err := client.Download(ctx, request)
+		if err != nil {
+			return 0, err
+		}
 		if err := csvout.WriteTicksAtomic(partPath, result.Instrument, tickColumns, result.Ticks); err != nil {
 			return 0, err
 		}
@@ -469,6 +468,10 @@ func downloadPartitionToFile(
 		return len(bidBars), nil
 	}
 
+	result, err := client.Download(ctx, request)
+	if err != nil {
+		return 0, err
+	}
 	if err := csvout.WriteBarsAtomic(partPath, result.Instrument, barColumns, result.Bars, nil, nil); err != nil {
 		return 0, err
 	}

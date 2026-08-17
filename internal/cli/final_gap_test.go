@@ -136,7 +136,7 @@ func TestDownloadAndResumeGapBranches(t *testing.T) {
 			{args: []string{"--symbol", "xauusd", "--from", "2024-01-01T00:00:00Z", "--to", "2024-01-01T01:00:00Z", "--output", "out.csv", "--partition", "weird"}},
 			{args: []string{"--symbol", "xauusd", "--from", "2024-01-01T00:00:00Z", "--to", "2024-01-01T01:00:00Z", "--output", "-", "--resume"}},
 			{args: []string{"--symbol", "xauusd", "--from", "2024-01-01T00:00:00Z", "--to", "2024-01-01T01:00:00Z", "--output", "-", "--partition", "hour"}},
-			{args: []string{"--symbol", "xauusd", "--from", "2024-01-01T00:00:00Z", "--to", "2024-01-01T01:00:00Z", "--output", "out.csv", "--parallelism", "2"}},
+			{args: []string{"--symbol", "xauusd", "--from", "2024-01-01T00:00:00Z", "--to", "2024-01-01T01:00:00Z", "--output", "out.csv", "--parallelism", "0"}},
 			{args: []string{"--symbol", "xauusd", "--from", "2024-01-01T00:00:00Z", "--to", "2024-01-01T01:00:00Z", "--output", "out.parquet", "--resume"}},
 			{args: []string{"--symbol", "xauusd", "--from", "2024-01-01T00:00:00Z", "--to", "2024-01-01T01:00:00Z", "--output", "-", "--checkpoint-manifest", "state.json"}},
 			{args: []string{"--symbol", "xauusd", "--from", "2024-01-01T00:00:00Z", "--to", "2024-01-01T01:00:00Z", "--output", "-", "--checkpoint-manifest", "state.json", "--partition="}},

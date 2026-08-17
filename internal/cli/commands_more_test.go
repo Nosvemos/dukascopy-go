@@ -28,7 +28,7 @@ func TestRunDownloadValidationErrors(t *testing.T) {
 		{name: "from after to", args: []string{"--symbol", "xauusd", "--timeframe", "m1", "--from", "2024-01-02T00:02:00Z", "--to", "2024-01-02T00:00:00Z", "--output", "out.csv"}},
 		{name: "conflicting profile flags", args: []string{"--symbol", "xauusd", "--timeframe", "m1", "--from", "2024-01-02T00:00:00Z", "--to", "2024-01-02T00:02:00Z", "--output", "out.csv", "--simple", "--full"}},
 		{name: "custom and simple", args: []string{"--symbol", "xauusd", "--timeframe", "m1", "--from", "2024-01-02T00:00:00Z", "--to", "2024-01-02T00:02:00Z", "--output", "out.csv", "--simple", "--custom-columns", "timestamp"}},
-		{name: "parallel without partition", args: []string{"--symbol", "xauusd", "--timeframe", "m1", "--from", "2024-01-02T00:00:00Z", "--to", "2024-01-02T00:02:00Z", "--output", "out.csv", "--parallelism", "2"}},
+		{name: "invalid parallelism", args: []string{"--symbol", "xauusd", "--timeframe", "m1", "--from", "2024-01-02T00:00:00Z", "--to", "2024-01-02T00:02:00Z", "--output", "out.csv", "--parallelism", "0"}},
 		{name: "resume to stdout", args: []string{"--symbol", "xauusd", "--timeframe", "m1", "--from", "2024-01-02T00:00:00Z", "--to", "2024-01-02T00:02:00Z", "--output", "-", "--resume"}},
 		{name: "live rejects to", args: []string{"--symbol", "xauusd", "--timeframe", "m1", "--from", "2024-01-02T00:00:00Z", "--to", "2024-01-02T00:02:00Z", "--output", "out.csv", "--live"}},
 		{name: "live rejects nonpositive poll interval", args: []string{"--symbol", "xauusd", "--timeframe", "m1", "--from", "2024-01-02T00:00:00Z", "--output", "out.csv", "--live", "--poll-interval", "0s"}},

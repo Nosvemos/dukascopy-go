@@ -107,20 +107,21 @@ type DownloadResult struct {
 }
 
 type Client struct {
-	baseURL      *url.URL
-	httpClient   *http.Client
-	maxRetries   int
-	backoff      time.Duration
-	rateLimit    time.Duration
-	adaptiveRate time.Duration
-	forceUpdate  bool
-	progress     ProgressFunc
-	rateMu       sync.Mutex
-	nextSlot     time.Time
-	cacheMu      sync.RWMutex
-	instruments  []Instrument
-	proxyPool    *ProxyPool
-	engine       Engine
+	baseURL         *url.URL
+	httpClient      *http.Client
+	maxRetries      int
+	backoff         time.Duration
+	rateLimit       time.Duration
+	adaptiveRate    time.Duration
+	forceUpdate     bool
+	progress        ProgressFunc
+	rateMu          sync.Mutex
+	nextSlot        time.Time
+	cacheMu         sync.RWMutex
+	instruments     []Instrument
+	resolvedSymbols map[string]Instrument
+	proxyPool       *ProxyPool
+	engine          Engine
 }
 
 func NewClient(rawBaseURL string, timeout time.Duration) (*Client, error) {
@@ -147,10 +148,11 @@ func NewClient(rawBaseURL string, timeout time.Duration) (*Client, error) {
 			Timeout:   timeout,
 			Transport: transport,
 		},
-		proxyPool:  pool,
-		maxRetries: 3,
-		backoff:    500 * time.Millisecond,
-		engine:     EngineJetta,
+		proxyPool:       pool,
+		maxRetries:      3,
+		backoff:         500 * time.Millisecond,
+		engine:          EngineJetta,
+		resolvedSymbols: make(map[string]Instrument),
 	}, nil
 }
 
