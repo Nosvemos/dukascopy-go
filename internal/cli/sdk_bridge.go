@@ -162,6 +162,10 @@ func RunSDKDownload(ctx context.Context, opts SDKDownloadOptions) error {
 		resumeState,
 		dedupeRecord,
 		opts.Hive,
+		dukascopy.BarTypeTime,
+		0,
+		dukascopy.OutlierConfig{},
+		nil,
 	)
 	return err
 }

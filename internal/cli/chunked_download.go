@@ -13,6 +13,7 @@ import (
 	"github.com/Nosvemos/dukascopy-go/internal/checkpoint"
 	"github.com/Nosvemos/dukascopy-go/pkg/csvout"
 	"github.com/Nosvemos/dukascopy-go/pkg/dukascopy"
+	"github.com/Nosvemos/dukascopy-go/pkg/features"
 )
 
 // runChunkedDownload orchestrates the low-memory download process.
@@ -36,6 +37,10 @@ func runChunkedDownload(
 	resumeState *csvout.ResumeState,
 	dedupeRecord []string,
 	hive bool,
+	barType dukascopy.BarType,
+	barSize float64,
+	outlierCfg dukascopy.OutlierConfig,
+	featureSpecs []features.FeatureSpec,
 ) (int, error) {
 	progress, _ := stderr.(*progressPrinter)
 
@@ -215,7 +220,21 @@ func runChunkedDownload(
 					if progress != nil {
 						progress.PartitionStarted(workerID, item.Partition)
 					}
-					result := downloadChunk(childCtx, client, targetCacheDir, workerID, item, request, resultKind, barColumns, tickColumns)
+					result := downloadChunk(
+						childCtx,
+						client,
+						targetCacheDir,
+						workerID,
+						item,
+						request,
+						resultKind,
+						barColumns,
+						tickColumns,
+						barType,
+						barSize,
+						outlierCfg,
+						featureSpecs,
+					)
 					if progress != nil {
 						progress.PartitionFinished(result)
 					}
@@ -240,16 +259,21 @@ func runChunkedDownload(
 
 		var firstErr error
 		for result := range results {
-			if partitionMode != partitionNone {
-				if err := applyPartitionResult(manifestPath, &manifest, result); err != nil && firstErr == nil {
-					firstErr = err
-					cancel()
-					continue
-				}
-			}
 			if result.Err != nil && firstErr == nil {
 				firstErr = result.Err
-				cancel() // cancel other workers on first failure
+				cancel()
+			}
+			if partitionMode != partitionNone && result.Err == nil {
+				manifestPart := checkpoint.FindPart(&manifest, result.Item.Partition.ID)
+				if manifestPart != nil {
+					manifestPart.Status = "completed"
+					manifestPart.Rows = result.RowsWritten
+					manifestPart.Bytes = result.Audit.Bytes
+					manifestPart.SHA256 = result.Audit.SHA256
+					manifestPart.Error = ""
+					manifestPart.UpdatedAt = time.Now().UTC()
+					_ = checkpoint.Save(manifestPath, manifest)
+				}
 			}
 		}
 
@@ -258,11 +282,9 @@ func runChunkedDownload(
 		}
 	}
 
-	// 3. Final Merge & Partitioning Stage
+	// 3. Assemble/Merge chunks
 	if progress != nil {
 		progress.SetStatus("merging chunks")
-	} else if outputPath != "-" {
-		fmt.Fprintf(stderr, "Merging %d chunks...\n", len(chunks))
 	}
 
 	partPaths := make([]string, len(chunks))
@@ -291,6 +313,18 @@ func runChunkedDownload(
 			return 0, fmt.Errorf("resume merge failed: %w", err)
 		}
 		totalRows = appendedRows
+	}
+
+	// Post-merge ML features calculation across continuous time series
+	if len(featureSpecs) > 0 && resultKind == dukascopy.ResultKindBar && barType == dukascopy.BarTypeTime && strings.TrimSpace(outputPath) != "-" {
+		bars, baseCols, err := csvout.ReadBarsFromCSV(outputPath)
+		if err == nil && len(bars) > 0 {
+			featNames, featRows, featErr := features.ComputeBarFeatures(bars, featureSpecs)
+			if featErr == nil {
+				inst := dukascopy.Instrument{Name: request.Symbol, PriceScale: 5}
+				_ = csvout.WriteBarsWithFeaturesAtomic(outputPath, inst, baseCols, bars, featNames, featRows)
+			}
+		}
 	}
 
 	// Save final output metadata to manifest if in partition mode

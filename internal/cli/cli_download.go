@@ -11,6 +11,7 @@ import (
 	"github.com/Nosvemos/dukascopy-go/internal/checkpoint"
 	"github.com/Nosvemos/dukascopy-go/pkg/csvout"
 	"github.com/Nosvemos/dukascopy-go/pkg/dukascopy"
+	"github.com/Nosvemos/dukascopy-go/pkg/features"
 )
 
 func runDownload(args []string, stdout io.Writer, stderr io.Writer) error {
@@ -59,6 +60,11 @@ func runDownload(args []string, stdout io.Writer, stderr io.Writer) error {
 	cacheDir := fs.String("cache-dir", "./.dukascopy_cache", "temporary cache directory path")
 	keepCache := fs.Bool("keep-cache", false, "keep temporary cache files after successful download")
 	hive := fs.Bool("hive", false, "enable Hive-style partitioning directory output (e.g. year=YYYY/month=MM/...)")
+	featuresFlag := fs.String("features", "", "comma-separated ML features / indicators (e.g. returns:log,rsi:14,ema:20,ema:50,atr:14,vwap,volatility:garman-klass)")
+	indicatorsFlag := fs.String("indicators", "", "alias for --features")
+	barType := fs.String("bar-type", "time", "sampling bar type: time, tick, volume, dollar")
+	barSize := fs.Float64("bar-size", 0, "size for alternative bar sampling (e.g. 500 for tick bars, 1000 for volume bars)")
+	cleanOutliers := fs.String("clean-outliers", "none", "outlier scrubbing mode (none, auto, median:window:threshold)")
 
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -445,6 +451,35 @@ func runDownload(args []string, stdout io.Writer, stderr io.Writer) error {
 		return nil
 	}
 
+	var featureSpecs []features.FeatureSpec
+	activeFeatures := strings.TrimSpace(*featuresFlag)
+	if activeFeatures == "" && strings.TrimSpace(*indicatorsFlag) != "" {
+		activeFeatures = strings.TrimSpace(*indicatorsFlag)
+	}
+	if activeFeatures != "" {
+		specs, err := features.ParseFeatureSpecs(activeFeatures)
+		if err != nil {
+			return fmt.Errorf("invalid --features: %w", err)
+		}
+		featureSpecs = specs
+	}
+
+	parsedBarType, err := dukascopy.ParseBarType(*barType)
+	if err != nil {
+		return err
+	}
+	if parsedBarType != dukascopy.BarTypeTime {
+		if *barSize <= 0 {
+			return fmt.Errorf("--bar-size must be > 0 when --bar-type is %q", *barType)
+		}
+		resultKind = dukascopy.ResultKindBar
+	}
+
+	outlierCfg, err := dukascopy.ParseOutlierConfig(*cleanOutliers)
+	if err != nil {
+		return fmt.Errorf("invalid --clean-outliers: %w", err)
+	}
+
 	appended, err := runChunkedDownload(
 		ctx,
 		client,
@@ -463,6 +498,10 @@ func runDownload(args []string, stdout io.Writer, stderr io.Writer) error {
 		resumeState,
 		dedupeRecord,
 		*hive,
+		parsedBarType,
+		*barSize,
+		outlierCfg,
+		featureSpecs,
 	)
 	if err != nil {
 		return err
