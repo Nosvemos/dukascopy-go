@@ -30,6 +30,10 @@ func ParseOutlierConfig(raw string) (OutlierConfig, error) {
 	}
 
 	parts := strings.Split(raw, ":")
+	strategy := parts[0]
+	if strategy != "median" && strategy != "mad" {
+		return OutlierConfig{}, fmt.Errorf("unsupported outlier strategy %q (supported: median, mad)", strategy)
+	}
 	window := 7
 	threshold := 5.0
 

@@ -126,12 +126,16 @@ func ParseFeatureSpecs(raw string) ([]FeatureSpec, error) {
 			window := 14
 			if len(parts) > 1 {
 				algo = strings.ToLower(strings.TrimSpace(parts[1]))
+				if !strings.Contains(algo, "parkinson") && !strings.Contains(algo, "garman") {
+					return nil, fmt.Errorf("unknown volatility algorithm %q (supported: garman-klass, parkinson)", parts[1])
+				}
 			}
 			if len(parts) > 2 {
 				w, err := strconv.Atoi(strings.TrimSpace(parts[2]))
-				if err == nil && w > 0 {
-					window = w
+				if err != nil || w <= 0 {
+					return nil, fmt.Errorf("invalid volatility window %q in %q", parts[2], token)
 				}
+				window = w
 			}
 
 			if strings.Contains(algo, "parkinson") {
@@ -145,19 +149,25 @@ func ParseFeatureSpecs(raw string) ([]FeatureSpec, error) {
 			slow := 26
 			signal := 9
 			if len(parts) > 1 {
-				if f, err := strconv.Atoi(strings.TrimSpace(parts[1])); err == nil && f > 0 {
-					fast = f
+				f, err := strconv.Atoi(strings.TrimSpace(parts[1]))
+				if err != nil || f <= 0 {
+					return nil, fmt.Errorf("invalid macd fast period %q in %q", parts[1], token)
 				}
+				fast = f
 			}
 			if len(parts) > 2 {
-				if s, err := strconv.Atoi(strings.TrimSpace(parts[2])); err == nil && s > 0 {
-					slow = s
+				s, err := strconv.Atoi(strings.TrimSpace(parts[2]))
+				if err != nil || s <= 0 {
+					return nil, fmt.Errorf("invalid macd slow period %q in %q", parts[2], token)
 				}
+				slow = s
 			}
 			if len(parts) > 3 {
-				if sig, err := strconv.Atoi(strings.TrimSpace(parts[3])); err == nil && sig > 0 {
-					signal = sig
+				sig, err := strconv.Atoi(strings.TrimSpace(parts[3]))
+				if err != nil || sig <= 0 {
+					return nil, fmt.Errorf("invalid macd signal period %q in %q", parts[3], token)
 				}
+				signal = sig
 			}
 			specs = append(specs,
 				FeatureSpec{Type: FeatureMACD, Param1: fast, Param2: slow, Param3: signal, Name: fmt.Sprintf("macd_%d_%d", fast, slow)},
@@ -169,14 +179,18 @@ func ParseFeatureSpecs(raw string) ([]FeatureSpec, error) {
 			period := 20
 			stdDev := 2.0
 			if len(parts) > 1 {
-				if p, err := strconv.Atoi(strings.TrimSpace(parts[1])); err == nil && p > 0 {
-					period = p
+				p, err := strconv.Atoi(strings.TrimSpace(parts[1]))
+				if err != nil || p <= 0 {
+					return nil, fmt.Errorf("invalid bollinger period %q in %q", parts[1], token)
 				}
+				period = p
 			}
 			if len(parts) > 2 {
-				if s, err := strconv.ParseFloat(strings.TrimSpace(parts[2]), 64); err == nil && s > 0 {
-					stdDev = s
+				s, err := strconv.ParseFloat(strings.TrimSpace(parts[2]), 64)
+				if err != nil || s <= 0 {
+					return nil, fmt.Errorf("invalid bollinger std_dev %q in %q", parts[2], token)
 				}
+				stdDev = s
 			}
 			specs = append(specs,
 				FeatureSpec{Type: FeatureBollinger, Param1: period, ParamF: stdDev, Name: fmt.Sprintf("bb_upper_%d", period)},

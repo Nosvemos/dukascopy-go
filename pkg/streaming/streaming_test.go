@@ -205,28 +205,118 @@ func TestRedisMockPublishStream(t *testing.T) {
 }
 
 func TestStreamingErrorBranches(t *testing.T) {
-	// Invalid Redis URL
+	// Defaults and URL parsing
+	pDef, err := NewRedisPublisher("localhost")
+	if err != nil || pDef.channel != "market_data" {
+		t.Errorf("unexpected redis defaults: %+v", pDef)
+	}
+	_ = pDef.Close()
+
+	nDef, err := NewNATSPublisher("localhost")
+	if err != nil || nDef.subject != "market.data" {
+		t.Errorf("unexpected nats defaults: %+v", nDef)
+	}
+	_ = nDef.Close()
+
+	// Direct fail on down server
 	p, err := NewRedisPublisher("redis://localhost:9999/chan")
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
 	}
-	_ = p.Close()
+	defer p.Close()
 
-	// Direct fail on down server
 	err = p.Publish(context.Background(), []byte("data"))
 	if err == nil {
 		t.Errorf("expected publish error on closed port")
 	}
 
-	// Invalid NATS URL
 	np, err := NewNATSPublisher("nats://localhost:9999/market")
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
 	}
-	_ = np.Close()
+	defer np.Close()
 
 	err = np.Publish(context.Background(), []byte("data"))
 	if err == nil {
 		t.Errorf("expected nats publish error on closed port")
 	}
+
+	// Redis server returning -ERR response
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen failed: %v", err)
+	}
+	defer ln.Close()
+
+	go func() {
+		conn, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+
+		r := bufio.NewReader(conn)
+		for {
+			_, err := r.ReadString('\n')
+			if err != nil {
+				return
+			}
+			_, _ = conn.Write([]byte("-ERR custom redis error\r\n"))
+		}
+	}()
+
+	errPub, err := NewRedisPublisher("redis://" + ln.Addr().String() + "/test")
+	if err != nil {
+		t.Fatalf("NewRedisPublisher failed: %v", err)
+	}
+	defer errPub.Close()
+
+	if err := errPub.Publish(context.Background(), []byte("test")); err == nil {
+		t.Errorf("expected error on -ERR response")
+	}
+}
+
+func TestStreamingReconnectionAndAuth(t *testing.T) {
+	// Mock server that accepts connection and responds to INFO and CONNECT
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen failed: %v", err)
+	}
+	defer ln.Close()
+
+	go func() {
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			go func(c net.Conn) {
+				defer c.Close()
+				_, _ = c.Write([]byte("INFO {\"server_id\":\"test\"}\r\n"))
+				r := bufio.NewReader(c)
+				for {
+					line, err := r.ReadString('\n')
+					if err != nil {
+						return
+					}
+					if strings.HasPrefix(line, "PUB") {
+						// close unexpectedly to test broken pipe
+						return
+					}
+				}
+			}(conn)
+		}
+	}()
+
+	np, err := NewNATSPublisher("nats://" + ln.Addr().String() + "/market.eurusd")
+	if err != nil {
+		t.Fatalf("NewNATSPublisher failed: %v", err)
+	}
+	defer np.Close()
+
+	// Initial publish
+	_ = np.Publish(context.Background(), []byte("test 1"))
+	// Second publish (connection reuse)
+	_ = np.Publish(context.Background(), []byte("test 2"))
+	_ = np.connect() // already connected branch
 }
