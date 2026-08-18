@@ -1,0 +1,98 @@
+DUKASCOPY-GO SOURCE-AVAILABLE NON-COMMERCIAL LICENSE
+Version 1.0, August 2026
+
+Copyright (c) 2026 Nosvemos and contributors. All rights reserved.
+
+TERMS AND CONDITIONS FOR ACCESS, USE, REPRODUCTION, AND REDISTRIBUTION
+
+1. DEFINITIONS
+
+"Software" means the source code, object code, documentation, scripts, and any 
+related files distributed under this License.
+
+"Copyright Holder" means Nosvemos, the creator and copyright owner of the Software.
+
+"Commercial Use" means any use of the Software, in whole or in part, directly or 
+indirectly, for monetary compensation, revenue generation, financial gain, or in 
+connection with any commercial enterprise, business operations, proprietary trading 
+desk, subscription service, or commercial product offering.
+
+"Derivative Work" means any work based upon the Software, including modifications, 
+translations, enhancements, adaptations, extensions, or integrations.
+
+2. GRANT OF LICENSE (PERMITTED USES)
+
+Subject to the terms, conditions, and prohibitions of this License, the Copyright 
+Holder hereby grants to you a worldwide, royalty-free, non-exclusive, non-transferable, 
+and non-sublicensable license to:
+
+  a) View and Inspect: Access, read, view, and inspect the source code of the Software.
+  
+  b) Personal & Non-Commercial Use: Compile, execute, test, and use the Software solely 
+     for personal, non-commercial, academic, educational, or private research purposes.
+  
+  c) Modification: Modify, adapt, and create Derivative Works of the Software solely 
+     for personal, non-commercial, academic, or private research purposes.
+  
+  d) Non-Commercial Redistribution: Reproduce and redistribute exact or modified copies 
+     of the Software or Derivative Works, provided that:
+     (i)   Such redistribution is made entirely free of charge;
+     (ii)  All original copyright, trademark, and attribution notices are preserved;
+     (iii) A copy of this License is included verbatim in all distributions; and
+     (iv)  No additional terms or restrictions are imposed that conflict with this License.
+
+3. STRICT PROHIBITIONS & COMMERCIAL RESTRICTIONS
+
+The following uses, actions, and distributions are STRICTLY PROHIBITED:
+
+  a) Commercial Use: You may not use the Software, or any Derivative Work, for any 
+     Commercial Use, commercial trade execution, business operations, or revenue generation.
+
+  b) Resale & Paid Distribution: You may not sell, rent, lease, auction, charge fees for, 
+     or distribute the Software or Derivative Works as part of any paid software bundle, 
+     data package, or commercial service.
+
+  c) Software-as-a-Service (SaaS) & Hosting: You may not provide, host, run, or expose 
+     the Software, its API, its real-time feeds, or any Derivative Work as a service 
+     (including SaaS, PaaS, IaaS, API endpoint, or cloud service) to any third party.
+
+  d) Commercial Product Integration: You may not embed, bundle, link, integrate, or 
+     incorporate the Software or any Derivative Work into any commercial product, 
+     proprietary trading software, paid trading bot, subscription platform, or 
+     closed-source commercial application.
+
+  e) Sublicensing & Relicensing: You may not sublicense, relicense, assign, or transfer 
+     this License or any rights granted herein to any other person or entity.
+
+4. RESERVATION OF RIGHTS
+
+All rights, titles, and interests in and to the Software not expressly granted under 
+Section 2 are reserved exclusively by the Copyright Holder. For commercial licensing 
+inquiries or permissions beyond the scope of this License, contact the Copyright Holder.
+
+5. TERMINATION
+
+This License and all rights granted hereunder shall terminate automatically and 
+immediately if you fail to comply with any term, condition, or prohibition of this 
+License. Upon termination, you must cease all use, reproduction, and distribution 
+of the Software and destroy all copies in your possession or control.
+
+6. DISCLAIMER OF WARRANTY
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, 
+INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A 
+PARTICULAR PURPOSE, TITLE, AND NON-INFRINGEMENT. IN NO EVENT SHALL THE COPYRIGHT 
+HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY CLAIM, DAMAGES, LOSS OF CAPITAL, TRADING 
+LOSSES, OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, 
+ARISING FROM, OUT OF, OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER 
+DEALINGS IN THE SOFTWARE.
+
+7. LIMITATION OF LIABILITY
+
+IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, 
+INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, PUNITIVE, OR CONSEQUENTIAL DAMAGES 
+(INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS 
+OF USE, DATA, FINANCIAL PROFITS, OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON 
+ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING 
+NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN 
+IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.

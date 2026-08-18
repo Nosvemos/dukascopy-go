@@ -16,10 +16,11 @@ setup(
     long_description_content_type="text/markdown",
     url="https://github.com/Nosvemos/dukascopy-go",
     author="Nosvemos",
+    license="Proprietary Source-Available Non-Commercial License",
     packages=find_packages(),
     classifiers=[
         "Programming Language :: Python :: 3",
-        "License :: OSI Approved :: MIT License",
+        "License :: Other/Proprietary License",
         "Operating System :: OS Independent",
         "Topic :: Office/Business :: Financial :: Investment",
     ],

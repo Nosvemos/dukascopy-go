@@ -359,4 +359,15 @@ go build -o dukascopy-go ./cmd/dukascopy-go
 
 ## ⚖️ Legal Disclaimer
 
-`dukascopy-go` is not affiliated with, endorsed by, or vetted by Dukascopy Bank SA. It is an independent open-source tool that works with Dukascopy's publicly accessible endpoints and is intended for research, data engineering, backtesting, and algorithmic trading workflows.
+`dukascopy-go` is not affiliated with, endorsed by, or vetted by Dukascopy Bank SA. It is an independent tool that works with Dukascopy's publicly accessible endpoints and is intended for research, data engineering, backtesting, and algorithmic trading workflows.
+
+---
+
+## 📜 License
+
+This project is licensed under the **Dukascopy-Go Source-Available Non-Commercial License**.
+
+- ✅ **Allowed**: Source code viewing, personal use, private research/testing, modification, and free non-commercial redistribution.
+- ❌ **Prohibited**: Commercial use, resale, paid distribution, SaaS/hosting services, sublicensing, and integration into commercial products.
+
+See the full [LICENSE](LICENSE) file for details.
