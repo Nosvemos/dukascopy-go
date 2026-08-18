@@ -147,3 +147,86 @@ func TestNATSMockPublish(t *testing.T) {
 		}
 	}
 }
+
+func TestRedisMockPublishStream(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen failed: %v", err)
+	}
+	defer ln.Close()
+
+	receivedChan := make(chan string, 10)
+	go func() {
+		conn, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+
+		r := bufio.NewReader(conn)
+		for {
+			line, err := r.ReadString('\n')
+			if err != nil {
+				return
+			}
+			receivedChan <- line
+			if strings.HasPrefix(line, "*") {
+				_, _ = conn.Write([]byte("+OK\r\n"))
+			}
+		}
+	}()
+
+	pub, err := NewRedisPublisher("redis://:secret@" + ln.Addr().String() + "/stream:market_ticks")
+	if err != nil {
+		t.Fatalf("NewRedisPublisher failed: %v", err)
+	}
+	defer pub.Close()
+
+	if err := pub.Publish(context.Background(), []byte(`{"stream_test":true}`)); err != nil {
+		t.Fatalf("Publish failed: %v", err)
+	}
+
+	hasAuth := false
+	hasXadd := false
+	timer := time.After(1 * time.Second)
+	for !hasAuth || !hasXadd {
+		select {
+		case line := <-receivedChan:
+			if strings.Contains(line, "AUTH") {
+				hasAuth = true
+			}
+			if strings.Contains(line, "XADD") {
+				hasXadd = true
+			}
+		case <-timer:
+			t.Fatalf("timeout waiting for Redis commands (auth=%v, xadd=%v)", hasAuth, hasXadd)
+		}
+	}
+}
+
+func TestStreamingErrorBranches(t *testing.T) {
+	// Invalid Redis URL
+	p, err := NewRedisPublisher("redis://localhost:9999/chan")
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	_ = p.Close()
+
+	// Direct fail on down server
+	err = p.Publish(context.Background(), []byte("data"))
+	if err == nil {
+		t.Errorf("expected publish error on closed port")
+	}
+
+	// Invalid NATS URL
+	np, err := NewNATSPublisher("nats://localhost:9999/market")
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	_ = np.Close()
+
+	err = np.Publish(context.Background(), []byte("data"))
+	if err == nil {
+		t.Errorf("expected nats publish error on closed port")
+	}
+}
