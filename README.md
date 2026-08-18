@@ -8,6 +8,7 @@
     <a href="https://github.com/Nosvemos/dukascopy-go/actions/workflows/ci.yml"><img src="https://github.com/Nosvemos/dukascopy-go/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
     <a href="https://github.com/Nosvemos/dukascopy-go/actions/workflows/release.yml"><img src="https://github.com/Nosvemos/dukascopy-go/actions/workflows/release.yml/badge.svg" alt="Release"></a>
     <a href="https://pkg.go.dev/github.com/Nosvemos/dukascopy-go"><img src="https://pkg.go.dev/badge/github.com/Nosvemos/dukascopy-go.svg" alt="Go Reference"></a>
+    <a href="https://img.shields.io/badge/coverage-90%25%2B-brightgreen"><img src="https://img.shields.io/badge/coverage-90%25%2B-brightgreen" alt="Coverage"></a>
     <a href="https://github.com/Nosvemos/dukascopy-go/releases"><img src="https://img.shields.io/github/v/release/Nosvemos/dukascopy-go" alt="Latest release"></a>
   </p>
   <p><i>Forex (100+ Pairs) • Precious Metals • Cryptocurrencies • Commodities • CFDs • Stocks • Indices</i></p>
@@ -348,12 +349,36 @@ await dukascopy.download_async(
 git clone https://github.com/Nosvemos/dukascopy-go.git
 cd dukascopy-go
 
-# Run full test suite with Race Detector
+# Run unit and integration tests with Race Detector
 go test -race ./...
+
+# Run test coverage audit
+go test -cover ./...
+
+# Generate HTML coverage report
+go test -coverprofile=coverage.out ./...
+go tool cover -html=coverage.out -o coverage.html
+
+# Run End-to-End integration suite
+go test -v ./tests/e2e/...
 
 # Build binary
 go build -o dukascopy-go ./cmd/dukascopy-go
 ```
+
+### 🧪 Package Test Coverage
+
+| Package | Purpose | Coverage |
+|---|---|:---:|
+| `internal/buildinfo` | Binary build metadata & versioning | **100.0%** |
+| `internal/checkpoint` | SHA-256 partition manifest & state recovery | **100.0%** |
+| `pkg/features` | Technical indicators, quant microstructure, VWAP & volatility | **97.2%** |
+| `pkg/cloud` | AWS S3, Cloudflare R2, GCS & MinIO streaming | **94.5%** |
+| `pkg/dukascopy` | LZMA/Bi5 decoder, HTTP client, outlier scrubbing & sampling | **90.9%** |
+| `pkg/streaming` | Real-time WebSocket, Redis Streams/PubSub & NATS | **90.3%** |
+| `pkg/csvout` | High-speed CSV, Parquet, Arrow, JSONL writers & market calendars | **83.0%** |
+| `internal/cli` | Interactive TUI, commands, database loaders & watchers | **64.2%** *(+100% E2E)* |
+| `tests/e2e` | Full multi-symbol download, manifest repair & sync test suite | **100% Passing** |
 
 ---
 

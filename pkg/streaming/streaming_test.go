@@ -319,4 +319,61 @@ func TestStreamingReconnectionAndAuth(t *testing.T) {
 	// Second publish (connection reuse)
 	_ = np.Publish(context.Background(), []byte("test 2"))
 	_ = np.connect() // already connected branch
+
+	// Invalid URLs
+	if _, err := NewNATSPublisher("://invalid-url"); err == nil {
+		t.Errorf("expected error for invalid nats url")
+	}
+	if _, err := NewRedisPublisher("://invalid-url"); err == nil {
+		t.Errorf("expected error for invalid redis url")
+	}
+
+	// Server that immediately closes connection on connect (handshake fail)
+	lnClose, err := net.Listen("tcp", "127.0.0.1:0")
+	if err == nil {
+		defer lnClose.Close()
+		go func() {
+			c, err := lnClose.Accept()
+			if err == nil {
+				c.Close() // immediately close
+			}
+		}()
+
+		npFail, err := NewNATSPublisher("nats://" + lnClose.Addr().String() + "/test")
+		if err == nil {
+			defer npFail.Close()
+			if err := npFail.Publish(context.Background(), []byte("test")); err == nil {
+				t.Errorf("expected handshake error on closed socket")
+			}
+		}
+	}
+
+	// Redis already connected branch
+	lnR, err := net.Listen("tcp", "127.0.0.1:0")
+	if err == nil {
+		defer lnR.Close()
+		go func() {
+			c, err := lnR.Accept()
+			if err == nil {
+				defer c.Close()
+				r := bufio.NewReader(c)
+				for {
+					line, err := r.ReadString('\n')
+					if err != nil {
+						return
+					}
+					if strings.HasPrefix(line, "*") {
+						_, _ = c.Write([]byte("+OK\r\n"))
+					}
+				}
+			}
+		}()
+
+		rp, err := NewRedisPublisher("redis://" + lnR.Addr().String() + "/test")
+		if err == nil {
+			defer rp.Close()
+			_ = rp.Publish(context.Background(), []byte("data1"))
+			_ = rp.connect() // already connected branch
+		}
+	}
 }

@@ -1,6 +1,11 @@
 package dukascopy
 
 import (
+	"context"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"strings"
 	"testing"
 	"time"
 )
@@ -125,5 +130,63 @@ func TestCoverageBoostSamplingAndOutliers(t *testing.T) {
 	loaded, ok := loadLocalCache()
 	if !ok || len(loaded) != 1 || loaded[0].Name != "EURUSD" {
 		t.Errorf("cache load failed: ok=%v, loaded=%v", ok, loaded)
+	}
+
+	// ListInstruments memory cache & local cache
+	client, err := NewClient("https://datafeed.dukascopy.com", 10*time.Second)
+	if err != nil {
+		t.Fatalf("NewClient failed: %v", err)
+	}
+	client.WithEngine(EngineDatafeed)
+	res, err := client.ListInstruments(context.Background())
+	if err != nil || len(res) == 0 {
+		t.Fatalf("ListInstruments failed: %v", err)
+	}
+
+	// Second call (memory cache hit)
+	resCached, err := client.ListInstruments(context.Background())
+	if err != nil || len(resCached) == 0 {
+		t.Fatalf("ListInstruments memory cache hit failed: %v", err)
+	}
+}
+
+func TestCoverageBoostHTTPRawBytes(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "404") {
+			http.NotFound(w, r)
+			return
+		}
+		if strings.Contains(r.URL.Path, "500") {
+			http.Error(w, "internal server error", http.StatusInternalServerError)
+			return
+		}
+		_, _ = w.Write([]byte("RAW_DATA_TEST"))
+	}))
+	defer ts.Close()
+
+	u, _ := url.Parse(ts.URL)
+	c := &Client{
+		baseURL:    u,
+		httpClient: ts.Client(),
+		engine:     EngineDatafeed,
+		maxRetries: 1,
+	}
+
+	// 200 OK
+	data, err := c.getRawBytes(context.Background(), []string{"data", "200"})
+	if err != nil || string(data) != "RAW_DATA_TEST" {
+		t.Errorf("unexpected 200 getRawBytes result: %s, %v", string(data), err)
+	}
+
+	// 404 Not Found
+	data404, err := c.getRawBytes(context.Background(), []string{"data", "404"})
+	if err != nil || data404 != nil {
+		t.Errorf("expected nil data for 404, got %v, %v", data404, err)
+	}
+
+	// 500 Server Error
+	_, err500 := c.getRawBytes(context.Background(), []string{"data", "500"})
+	if err500 == nil {
+		t.Errorf("expected error for 500 status")
 	}
 }
