@@ -38,7 +38,7 @@
 
 Pre-built standalone binaries for **Windows, Linux, and macOS (Apple Silicon & Intel)** are available on the **[Releases Page](https://github.com/Nosvemos/dukascopy-go/releases)**.
 
-### Install via Go (1.22+):
+### Install via Go (1.26+):
 
 ```bash
 go install github.com/Nosvemos/dukascopy-go/cmd/dukascopy-go@latest
