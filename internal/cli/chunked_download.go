@@ -60,6 +60,9 @@ func runChunkedDownload(
 		symSafe := safeSymbolFilename(request.Symbol)
 		tfSafe := strings.ToLower(string(request.Granularity))
 		sideSafe := strings.ToLower(string(request.Side))
+		if containsString(barColumns, "tick_count") {
+			tfSafe += "_tickcount"
+		}
 		targetCacheDir = filepath.Join(cacheDir, fmt.Sprintf("%s_%s_%s", symSafe, tfSafe, sideSafe))
 	}
 

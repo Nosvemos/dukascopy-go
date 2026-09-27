@@ -24,6 +24,8 @@ func arrowSchemaForColumns(columns []string) *arrow.Schema {
 	for i, col := range columns {
 		if strings.EqualFold(strings.TrimSpace(col), "timestamp") {
 			fields[i] = arrow.Field{Name: col, Type: arrow.BinaryTypes.String}
+		} else if strings.EqualFold(strings.TrimSpace(col), "tick_count") {
+			fields[i] = arrow.Field{Name: col, Type: arrow.PrimitiveTypes.Int64}
 		} else {
 			fields[i] = arrow.Field{Name: col, Type: arrow.PrimitiveTypes.Float64}
 		}
@@ -94,6 +96,18 @@ func (c *Config) writeArrowRecords(outputPath string, columns []string, records 
 					} else if strVal, ok := val.(string); ok {
 						if f, err := strconv.ParseFloat(strVal, 64); err == nil {
 							b.Append(f)
+						} else {
+							b.AppendNull()
+						}
+					} else {
+						b.AppendNull()
+					}
+				case *array.Int64Builder:
+					if intVal, ok := val.(int64); ok {
+						b.Append(intVal)
+					} else if strVal, ok := val.(string); ok {
+						if number, err := strconv.ParseInt(strVal, 10, 64); err == nil {
+							b.Append(number)
 						} else {
 							b.AppendNull()
 						}
@@ -184,6 +198,18 @@ func (w *ArrowStreamWriter) WriteBatch(records []map[string]any) error {
 				} else if strVal, ok := val.(string); ok {
 					if f, err := strconv.ParseFloat(strVal, 64); err == nil {
 						b.Append(f)
+					} else {
+						b.AppendNull()
+					}
+				} else {
+					b.AppendNull()
+				}
+			case *array.Int64Builder:
+				if intVal, ok := val.(int64); ok {
+					b.Append(intVal)
+				} else if strVal, ok := val.(string); ok {
+					if number, err := strconv.ParseInt(strVal, 10, 64); err == nil {
+						b.Append(number)
 					} else {
 						b.AppendNull()
 					}

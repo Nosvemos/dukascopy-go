@@ -233,6 +233,7 @@ func ReadBarsFromCSV(path string) ([]dukascopy.Bar, []string, error) {
 	lowIdx := -1
 	closeIdx := -1
 	volIdx := -1
+	tickCountIdx := -1
 
 	for i, col := range header {
 		switch strings.ToLower(strings.TrimSpace(col)) {
@@ -257,6 +258,10 @@ func ReadBarsFromCSV(path string) ([]dukascopy.Bar, []string, error) {
 		case "volume":
 			if volIdx == -1 {
 				volIdx = i
+			}
+		case "tick_count":
+			if tickCountIdx == -1 {
+				tickCountIdx = i
 			}
 		}
 	}
@@ -291,6 +296,9 @@ func ReadBarsFromCSV(path string) ([]dukascopy.Bar, []string, error) {
 		}
 		if volIdx >= 0 && volIdx < len(record) {
 			b.Volume, _ = strconv.ParseFloat(record[volIdx], 64)
+		}
+		if tickCountIdx >= 0 && tickCountIdx < len(record) {
+			b.TickCount, _ = strconv.ParseInt(record[tickCountIdx], 10, 64)
 		}
 		bars = append(bars, b)
 	}

@@ -91,6 +91,13 @@ dukascopy-go download --symbol xauusd --bar-type tick --bar-size 500 --last 7d -
 dukascopy-go download --symbol eurusd --bar-type volume --bar-size 1000000 --last 30d --output ./eurusd_vol.parquet
 ```
 
+### Tick record counts on time bars
+Add `tick_count` to a historical time-bar download to count source tick records in each UTC interval:
+```bash
+dukascopy-go download --symbol eurusd --timeframe m1 --last 30d --output ./eurusd_m1.csv --tick-count
+```
+`tick_count` is a feed-activity indicator, not a count of executed trades. It is separate from the existing `volume` field, which continues to report Dukascopy bid/ask liquidity volume. Counting requires an additional raw-tick download; it is supported for historical time bars, not live or custom tick/volume/dollar bars. You can also request it through `--custom-columns timestamp,open,high,low,close,volume,tick_count`.
+
 ### 6. Direct Cloud Storage Upload
 Stream directly to your AWS S3, Cloudflare R2, Google Cloud Storage, or MinIO bucket:
 ```bash
@@ -139,6 +146,7 @@ dukascopy-go download [options]
 | `--features` | `string` | — | Comma-separated list of indicators to compute and append on the fly. |
 | `--bar-type` | `string` | `time` | Bar sampling type: `time`, `tick`, `volume`, `dollar` |
 | `--bar-size` | `float` | `0` | Threshold size for custom bar aggregation (e.g. `500` ticks, `1000000` volume) |
+| `--tick-count` | `bool` | `false` | Append source tick record counts per UTC time bar as `tick_count` (additional tick download; not transaction volume) |
 | `--clean-outliers` | `string` | `none` | Outlier filtering: `auto` or `median:window:threshold` (e.g. `median:7:5.0`) |
 
 ### Format & Presets

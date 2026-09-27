@@ -72,6 +72,25 @@ func AggregateTicksToBars(ticks []Tick, granularity Granularity, side PriceSide,
 	return bars, nil
 }
 
+// CountTicksByInterval returns the number of source tick records in each UTC
+// time-bar interval. It counts records regardless of their bid/ask liquidity
+// volume, which remains represented separately by Bar.Volume.
+func CountTicksByInterval(ticks []Tick, granularity Granularity) (map[time.Time]int64, error) {
+	if !isBarTimeframe(granularity) {
+		return nil, fmt.Errorf("tick counting does not support granularity %q", granularity)
+	}
+
+	counts := make(map[time.Time]int64)
+	for _, tick := range ticks {
+		bucketTime, err := bucketStart(tick.Time.UTC(), granularity)
+		if err != nil {
+			return nil, err
+		}
+		counts[bucketTime]++
+	}
+	return counts, nil
+}
+
 func AggregateBars(sourceBars []Bar, granularity Granularity, from time.Time, to time.Time) ([]Bar, error) {
 	normalized := normalizeGranularity(granularity)
 	if normalized == GranularityM1 || normalized == GranularityH1 || normalized == GranularityD1 {
@@ -100,12 +119,13 @@ func AggregateBars(sourceBars []Bar, granularity Granularity, from time.Time, to
 
 		if !state.initialized {
 			state.bar = Bar{
-				Time:   bucketTime,
-				Open:   source.Open,
-				High:   source.High,
-				Low:    source.Low,
-				Close:  source.Close,
-				Volume: source.Volume,
+				Time:      bucketTime,
+				Open:      source.Open,
+				High:      source.High,
+				Low:       source.Low,
+				Close:     source.Close,
+				Volume:    source.Volume,
+				TickCount: source.TickCount,
 			}
 			state.initialized = true
 			continue
@@ -119,6 +139,7 @@ func AggregateBars(sourceBars []Bar, granularity Granularity, from time.Time, to
 		}
 		state.bar.Close = source.Close
 		state.bar.Volume += source.Volume
+		state.bar.TickCount += source.TickCount
 	}
 
 	sort.Slice(keys, func(i, j int) bool {
