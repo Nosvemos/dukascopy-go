@@ -23,12 +23,12 @@ var flexibleTimestampLayouts = []string{
 	time.RFC3339Nano,            // default output format
 	time.RFC3339,                // RFC3339 without nanoseconds
 	"2006-01-02T15:04:05Z07:00", // explicit RFC3339 variant
-	"2006-01-02 15:04:05",      // backtrader preset
-	"2006.01.02 15:04:05",      // mt5 preset
-	"2006.01.02 15:04",         // mt4 preset
-	"20060102 150405",          // ninjatrader preset
-	"2006-01-02 15:04",         // common short format
-	"2006-01-02",               // date-only
+	"2006-01-02 15:04:05",       // backtrader preset
+	"2006.01.02 15:04:05",       // mt5 preset
+	"2006.01.02 15:04",          // mt4 preset
+	"20060102 150405",           // ninjatrader preset
+	"2006-01-02 15:04",          // common short format
+	"2006-01-02",                // date-only
 }
 
 // parseFlexibleTimestamp tries to parse a timestamp string using all known
@@ -225,25 +225,26 @@ func TickColumnsForProfile(profile Profile) []string {
 
 func ParseBarColumns(value string) ([]string, error) {
 	return parseColumns(value, map[string]struct{}{
-		"timestamp": {},
-		"open":      {},
-		"high":      {},
-		"low":       {},
-		"close":     {},
-		"mid_open":  {},
-		"mid_high":  {},
-		"mid_low":   {},
-		"mid_close": {},
-		"spread":    {},
-		"volume":    {},
-		"bid_open":  {},
-		"bid_high":  {},
-		"bid_low":   {},
-		"bid_close": {},
-		"ask_open":  {},
-		"ask_high":  {},
-		"ask_low":   {},
-		"ask_close": {},
+		"timestamp":  {},
+		"open":       {},
+		"high":       {},
+		"low":        {},
+		"close":      {},
+		"mid_open":   {},
+		"mid_high":   {},
+		"mid_low":    {},
+		"mid_close":  {},
+		"spread":     {},
+		"volume":     {},
+		"tick_count": {},
+		"bid_open":   {},
+		"bid_high":   {},
+		"bid_low":    {},
+		"bid_close":  {},
+		"ask_open":   {},
+		"ask_high":   {},
+		"ask_low":    {},
+		"ask_close":  {},
 	})
 }
 

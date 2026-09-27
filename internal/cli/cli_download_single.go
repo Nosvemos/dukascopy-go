@@ -55,6 +55,11 @@ func runSingleDownload(
 }
 
 func loadBidAskBars(ctx context.Context, client *dukascopy.Client, request dukascopy.DownloadRequest) (dukascopy.Instrument, []dukascopy.Bar, []dukascopy.Bar, error) {
+	instrument, bidBars, askBars, _, _, err := loadBidAskBarsWithTicks(ctx, client, request)
+	return instrument, bidBars, askBars, err
+}
+
+func loadBidAskBarsWithTicks(ctx context.Context, client *dukascopy.Client, request dukascopy.DownloadRequest) (dukascopy.Instrument, []dukascopy.Bar, []dukascopy.Bar, []dukascopy.Tick, bool, error) {
 	var bidBars, askBars []dukascopy.Bar
 	var instrument dukascopy.Instrument
 	var bidErr, askErr error
@@ -79,23 +84,23 @@ func loadBidAskBars(ctx context.Context, client *dukascopy.Client, request dukas
 	wg.Wait()
 
 	if bidErr == nil && askErr == nil {
-		return instrument, bidBars, askBars, nil
+		return instrument, bidBars, askBars, nil, false, nil
 	}
 
 	tickRequest := request
 	tickRequest.Granularity = dukascopy.GranularityTick
 	tickResult, err := client.Download(ctx, tickRequest)
 	if err != nil {
-		return dukascopy.Instrument{}, nil, nil, err
+		return dukascopy.Instrument{}, nil, nil, nil, false, err
 	}
 
 	bidBars, err = dukascopy.AggregateTicksToBars(tickResult.Ticks, request.Granularity, dukascopy.PriceSideBid, request.From, request.To)
 	if err != nil {
-		return dukascopy.Instrument{}, nil, nil, err
+		return dukascopy.Instrument{}, nil, nil, nil, false, err
 	}
 	askBars, err = dukascopy.AggregateTicksToBars(tickResult.Ticks, request.Granularity, dukascopy.PriceSideAsk, request.From, request.To)
 	if err != nil {
-		return dukascopy.Instrument{}, nil, nil, err
+		return dukascopy.Instrument{}, nil, nil, nil, false, err
 	}
-	return tickResult.Instrument, bidBars, askBars, nil
+	return tickResult.Instrument, bidBars, askBars, tickResult.Ticks, true, nil
 }

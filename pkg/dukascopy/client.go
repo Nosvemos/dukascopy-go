@@ -81,12 +81,13 @@ type ProgressEvent struct {
 type ProgressFunc func(ProgressEvent)
 
 type Bar struct {
-	Time   time.Time
-	Open   float64
-	High   float64
-	Low    float64
-	Close  float64
-	Volume float64
+	Time      time.Time
+	Open      float64
+	High      float64
+	Low       float64
+	Close     float64
+	Volume    float64
+	TickCount int64
 }
 
 type Tick struct {

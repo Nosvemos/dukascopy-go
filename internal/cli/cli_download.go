@@ -67,6 +67,7 @@ func runDownload(args []string, stdout io.Writer, stderr io.Writer) error {
 	indicatorsFlag := fs.String("indicators", "", "alias for --features")
 	barType := fs.String("bar-type", "time", "sampling bar type: time, tick, volume, dollar")
 	barSize := fs.Float64("bar-size", 0, "size for alternative bar sampling (e.g. 500 for tick bars, 1000 for volume bars)")
+	tickCount := fs.Bool("tick-count", false, "append source tick record counts per UTC time bar (additional tick download; not transaction volume)")
 	cleanOutliers := fs.String("clean-outliers", "none", "outlier scrubbing mode (none, auto, median:window:threshold)")
 
 	if err := fs.Parse(args); err != nil {
@@ -319,6 +320,10 @@ func runDownload(args []string, stdout io.Writer, stderr io.Writer) error {
 	}
 
 	normalizedTimeframe := dukascopy.NormalizeGranularity(dukascopy.Granularity(timeframeValue))
+	parsedBarType, err := dukascopy.ParseBarType(*barType)
+	if err != nil {
+		return err
+	}
 	profile := csvout.ProfileSimple
 	if *fullOutput {
 		profile = csvout.ProfileFull
@@ -342,6 +347,28 @@ func runDownload(args []string, stdout io.Writer, stderr io.Writer) error {
 			if err != nil {
 				return err
 			}
+		}
+	}
+
+	tickCountEnabled := *tickCount
+	for _, column := range barColumns {
+		if column == "tick_count" {
+			tickCountEnabled = true
+			break
+		}
+	}
+	if tickCountEnabled {
+		if normalizedTimeframe == dukascopy.GranularityTick {
+			return errors.New("tick_count can only be added to time-based bars, not --timeframe tick")
+		}
+		if *live {
+			return errors.New("tick_count is only supported for historical downloads")
+		}
+		if parsedBarType != dukascopy.BarTypeTime {
+			return errors.New("tick_count is only supported with --bar-type time")
+		}
+		if !containsString(barColumns, "tick_count") {
+			barColumns = append(barColumns, "tick_count")
 		}
 	}
 
@@ -483,10 +510,6 @@ func runDownload(args []string, stdout io.Writer, stderr io.Writer) error {
 		featureSpecs = specs
 	}
 
-	parsedBarType, err := dukascopy.ParseBarType(*barType)
-	if err != nil {
-		return err
-	}
 	if parsedBarType != dukascopy.BarTypeTime {
 		if *barSize <= 0 {
 			return fmt.Errorf("--bar-size must be > 0 when --bar-type is %q", *barType)

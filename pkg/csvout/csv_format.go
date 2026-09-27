@@ -75,6 +75,8 @@ func (c *Config) formatPrimaryBarColumn(column string, scale int, bar dukascopy.
 		return formatPrice(bar.Close, scale), nil
 	case "volume":
 		return formatVolume(bar.Volume), nil
+	case "tick_count":
+		return strconv.FormatInt(bar.TickCount, 10), nil
 	default:
 		return "", fmt.Errorf("column %q requires bid/ask data or is unsupported for simple bars", column)
 	}
@@ -103,6 +105,8 @@ func (c *Config) formatBarColumn(column string, scale int, bid dukascopy.Bar, as
 		return formatPrice(roundToScale(ask.Close, scale)-roundToScale(bid.Close, scale), scale), nil
 	case "volume":
 		return formatVolume(bid.Volume + ask.Volume), nil
+	case "tick_count":
+		return strconv.FormatInt(bid.TickCount, 10), nil
 	case "bid_open":
 		return formatPrice(roundToScale(bid.Open, scale), scale), nil
 	case "bid_high":

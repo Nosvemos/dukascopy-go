@@ -71,12 +71,22 @@ func parquetNodeForColumn(column string) parquet.Node {
 	if strings.EqualFold(strings.TrimSpace(column), "timestamp") {
 		return parquet.String()
 	}
+	if strings.EqualFold(strings.TrimSpace(column), "tick_count") {
+		return parquet.Leaf(parquet.Int64Type)
+	}
 	return parquet.Leaf(parquet.DoubleType)
 }
 
 func parquetValueForColumn(column string, value string) (any, error) {
 	if strings.EqualFold(strings.TrimSpace(column), "timestamp") {
 		return value, nil
+	}
+	if strings.EqualFold(strings.TrimSpace(column), "tick_count") {
+		number, err := strconv.ParseInt(value, 10, 64)
+		if err != nil {
+			return nil, fmt.Errorf("parse parquet tick count for column %q: %w", column, err)
+		}
+		return number, nil
 	}
 	number, err := strconv.ParseFloat(value, 64)
 	if err != nil {
