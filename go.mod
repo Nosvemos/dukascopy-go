@@ -11,7 +11,7 @@ require (
 	github.com/charmbracelet/huh v1.0.0
 	github.com/charmbracelet/lipgloss v1.1.0
 	github.com/lib/pq v1.12.3
-	github.com/mattn/go-isatty v0.0.20
+	github.com/mattn/go-isatty v0.0.24
 	github.com/parquet-go/parquet-go v0.32.1
 	github.com/pelletier/go-toml/v2 v2.3.1
 	github.com/ulikunitz/xz v0.5.17
