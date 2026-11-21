@@ -78,11 +78,17 @@ func TestComputeBarFeatures(t *testing.T) {
 		t.Fatalf("expected %d columns in row, got %d", len(colNames), len(rows[0]))
 	}
 
-	// Verify values are not NaN or Inf
+	// Warm-up rows are NaN by design (no look-ahead back-fill). The longest
+	// warm-up here is the MACD signal line: max(12, 26) + 9 - 2 = 33, so every
+	// row from index 33 on must be finite. Inf is never allowed.
+	const longestWarmup = 33
 	for r, row := range rows {
 		for c, val := range row {
-			if math.IsNaN(val) || math.IsInf(val, 0) {
-				t.Errorf("row %d col %s is NaN/Inf", r, colNames[c])
+			if math.IsInf(val, 0) {
+				t.Errorf("row %d col %s is Inf", r, colNames[c])
+			}
+			if r >= longestWarmup && math.IsNaN(val) {
+				t.Errorf("row %d col %s is NaN after warm-up", r, colNames[c])
 			}
 		}
 	}

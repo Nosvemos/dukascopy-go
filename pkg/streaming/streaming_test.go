@@ -121,6 +121,9 @@ func TestNATSMockPublish(t *testing.T) {
 				return
 			}
 			receivedChan <- line
+			if strings.HasPrefix(line, "PING") {
+				_, _ = conn.Write([]byte("PONG\r\n"))
+			}
 		}
 	}()
 
@@ -165,12 +168,16 @@ func TestRedisMockPublishStream(t *testing.T) {
 
 		r := bufio.NewReader(conn)
 		for {
-			line, err := r.ReadString('\n')
+			args, err := readTestRESPCommand(r)
 			if err != nil {
 				return
 			}
-			receivedChan <- line
-			if strings.HasPrefix(line, "*") {
+			receivedChan <- strings.Join(args, " ")
+			switch strings.ToUpper(args[0]) {
+			case "XADD":
+				// XADD replies with a bulk string (the new entry id).
+				_, _ = conn.Write([]byte("$15\r\n1700000000000-0\r\n"))
+			default:
 				_, _ = conn.Write([]byte("+OK\r\n"))
 			}
 		}
@@ -299,6 +306,9 @@ func TestStreamingReconnectionAndAuth(t *testing.T) {
 					if err != nil {
 						return
 					}
+					if strings.HasPrefix(line, "PING") {
+						_, _ = c.Write([]byte("PONG\r\n"))
+					}
 					if strings.HasPrefix(line, "PUB") {
 						// close unexpectedly to test broken pipe
 						return
@@ -318,7 +328,6 @@ func TestStreamingReconnectionAndAuth(t *testing.T) {
 	_ = np.Publish(context.Background(), []byte("test 1"))
 	// Second publish (connection reuse)
 	_ = np.Publish(context.Background(), []byte("test 2"))
-	_ = np.connect() // already connected branch
 
 	// Invalid URLs
 	if _, err := NewNATSPublisher("://invalid-url"); err == nil {
@@ -373,7 +382,7 @@ func TestStreamingReconnectionAndAuth(t *testing.T) {
 		if err == nil {
 			defer rp.Close()
 			_ = rp.Publish(context.Background(), []byte("data1"))
-			_ = rp.connect() // already connected branch
+			_ = rp.Publish(context.Background(), []byte("data2")) // already connected branch
 		}
 	}
 }
