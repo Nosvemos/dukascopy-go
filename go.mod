@@ -13,7 +13,7 @@ require (
 	github.com/lib/pq v1.12.3
 	github.com/mattn/go-isatty v0.0.20
 	github.com/parquet-go/parquet-go v0.32.1
-	github.com/pelletier/go-toml/v2 v2.3.1
+	github.com/pelletier/go-toml/v2 v2.4.3
 	github.com/ulikunitz/xz v0.5.17
 	gopkg.in/yaml.v3 v3.0.1
 )
