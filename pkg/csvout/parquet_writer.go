@@ -1,6 +1,7 @@
 package csvout
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -98,31 +99,28 @@ func (c *Config) writeParquetRecords(outputPath string, columns []string, record
 	if err != nil {
 		return err
 	}
-	defer file.Close()
 
 	schema := parquetSchemaForColumns(columns)
 	writer := c.parquetWriterFactory(file, schema)
 	writer.SetKeyValueMetadata(parquetColumnsMetadataKey, strings.Join(columns, ","))
+	var writeErr error
 	if len(records) > 0 {
-		if _, err := writer.Write(records); err != nil {
-			return err
-		}
+		_, writeErr = writer.Write(records)
 	}
-	if err := writer.Close(); err != nil {
-		return err
-	}
-	return nil
+	return errors.Join(writeErr, writer.Close(), file.Close())
 }
 
 func writeParquetRecords(outputPath string, columns []string, records []map[string]any) error {
 	return DefaultConfig().writeParquetRecords(outputPath, columns, records)
 }
 
+// ParquetStreamWriter writes row batches incrementally to a Parquet file.
 type ParquetStreamWriter struct {
 	file   *os.File
 	writer parquetRecordWriter
 }
 
+// CreateParquetStreamWriter creates outputPath and returns a writer for columns.
 func (c *Config) CreateParquetStreamWriter(outputPath string, columns []string) (*ParquetStreamWriter, error) {
 	if err := ensureParentDir(outputPath); err != nil {
 		return nil, err
@@ -143,10 +141,12 @@ func (c *Config) CreateParquetStreamWriter(outputPath string, columns []string) 
 	}, nil
 }
 
+// CreateParquetStreamWriter is (*Config).CreateParquetStreamWriter on DefaultConfig.
 func CreateParquetStreamWriter(outputPath string, columns []string) (*ParquetStreamWriter, error) {
 	return DefaultConfig().CreateParquetStreamWriter(outputPath, columns)
 }
 
+// WriteBatch writes rows keyed by column name.
 func (w *ParquetStreamWriter) WriteBatch(records []map[string]any) error {
 	if len(records) == 0 {
 		return nil
@@ -155,18 +155,16 @@ func (w *ParquetStreamWriter) WriteBatch(records []map[string]any) error {
 	return err
 }
 
+// Close writes the Parquet footer and closes the file. It reports every failure.
 func (w *ParquetStreamWriter) Close() error {
-	var errs []string
+	var errs []error
 	if err := w.writer.Close(); err != nil {
-		errs = append(errs, err.Error())
+		errs = append(errs, fmt.Errorf("parquet stream writer close failed: %w", err))
 	}
 	if err := w.file.Close(); err != nil {
-		errs = append(errs, err.Error())
+		errs = append(errs, fmt.Errorf("parquet stream writer close failed: %w", err))
 	}
-	if len(errs) > 0 {
-		return fmt.Errorf("parquet stream writer close failed: %s", strings.Join(errs, "; "))
-	}
-	return nil
+	return errors.Join(errs...)
 }
 
 func buildBarParquetRecords(instrument dukascopy.Instrument, columns []string, primaryBars []dukascopy.Bar, bidBars []dukascopy.Bar, askBars []dukascopy.Bar) ([]map[string]any, error) {

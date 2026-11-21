@@ -447,8 +447,8 @@ func TestCoverageBoostMarketClosureBoundaries(t *testing.T) {
 
 	// IsExpectedGapForProfile: FX and Equity paths
 	// FX gap: previous Friday 17:00 -> Monday 09:00 UTC (weekend gap, expected)
-	prev := ny(2024, 1, 5, 17, 0)  // Friday 17:00 NY
-	curr := ny(2024, 1, 8, 9, 0)   // Monday 09:00 NY
+	prev := ny(2024, 1, 5, 17, 0) // Friday 17:00 NY
+	curr := ny(2024, 1, 8, 9, 0)  // Monday 09:00 NY
 	isFX := IsExpectedGapForProfile(prev, curr, time.Minute, "EURUSD", "")
 	_ = isFX // Just exercise the code path
 

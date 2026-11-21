@@ -92,9 +92,7 @@ func (r *stubParquetReader) Read(rows []map[string]any) (int, error) {
 	}
 	result := r.results[r.index]
 	r.index++
-	for index := range result.rows {
-		rows[index] = result.rows[index]
-	}
+	copy(rows, result.rows)
 	return len(result.rows), result.err
 }
 

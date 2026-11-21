@@ -1,9 +1,10 @@
 package csvout
 
 import (
+	"errors"
 	"fmt"
+	"io"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -26,6 +27,10 @@ func arrowSchemaForColumns(columns []string) *arrow.Schema {
 			fields[i] = arrow.Field{Name: col, Type: arrow.BinaryTypes.String}
 		} else if strings.EqualFold(strings.TrimSpace(col), "tick_count") {
 			fields[i] = arrow.Field{Name: col, Type: arrow.PrimitiveTypes.Int64}
+		} else if isFeatureColumn(col) {
+			// Feature values can be missing (NaN/Inf warm-up rows) and are
+			// stored as nulls.
+			fields[i] = arrow.Field{Name: col, Type: arrow.PrimitiveTypes.Float64, Nullable: true}
 		} else {
 			fields[i] = arrow.Field{Name: col, Type: arrow.PrimitiveTypes.Float64}
 		}
@@ -58,74 +63,95 @@ func (c *Config) writeArrowRecords(outputPath string, columns []string, records 
 	if err != nil {
 		return err
 	}
-	defer file.Close()
+	return errors.Join(writeArrowRecordsTo(file, columns, records), file.Close())
+}
 
+// writeArrowRecordsTo writes records as an Arrow IPC file to w. The IPC footer
+// is written by the final Close, whose error is returned.
+func writeArrowRecordsTo(w io.Writer, columns []string, records []map[string]any) error {
 	schema := arrowSchemaForColumns(columns)
-	allocator := memory.NewGoAllocator()
-	builder := array.NewRecordBuilder(allocator, schema)
+	builder := array.NewRecordBuilder(memory.NewGoAllocator(), schema)
 	defer builder.Release()
 
-	writer, err := ipc.NewFileWriter(file, ipc.WithSchema(schema))
+	writer, err := ipc.NewFileWriter(w, ipc.WithSchema(schema))
 	if err != nil {
 		return err
 	}
-	defer writer.Close()
 
 	if len(records) > 0 {
-		builder.Reserve(len(records))
-		for _, record := range records {
-			for i, col := range columns {
-				val := record[col]
-				fieldBuilder := builder.Field(i)
-				if val == nil {
-					fieldBuilder.AppendNull()
-					continue
+		appendArrowRecords(builder, columns, records)
+		rec := builder.NewRecord()
+		writeErr := writer.Write(rec)
+		rec.Release()
+		if writeErr != nil {
+			return errors.Join(writeErr, writer.Close())
+		}
+	}
+	return writer.Close()
+}
+
+// appendArrowRecords appends records to builder in column order. Missing or
+// unconvertible values, and NaN/±Inf feature values, become nulls.
+func appendArrowRecords(builder *array.RecordBuilder, columns []string, records []map[string]any) {
+	builder.Reserve(len(records))
+	featureCols := make([]bool, len(columns))
+	for i, col := range columns {
+		featureCols[i] = isFeatureColumn(col)
+	}
+	appendFloat := func(b *array.Float64Builder, i int, value float64) {
+		if featureCols[i] && !isFiniteFloat(value) {
+			b.AppendNull()
+			return
+		}
+		b.Append(value)
+	}
+	for _, record := range records {
+		for i, col := range columns {
+			val := record[col]
+			fieldBuilder := builder.Field(i)
+			if val == nil {
+				fieldBuilder.AppendNull()
+				continue
+			}
+			switch b := fieldBuilder.(type) {
+			case *array.StringBuilder:
+				if strVal, ok := val.(string); ok {
+					b.Append(strVal)
+				} else {
+					b.Append(fmt.Sprintf("%v", val))
 				}
-				switch b := fieldBuilder.(type) {
-				case *array.StringBuilder:
-					if strVal, ok := val.(string); ok {
-						b.Append(strVal)
-					} else {
-						b.Append(fmt.Sprintf("%v", val))
-					}
-				case *array.Float64Builder:
-					if floatVal, ok := val.(float64); ok {
-						b.Append(floatVal)
-					} else if intVal, ok := val.(int); ok {
-						b.Append(float64(intVal))
-					} else if strVal, ok := val.(string); ok {
-						if f, err := strconv.ParseFloat(strVal, 64); err == nil {
-							b.Append(f)
-						} else {
-							b.AppendNull()
-						}
+			case *array.Float64Builder:
+				if floatVal, ok := val.(float64); ok {
+					appendFloat(b, i, floatVal)
+				} else if intVal, ok := val.(int); ok {
+					b.Append(float64(intVal))
+				} else if strVal, ok := val.(string); ok {
+					if f, err := strconv.ParseFloat(strVal, 64); err == nil {
+						appendFloat(b, i, f)
 					} else {
 						b.AppendNull()
 					}
-				case *array.Int64Builder:
-					if intVal, ok := val.(int64); ok {
-						b.Append(intVal)
-					} else if strVal, ok := val.(string); ok {
-						if number, err := strconv.ParseInt(strVal, 10, 64); err == nil {
-							b.Append(number)
-						} else {
-							b.AppendNull()
-						}
+				} else {
+					b.AppendNull()
+				}
+			case *array.Int64Builder:
+				if intVal, ok := val.(int64); ok {
+					b.Append(intVal)
+				} else if strVal, ok := val.(string); ok {
+					if number, err := strconv.ParseInt(strVal, 10, 64); err == nil {
+						b.Append(number)
 					} else {
 						b.AppendNull()
 					}
+				} else {
+					b.AppendNull()
 				}
 			}
 		}
-		rec := builder.NewRecord()
-		defer rec.Release()
-		if err := writer.Write(rec); err != nil {
-			return err
-		}
 	}
-	return nil
 }
 
+// ArrowStreamWriter writes record batches incrementally to an Arrow IPC file.
 type ArrowStreamWriter struct {
 	file    *os.File
 	writer  *ipc.FileWriter
@@ -134,6 +160,7 @@ type ArrowStreamWriter struct {
 	columns []string
 }
 
+// CreateArrowStreamWriter creates outputPath and returns a writer for columns.
 func (c *Config) CreateArrowStreamWriter(outputPath string, columns []string) (*ArrowStreamWriter, error) {
 	if err := ensureParentDir(outputPath); err != nil {
 		return nil, err
@@ -164,96 +191,42 @@ func (c *Config) CreateArrowStreamWriter(outputPath string, columns []string) (*
 	}, nil
 }
 
+// CreateArrowStreamWriter is (*Config).CreateArrowStreamWriter on DefaultConfig.
 func CreateArrowStreamWriter(outputPath string, columns []string) (*ArrowStreamWriter, error) {
 	return DefaultConfig().CreateArrowStreamWriter(outputPath, columns)
 }
 
+// WriteBatch appends records as one Arrow record batch.
 func (w *ArrowStreamWriter) WriteBatch(records []map[string]any) error {
 	if len(records) == 0 {
 		return nil
 	}
 
-	w.builder.Reserve(len(records))
-	for _, record := range records {
-		for i, col := range w.columns {
-			val := record[col]
-			fieldBuilder := w.builder.Field(i)
-			if val == nil {
-				fieldBuilder.AppendNull()
-				continue
-			}
-			switch b := fieldBuilder.(type) {
-			case *array.StringBuilder:
-				if strVal, ok := val.(string); ok {
-					b.Append(strVal)
-				} else {
-					b.Append(fmt.Sprintf("%v", val))
-					_ = filepath.Separator // reference filepath just in case to satisfy imports if needed
-				}
-			case *array.Float64Builder:
-				if floatVal, ok := val.(float64); ok {
-					b.Append(floatVal)
-				} else if intVal, ok := val.(int); ok {
-					b.Append(float64(intVal))
-				} else if strVal, ok := val.(string); ok {
-					if f, err := strconv.ParseFloat(strVal, 64); err == nil {
-						b.Append(f)
-					} else {
-						b.AppendNull()
-					}
-				} else {
-					b.AppendNull()
-				}
-			case *array.Int64Builder:
-				if intVal, ok := val.(int64); ok {
-					b.Append(intVal)
-				} else if strVal, ok := val.(string); ok {
-					if number, err := strconv.ParseInt(strVal, 10, 64); err == nil {
-						b.Append(number)
-					} else {
-						b.AppendNull()
-					}
-				} else {
-					b.AppendNull()
-				}
-			}
-		}
-	}
-
+	appendArrowRecords(w.builder, w.columns, records)
 	rec := w.builder.NewRecord()
 	defer rec.Release()
 
 	return w.writer.Write(rec)
 }
 
+// Close writes the IPC footer and closes the file. It reports every failure.
 func (w *ArrowStreamWriter) Close() error {
-	var errs []string
+	var errs []error
 	if w.builder != nil {
 		w.builder.Release()
 		w.builder = nil
 	}
 	if w.writer != nil {
 		if err := w.writer.Close(); err != nil {
-			errs = append(errs, err.Error())
+			errs = append(errs, fmt.Errorf("arrow stream writer close failed: %w", err))
 		}
 		w.writer = nil
 	}
 	if w.file != nil {
 		if err := w.file.Close(); err != nil {
-			errs = append(errs, err.Error())
+			errs = append(errs, fmt.Errorf("arrow stream writer close failed: %w", err))
 		}
 		w.file = nil
 	}
-	if len(errs) > 0 {
-		return fmt.Errorf("arrow stream writer close failed: %s", strings.Join(errs, "; "))
-	}
-	return nil
-}
-
-func writeBarsArrow(outputPath string, instrument dukascopy.Instrument, columns []string, primaryBars []dukascopy.Bar, bidBars []dukascopy.Bar, askBars []dukascopy.Bar) error {
-	return DefaultConfig().writeBarsArrow(outputPath, instrument, columns, primaryBars, bidBars, askBars)
-}
-
-func writeTicksArrow(outputPath string, instrument dukascopy.Instrument, columns []string, ticks []dukascopy.Tick) error {
-	return DefaultConfig().writeTicksArrow(outputPath, instrument, columns, ticks)
+	return errors.Join(errs...)
 }

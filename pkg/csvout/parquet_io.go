@@ -2,6 +2,7 @@ package csvout
 
 import (
 	"fmt"
+	"math"
 	"os"
 	"strconv"
 	"strings"
@@ -21,10 +22,6 @@ type parquetRecordWriter interface {
 type parquetRecordReader interface {
 	Read(rows []map[string]any) (int, error)
 	Close() error
-}
-
-type parquetCompressionCodec interface {
-	// dummy interface just to type parquetCompression correctly
 }
 
 var parquetCompression = parquet.Compression(&parquet.Zstd)
@@ -67,12 +64,59 @@ func parquetSchemaForColumns(columns []string) *parquet.Schema {
 	return parquet.NewSchema("row", group)
 }
 
+// baseDataColumns lists every bar and tick column the package itself produces
+// (see ParseBarColumns / ParseTickColumns). Any other column is a computed
+// feature column, which may hold missing values (e.g. indicator warm-up rows).
+var baseDataColumns = map[string]struct{}{
+	"timestamp":  {},
+	"open":       {},
+	"high":       {},
+	"low":        {},
+	"close":      {},
+	"mid_open":   {},
+	"mid_high":   {},
+	"mid_low":    {},
+	"mid_close":  {},
+	"spread":     {},
+	"volume":     {},
+	"tick_count": {},
+	"bid_open":   {},
+	"bid_high":   {},
+	"bid_low":    {},
+	"bid_close":  {},
+	"ask_open":   {},
+	"ask_high":   {},
+	"ask_low":    {},
+	"ask_close":  {},
+	"bid":        {},
+	"ask":        {},
+	"bid_volume": {},
+	"ask_volume": {},
+}
+
+// isFeatureColumn reports whether column is a computed feature column rather
+// than one of the base price/volume/timestamp columns.
+func isFeatureColumn(column string) bool {
+	_, ok := baseDataColumns[strings.ToLower(strings.TrimSpace(column))]
+	return !ok
+}
+
+// isFiniteFloat reports whether value is neither NaN nor ±Inf.
+func isFiniteFloat(value float64) bool {
+	return !math.IsNaN(value) && !math.IsInf(value, 0)
+}
+
 func parquetNodeForColumn(column string) parquet.Node {
 	if strings.EqualFold(strings.TrimSpace(column), "timestamp") {
 		return parquet.String()
 	}
 	if strings.EqualFold(strings.TrimSpace(column), "tick_count") {
 		return parquet.Leaf(parquet.Int64Type)
+	}
+	if isFeatureColumn(column) {
+		// Feature values can be missing (NaN/Inf warm-up rows); store them as
+		// NULL rather than as IEEE NaN.
+		return parquet.Optional(parquet.Leaf(parquet.DoubleType))
 	}
 	return parquet.Leaf(parquet.DoubleType)
 }
@@ -159,6 +203,22 @@ func parquetRecordFromCSVRecord(columns []string, record []string) (map[string]a
 		if index >= len(record) {
 			return nil, fmt.Errorf("malformed CSV record for parquet conversion")
 		}
+		if isFeatureColumn(column) {
+			// An empty (or legacy NaN/Inf) feature cell is a missing value:
+			// leave it out so the optional Parquet column stores NULL.
+			cell := strings.TrimSpace(record[index])
+			if cell == "" {
+				continue
+			}
+			number, err := strconv.ParseFloat(cell, 64)
+			if err != nil {
+				return nil, fmt.Errorf("parse parquet numeric value for column %q: %w", column, err)
+			}
+			if isFiniteFloat(number) {
+				row[column] = number
+			}
+			continue
+		}
 		value, err := parquetValueForColumn(column, record[index])
 		if err != nil {
 			return nil, err
@@ -203,28 +263,30 @@ func parquetStringValue(value any) string {
 	}
 }
 
-func parquetTimestampFromRow(row map[string]any) (time.Time, bool) {
+// rowTimestamp returns the instant stored in a Parquet row's "timestamp"
+// column. String values are parsed with c.ParseTimestamp so files written with
+// any timestamp format / location round-trip.
+func (c *Config) rowTimestamp(row map[string]any) (time.Time, error) {
 	value, ok := row["timestamp"]
-	if !ok {
-		return time.Time{}, false
+	if !ok || value == nil {
+		return time.Time{}, fmt.Errorf("row has no timestamp value")
 	}
 
 	switch typed := value.(type) {
 	case string:
-		timestamp, err := time.Parse(timestampLayout, typed)
-		if err != nil {
-			return time.Time{}, false
-		}
-		return timestamp.UTC(), true
+		return c.ParseTimestamp(typed)
 	case time.Time:
-		return typed.UTC(), true
+		return typed.UTC(), nil
 	default:
-		timestamp, err := time.Parse(timestampLayout, fmt.Sprint(value))
-		if err != nil {
-			return time.Time{}, false
-		}
-		return timestamp.UTC(), true
+		return c.ParseTimestamp(fmt.Sprint(value))
 	}
+}
+
+// parquetTimestampFromRow is rowTimestamp on DefaultConfig, reporting success
+// as a bool.
+func parquetTimestampFromRow(row map[string]any) (time.Time, bool) {
+	timestamp, err := DefaultConfig().rowTimestamp(row)
+	return timestamp, err == nil
 }
 
 func isParquetPath(path string) bool {

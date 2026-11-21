@@ -10,7 +10,38 @@ import (
 	"time"
 )
 
-func (c *Config) assembleParquetFromCSVParts(outputPath string, partPaths []string, from time.Time, to time.Time) error {
+// parquetWriteBatchSize is the number of rows buffered before a Parquet write.
+const parquetWriteBatchSize = 4096
+
+// parquetBatcher buffers rows and writes them to a Parquet writer in batches.
+type parquetBatcher struct {
+	writer parquetRecordWriter
+	rows   []map[string]any
+}
+
+func newParquetBatcher(writer parquetRecordWriter) *parquetBatcher {
+	return &parquetBatcher{writer: writer, rows: make([]map[string]any, 0, parquetWriteBatchSize)}
+}
+
+func (b *parquetBatcher) add(row map[string]any) error {
+	b.rows = append(b.rows, row)
+	if len(b.rows) >= parquetWriteBatchSize {
+		return b.flush()
+	}
+	return nil
+}
+
+func (b *parquetBatcher) flush() error {
+	if len(b.rows) == 0 {
+		return nil
+	}
+	_, err := b.writer.Write(b.rows)
+	// Rows are not reused by callers, so a fresh slice avoids retaining them.
+	b.rows = make([]map[string]any, 0, parquetWriteBatchSize)
+	return err
+}
+
+func (c *Config) assembleParquetFromCSVParts(outputPath string, partPaths []string, from time.Time, to time.Time) (retErr error) {
 	if len(partPaths) == 0 {
 		return fmt.Errorf("no partition files were provided for assembly")
 	}
@@ -24,8 +55,10 @@ func (c *Config) assembleParquetFromCSVParts(outputPath string, partPaths []stri
 	var (
 		columns        []string
 		writer         parquetRecordWriter
+		batcher        *parquetBatcher
 		file           *os.File
-		lastTimestamp  string
+		lastTimestamp  int64
+		haveLast       bool
 		lastRecordKey  string
 		headerPrepared bool
 	)
@@ -36,20 +69,20 @@ func (c *Config) assembleParquetFromCSVParts(outputPath string, partPaths []stri
 		writer = nil
 		file = nil
 
+		var errs []error
 		if currentWriter != nil {
-			if err := currentWriter.Close(); err != nil {
-				if currentFile != nil {
-					currentFile.Close()
-				}
-				return err
-			}
+			errs = append(errs, currentWriter.Close())
 		}
 		if currentFile != nil {
-			return currentFile.Close()
+			errs = append(errs, currentFile.Close())
 		}
-		return nil
+		return errors.Join(errs...)
 	}
-	defer closeWriter()
+	defer func() {
+		if err := closeWriter(); err != nil {
+			retErr = errors.Join(retErr, err)
+		}
+	}()
 
 	for _, partPath := range partPaths {
 		_, readerFactory, closeReader, err := c.openCSVReader(partPath)
@@ -61,7 +94,7 @@ func (c *Config) assembleParquetFromCSVParts(outputPath string, partPaths []stri
 		partHeader, err := reader.Read()
 		if err != nil {
 			closeReader()
-			if errors.Is(err, io.EOF) || err.Error() == "EOF" {
+			if errors.Is(err, io.EOF) {
 				continue
 			}
 			return err
@@ -76,6 +109,7 @@ func (c *Config) assembleParquetFromCSVParts(outputPath string, partPaths []stri
 			}
 			writer = c.parquetWriterFactory(file, parquetSchemaForColumns(columns))
 			writer.SetKeyValueMetadata(parquetColumnsMetadataKey, strings.Join(columns, ","))
+			batcher = newParquetBatcher(writer)
 			headerPrepared = true
 		} else if !HeadersMatch(columns, partHeader) {
 			closeReader()
@@ -91,7 +125,7 @@ func (c *Config) assembleParquetFromCSVParts(outputPath string, partPaths []stri
 		for {
 			record, readErr := reader.Read()
 			if readErr != nil {
-				if readErr.Error() == "EOF" {
+				if errors.Is(readErr, io.EOF) {
 					break
 				}
 				closeReader()
@@ -105,22 +139,21 @@ func (c *Config) assembleParquetFromCSVParts(outputPath string, partPaths []stri
 				return fmt.Errorf("partition file %s contains a malformed row", partPath)
 			}
 
-			timestamp, err := time.Parse(timestampLayout, record[timestampIndex])
+			timestamp, err := c.ParseTimestamp(record[timestampIndex])
 			if err != nil {
 				closeReader()
 				return fmt.Errorf("parse partition timestamp %q: %w", record[timestampIndex], err)
 			}
-			timestamp = timestamp.UTC()
 			if timestamp.Before(from) || !timestamp.Before(to) {
 				continue
 			}
 
-			currentTimestamp := timestamp.Format(timestampLayout)
+			currentTimestamp := timestamp.UnixNano()
 			recordKey := strings.Join(record, "\x1f")
-			if currentTimestamp == lastTimestamp {
+			if haveLast && currentTimestamp == lastTimestamp {
 				if recordKey != lastRecordKey {
 					closeReader()
-					return fmt.Errorf("conflicting duplicate timestamp %s while assembling %s", currentTimestamp, outputPath)
+					return fmt.Errorf("conflicting duplicate timestamp %s while assembling %s", timestamp.Format(timestampLayout), outputPath)
 				}
 				continue
 			}
@@ -130,12 +163,13 @@ func (c *Config) assembleParquetFromCSVParts(outputPath string, partPaths []stri
 				closeReader()
 				return err
 			}
-			if _, err := writer.Write([]map[string]any{row}); err != nil {
+			if err := batcher.add(row); err != nil {
 				closeReader()
 				return err
 			}
 
 			lastTimestamp = currentTimestamp
+			haveLast = true
 			lastRecordKey = recordKey
 		}
 
@@ -144,10 +178,15 @@ func (c *Config) assembleParquetFromCSVParts(outputPath string, partPaths []stri
 		}
 	}
 
+	if batcher != nil {
+		if err := batcher.flush(); err != nil {
+			return err
+		}
+	}
 	if err := closeWriter(); err != nil {
 		return err
 	}
-	return replaceFile(tempPath, outputPath)
+	return commitAtomic(tempPath, outputPath)
 }
 
 func (c *Config) cleanParquetDuplicates(path string) (int, error) {
@@ -171,8 +210,9 @@ func (c *Config) cleanParquetDuplicates(path string) (int, error) {
 	}
 
 	var records []parquetRowRecord
-	seenTimestamps := make(map[string]bool)
+	seenTimestamps := make(map[int64]struct{})
 	duplicatesCount := 0
+	rowNumber := 0
 
 	for {
 		rows := make([]map[string]any, 256)
@@ -188,17 +228,19 @@ func (c *Config) cleanParquetDuplicates(path string) (int, error) {
 		}
 
 		for _, row := range rows[:count] {
-			timestamp, ok := parquetTimestampFromRow(row)
-			if !ok {
-				continue
+			rowNumber++
+			timestamp, parseErr := c.rowTimestamp(row)
+			if parseErr != nil {
+				reader.Close()
+				closeFile()
+				return 0, fmt.Errorf("parquet %s row %d: %w", path, rowNumber, parseErr)
 			}
-			timestamp = timestamp.UTC()
-			stampKey := timestamp.Format(timestampLayout)
-			if seenTimestamps[stampKey] {
+			stampKey := timestamp.UnixNano()
+			if _, seen := seenTimestamps[stampKey]; seen {
 				duplicatesCount++
 				continue
 			}
-			seenTimestamps[stampKey] = true
+			seenTimestamps[stampKey] = struct{}{}
 			records = append(records, parquetRowRecord{timestamp: timestamp, row: row})
 		}
 
@@ -207,8 +249,9 @@ func (c *Config) cleanParquetDuplicates(path string) (int, error) {
 		}
 	}
 
-	reader.Close()
-	closeFile()
+	if err := errors.Join(reader.Close(), closeFile()); err != nil {
+		return 0, err
+	}
 
 	// Sort chronologically
 	sort.SliceStable(records, func(i, j int) bool {
@@ -231,7 +274,7 @@ func (c *Config) cleanParquetDuplicates(path string) (int, error) {
 		return 0, err
 	}
 
-	if err := replaceFile(tempPath, path); err != nil {
+	if err := commitAtomic(tempPath, path); err != nil {
 		return 0, err
 	}
 

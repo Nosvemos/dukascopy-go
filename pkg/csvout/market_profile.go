@@ -3,13 +3,24 @@ package csvout
 import (
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
+
+	// Embed the IANA time zone database so America/New_York is available even
+	// where the host has no zoneinfo (e.g. Windows without Go installed);
+	// otherwise gap classification would silently fall back to UTC.
+	_ "time/tzdata"
 )
 
+// IsExpectedMarketClosureGap reports whether the gap between previous and
+// current is explained by the OTC 24x5 market schedule.
 func IsExpectedMarketClosureGap(previous time.Time, current time.Time, expectedInterval time.Duration) bool {
 	return IsExpectedGapForProfile(previous, current, expectedInterval, "", MarketProfileOTC24x5)
 }
 
+// IsExpectedGapForProfile reports whether every missing interval between
+// previous and current falls inside a scheduled closure of the market profile
+// (resolved from symbol when profile is "" or "auto").
 func IsExpectedGapForProfile(previous time.Time, current time.Time, expectedInterval time.Duration, symbol string, profile string) bool {
 	if expectedInterval <= 0 || !current.After(previous) || current.Sub(previous) <= expectedInterval {
 		return false
@@ -105,6 +116,10 @@ func nextLikelyOTCClosureBoundary(timestamp time.Time) time.Time {
 	return timestamp
 }
 
+// ResolveGapMarketProfile returns explicitProfile when it names a known
+// profile, otherwise a profile inferred from symbol: crypto 24x7, metals and
+// index CFDs OTC 24x5, forex FX 24x5, single-stock CFDs equity cash hours,
+// and OTC 24x5 for anything else.
 func ResolveGapMarketProfile(symbol string, explicitProfile string) string {
 	profile := strings.ToLower(strings.TrimSpace(explicitProfile))
 	switch profile {
@@ -242,12 +257,14 @@ func nextLikelyFXClosureBoundary(timestamp time.Time) time.Time {
 	return timestamp
 }
 
-func gapMarketLocation() *time.Location {
+// gapMarketLocation returns the America/New_York location used for market
+// session rules, loading it once.
+var gapMarketLocation = sync.OnceValue(func() *time.Location {
 	if location, err := time.LoadLocation("America/New_York"); err == nil {
 		return location
 	}
 	return time.UTC
-}
+})
 
 func isExpectedEquityGap(previous time.Time, current time.Time, expectedInterval time.Duration) bool {
 	probe := previous.Add(expectedInterval).UTC()
@@ -314,13 +331,22 @@ func nextLikelyEquityClosureBoundary(timestamp time.Time) time.Time {
 	return timestamp
 }
 
+// looksLikeIndexSymbol reports whether symbol is a Dukascopy index CFD such as
+// USA500IDXUSD or DEUIDXEUR.
+func looksLikeIndexSymbol(symbol string) bool {
+	return strings.Contains(normalizeGapSymbol(symbol), "IDX")
+}
+
+// looksLikeEquitySymbol reports whether symbol is a Dukascopy single-stock CFD
+// (e.g. AAPLUSUSD, BMWDEEUR), which follows cash-session hours. Index CFDs
+// (*IDX*) are excluded: they trade nearly 24h and belong to the OTC profile.
 func looksLikeEquitySymbol(symbol string) bool {
 	symbol = normalizeGapSymbol(symbol)
 	if symbol == "" {
 		return false
 	}
-	if strings.Contains(symbol, "IDX") {
-		return true
+	if looksLikeIndexSymbol(symbol) {
+		return false
 	}
 	suffixes := []string{
 		"USUSD", "DEEUR", "FREUR", "GBRGBP", "JPNJPY", "CHECHF", "NLDEUR", "ITAEUR", "SWESEK", "ZAFZAR", "SGPSGD",

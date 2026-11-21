@@ -31,82 +31,131 @@ func nextHolidayClosureBoundary(timestamp time.Time, profile string) (time.Time,
 func holidayClosureWindow(timestamp time.Time, profile string) (time.Time, time.Time, bool) {
 	local := timestamp.In(gapMarketLocation())
 	dayStart := time.Date(local.Year(), local.Month(), local.Day(), 0, 0, 0, 0, local.Location())
-	kind := usMarketHolidayKind(dayStart)
+	var kind marketHolidayKind
+	if profile == MarketProfileEquity {
+		kind = nyseHolidayKind(dayStart)
+	} else {
+		kind = usMarketHolidayKind(dayStart)
+	}
 	if kind == marketHolidayNone {
 		return time.Time{}, time.Time{}, false
+	}
+
+	at := func(hour int, minute int) time.Time {
+		return time.Date(local.Year(), local.Month(), local.Day(), hour, minute, 0, 0, local.Location()).UTC()
 	}
 
 	switch kind {
 	case marketHolidayFullClose:
 		switch profile {
 		case MarketProfileOTC24x5:
-			start := dayStart
-			end := dayStart.Add(18 * time.Hour)
-			return start.UTC(), end.UTC(), true
+			return at(0, 0), at(18, 0), true
 		case MarketProfileFX24x5:
-			start := dayStart
-			end := dayStart.Add(17 * time.Hour)
-			return start.UTC(), end.UTC(), true
+			return at(0, 0), at(17, 0), true
 		case MarketProfileEquity:
-			start := dayStart.Add(9*time.Hour + 30*time.Minute)
-			end := dayStart.Add(16 * time.Hour)
-			return start.UTC(), end.UTC(), true
+			return at(9, 30), at(16, 0), true
 		}
 	case marketHolidayEarlyClose:
 		switch profile {
 		case MarketProfileOTC24x5:
-			start := time.Date(local.Year(), local.Month(), local.Day(), 13, 0, 0, 0, local.Location())
-			end := time.Date(local.Year(), local.Month(), local.Day(), 18, 0, 0, 0, local.Location())
-			return start.UTC(), end.UTC(), true
+			return at(13, 0), at(18, 0), true
 		case MarketProfileFX24x5:
-			start := time.Date(local.Year(), local.Month(), local.Day(), 13, 0, 0, 0, local.Location())
-			end := time.Date(local.Year(), local.Month(), local.Day(), 17, 0, 0, 0, local.Location())
-			return start.UTC(), end.UTC(), true
+			return at(13, 0), at(17, 0), true
 		case MarketProfileEquity:
-			start := time.Date(local.Year(), local.Month(), local.Day(), 13, 0, 0, 0, local.Location())
-			end := time.Date(local.Year(), local.Month(), local.Day(), 16, 0, 0, 0, local.Location())
-			return start.UTC(), end.UTC(), true
+			return at(13, 0), at(16, 0), true
 		}
 	}
 
 	return time.Time{}, time.Time{}, false
 }
 
+// usMarketHolidayKind classifies a New York calendar day for the OTC and FX
+// profiles. Good Friday, Christmas Day and New Year's Day (on their actual
+// calendar dates, since OTC/FX liquidity disappears on the day itself) are
+// full closes; the other US federal market holidays (on their observed
+// weekdays) trade a shortened session.
 func usMarketHolidayKind(localDay time.Time) marketHolidayKind {
 	year, month, day := localDay.Date()
-	date := time.Date(year, month, day, 0, 0, 0, 0, localDay.Location())
+	loc := localDay.Location()
+	date := time.Date(year, month, day, 0, 0, 0, 0, loc)
 
-	if sameLocalDay(date, nthWeekdayOfMonth(year, time.January, time.Monday, 3, localDay.Location())) {
-		return marketHolidayEarlyClose
-	}
-	if sameLocalDay(date, nthWeekdayOfMonth(year, time.February, time.Monday, 3, localDay.Location())) {
-		return marketHolidayEarlyClose
-	}
-	if sameLocalDay(date, goodFriday(year, localDay.Location())) {
+	switch {
+	case month == time.January && day == 1,
+		month == time.December && day == 25,
+		sameLocalDay(date, goodFriday(year, loc)):
 		return marketHolidayFullClose
-	}
-	if sameLocalDay(date, lastWeekdayOfMonth(year, time.May, time.Monday, localDay.Location())) {
+	case sameLocalDay(date, nthWeekdayOfMonth(year, time.January, time.Monday, 3, loc)),
+		sameLocalDay(date, nthWeekdayOfMonth(year, time.February, time.Monday, 3, loc)),
+		sameLocalDay(date, lastWeekdayOfMonth(year, time.May, time.Monday, loc)),
+		year >= 2022 && sameLocalDay(date, observedFixedHoliday(year, time.June, 19, loc)),
+		sameLocalDay(date, observedFixedHoliday(year, time.July, 4, loc)),
+		sameLocalDay(date, nthWeekdayOfMonth(year, time.September, time.Monday, 1, loc)),
+		sameLocalDay(date, nthWeekdayOfMonth(year, time.November, time.Thursday, 4, loc)):
 		return marketHolidayEarlyClose
-	}
-	if year >= 2022 && sameLocalDay(date, observedFixedHoliday(year, time.June, 19, localDay.Location())) {
-		return marketHolidayEarlyClose
-	}
-	if sameLocalDay(date, observedFixedHoliday(year, time.July, 4, localDay.Location())) {
-		return marketHolidayEarlyClose
-	}
-	if sameLocalDay(date, nthWeekdayOfMonth(year, time.September, time.Monday, 1, localDay.Location())) {
-		return marketHolidayEarlyClose
-	}
-	if sameLocalDay(date, nthWeekdayOfMonth(year, time.November, time.Thursday, 4, localDay.Location())) {
-		return marketHolidayEarlyClose
-	}
-	if sameLocalDay(date, observedFixedHoliday(year, time.December, 25, localDay.Location())) {
-		return marketHolidayFullClose
-	}
-	if sameLocalDay(date, observedFixedHoliday(year, time.January, 1, localDay.Location())) {
-		return marketHolidayFullClose
 	}
 	return marketHolidayNone
+}
+
+// nyseHolidayKind classifies a New York calendar day following NYSE's
+// published rules:
+//
+//   - Full closes: New Year's Day, Martin Luther King Jr. Day, Washington's
+//     Birthday, Good Friday, Memorial Day, Juneteenth (from 2022),
+//     Independence Day, Labor Day, Thanksgiving Day and Christmas Day.
+//     A holiday on Saturday is observed the preceding Friday and one on
+//     Sunday the following Monday, except that New Year's Day on a Saturday
+//     is not observed (the preceding Friday is a normal session).
+//   - Early closes (13:00): July 3 when it is Monday-Thursday, the day after
+//     Thanksgiving, and December 24 when it is Monday-Thursday.
+//
+// One-off closures (national days of mourning, weather) are not modelled.
+func nyseHolidayKind(localDay time.Time) marketHolidayKind {
+	year, month, day := localDay.Date()
+	loc := localDay.Location()
+	date := time.Date(year, month, day, 0, 0, 0, 0, loc)
+	weekday := date.Weekday()
+	if weekday == time.Saturday || weekday == time.Sunday {
+		return marketHolidayNone
+	}
+
+	fullCloses := []time.Time{
+		nyseNewYearObserved(year, loc),
+		nthWeekdayOfMonth(year, time.January, time.Monday, 3, loc),
+		nthWeekdayOfMonth(year, time.February, time.Monday, 3, loc),
+		goodFriday(year, loc),
+		lastWeekdayOfMonth(year, time.May, time.Monday, loc),
+		observedFixedHoliday(year, time.July, 4, loc),
+		nthWeekdayOfMonth(year, time.September, time.Monday, 1, loc),
+		nthWeekdayOfMonth(year, time.November, time.Thursday, 4, loc),
+		observedFixedHoliday(year, time.December, 25, loc),
+	}
+	if year >= 2022 {
+		fullCloses = append(fullCloses, observedFixedHoliday(year, time.June, 19, loc))
+	}
+	for _, holiday := range fullCloses {
+		if sameLocalDay(date, holiday) {
+			return marketHolidayFullClose
+		}
+	}
+
+	switch {
+	case month == time.July && day == 3 && weekday != time.Friday,
+		month == time.December && day == 24 && weekday != time.Friday,
+		sameLocalDay(date, nthWeekdayOfMonth(year, time.November, time.Thursday, 4, loc).AddDate(0, 0, 1)):
+		return marketHolidayEarlyClose
+	}
+	return marketHolidayNone
+}
+
+// nyseNewYearObserved returns the NYSE New Year's Day closure for year: Jan 1,
+// or Monday Jan 2 when Jan 1 is a Sunday. When Jan 1 is a Saturday there is no
+// closure, signalled by returning the Saturday itself (never a trading day).
+func nyseNewYearObserved(year int, location *time.Location) time.Time {
+	date := time.Date(year, time.January, 1, 0, 0, 0, 0, location)
+	if date.Weekday() == time.Sunday {
+		return date.AddDate(0, 0, 1)
+	}
+	return date
 }
 
 func sameLocalDay(left time.Time, right time.Time) bool {

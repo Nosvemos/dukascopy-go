@@ -44,10 +44,6 @@ func inspectParquet(path string) (CSVStats, error) {
 	return DefaultConfig().inspectParquetWithOptions(path, InspectOptions{})
 }
 
-func inspectParquetWithOptions(path string, options InspectOptions) (CSVStats, error) {
-	return DefaultConfig().inspectParquetWithOptions(path, options)
-}
-
 func (c *Config) inspectParquetWithOptions(path string, options InspectOptions) (CSVStats, error) {
 	stats := CSVStats{
 		Path:       path,
@@ -70,8 +66,9 @@ func (c *Config) inspectParquetWithOptions(path string, options InspectOptions) 
 	reader := c.parquetReaderFactory(file, parquetFile.Schema())
 	defer reader.Close()
 
-	seenRows := make(map[string]int)
-	seenTimestamps := make(map[string]int)
+	seenRows := make(map[uint64]struct{})
+	seenTimestamps := make(map[int64]struct{})
+	hasher := newRowHasher()
 	var intervals []time.Duration
 	var gapObservations []gapObservation
 	var previousTimestamp time.Time
@@ -91,21 +88,21 @@ func (c *Config) inspectParquetWithOptions(path string, options InspectOptions) 
 			record := parquetRecordStrings(stats.Columns, row)
 			stats.Rows++
 
-			rowKey := strings.Join(record, "\x1f")
-			if seenRows[rowKey] > 0 {
+			rowKey := hasher.sum(record)
+			if _, seen := seenRows[rowKey]; seen {
 				stats.DuplicateRows++
+			} else {
+				seenRows[rowKey] = struct{}{}
 			}
-			seenRows[rowKey]++
 
 			if !stats.HasTimestamp || timestampIndex >= len(record) {
 				continue
 			}
 
-			timestamp, err := time.Parse(timestampLayout, record[timestampIndex])
+			timestamp, err := c.rowTimestamp(row)
 			if err != nil {
 				return CSVStats{}, fmt.Errorf("parse parquet timestamp %q: %w", record[timestampIndex], err)
 			}
-			timestamp = timestamp.UTC()
 			if stats.FirstTimestamp.IsZero() || timestamp.Before(stats.FirstTimestamp) {
 				stats.FirstTimestamp = timestamp
 			}
@@ -113,11 +110,12 @@ func (c *Config) inspectParquetWithOptions(path string, options InspectOptions) 
 				stats.LastTimestamp = timestamp
 			}
 
-			stampKey := timestamp.Format(timestampLayout)
-			if seenTimestamps[stampKey] > 0 {
+			stampKey := timestamp.UnixNano()
+			if _, seen := seenTimestamps[stampKey]; seen {
 				stats.DuplicateStamps++
+			} else {
+				seenTimestamps[stampKey] = struct{}{}
 			}
-			seenTimestamps[stampKey]++
 
 			if !previousTimestamp.IsZero() {
 				delta := timestamp.Sub(previousTimestamp)
@@ -179,6 +177,7 @@ func (c *Config) extractRangeFromParquet(sourcePath string, outputPath string, f
 		writer := c.parquetWriterFactory(outFile, parquetSchemaForColumns(columns))
 		writer.SetKeyValueMetadata(parquetColumnsMetadataKey, strings.Join(columns, ","))
 
+		rowNumber := 0
 		for {
 			rows := make([]map[string]any, 256)
 			for index := range rows {
@@ -194,9 +193,12 @@ func (c *Config) extractRangeFromParquet(sourcePath string, outputPath string, f
 
 			filtered := make([]map[string]any, 0, count)
 			for _, row := range rows[:count] {
-				timestamp, ok := parquetTimestampFromRow(row)
-				if !ok {
-					continue
+				rowNumber++
+				timestamp, parseErr := c.rowTimestamp(row)
+				if parseErr != nil {
+					writer.Close()
+					outFile.Close()
+					return fmt.Errorf("source parquet %s row %d: %w", sourcePath, rowNumber, parseErr)
 				}
 				if timestamp.Before(from) || !timestamp.Before(to) {
 					continue
@@ -216,14 +218,10 @@ func (c *Config) extractRangeFromParquet(sourcePath string, outputPath string, f
 			}
 		}
 
-		if err := writer.Close(); err != nil {
-			outFile.Close()
+		if err := errors.Join(writer.Close(), outFile.Close()); err != nil {
 			return err
 		}
-		if err := outFile.Close(); err != nil {
-			return err
-		}
-		return replaceFile(tempPath, outputPath)
+		return commitAtomic(tempPath, outputPath)
 	}
 
 	tempPath, err := createAtomicTempPath(outputPath)
@@ -241,6 +239,7 @@ func (c *Config) extractRangeFromParquet(sourcePath string, outputPath string, f
 		return err
 	}
 
+	rowNumber := 0
 	for {
 		rows := make([]map[string]any, 256)
 		for index := range rows {
@@ -254,9 +253,11 @@ func (c *Config) extractRangeFromParquet(sourcePath string, outputPath string, f
 		}
 
 		for _, row := range rows[:count] {
-			timestamp, ok := parquetTimestampFromRow(row)
-			if !ok {
-				continue
+			rowNumber++
+			timestamp, parseErr := c.rowTimestamp(row)
+			if parseErr != nil {
+				closeWriter()
+				return fmt.Errorf("source parquet %s row %d: %w", sourcePath, rowNumber, parseErr)
 			}
 			if timestamp.Before(from) || !timestamp.Before(to) {
 				continue
@@ -273,15 +274,10 @@ func (c *Config) extractRangeFromParquet(sourcePath string, outputPath string, f
 		}
 	}
 
-	csvWriter.Flush()
-	if err := csvWriter.Error(); err != nil {
-		closeWriter()
-		return err
-	}
 	if err := closeWriter(); err != nil {
 		return err
 	}
-	return replaceFile(tempPath, outputPath)
+	return commitAtomic(tempPath, outputPath)
 }
 
 func (c *Config) extractRangeCSVToParquet(sourcePath string, outputPath string, from time.Time, to time.Time) error {
@@ -314,6 +310,7 @@ func (c *Config) extractRangeCSVToParquet(sourcePath string, outputPath string, 
 	}
 	writer := c.parquetWriterFactory(file, parquetSchemaForColumns(header))
 	writer.SetKeyValueMetadata(parquetColumnsMetadataKey, strings.Join(header, ","))
+	batcher := newParquetBatcher(writer)
 
 	for {
 		record, readErr := reader.Read()
@@ -334,13 +331,12 @@ func (c *Config) extractRangeCSVToParquet(sourcePath string, outputPath string, 
 			return fmt.Errorf("source CSV %s contains a malformed row", sourcePath)
 		}
 
-		timestamp, err := time.Parse(timestampLayout, record[timestampIndex])
+		timestamp, err := c.ParseTimestamp(record[timestampIndex])
 		if err != nil {
 			writer.Close()
 			file.Close()
 			return fmt.Errorf("parse source CSV timestamp %q: %w", record[timestampIndex], err)
 		}
-		timestamp = timestamp.UTC()
 		if timestamp.Before(from) || !timestamp.Before(to) {
 			continue
 		}
@@ -351,21 +347,18 @@ func (c *Config) extractRangeCSVToParquet(sourcePath string, outputPath string, 
 			file.Close()
 			return err
 		}
-		if _, err := writer.Write([]map[string]any{row}); err != nil {
+		if err := batcher.add(row); err != nil {
 			writer.Close()
 			file.Close()
 			return err
 		}
 	}
 
-	if err := writer.Close(); err != nil {
-		file.Close()
+	flushErr := batcher.flush()
+	if err := errors.Join(flushErr, writer.Close(), file.Close()); err != nil {
 		return err
 	}
-	if err := file.Close(); err != nil {
-		return err
-	}
-	return replaceFile(tempPath, outputPath)
+	return commitAtomic(tempPath, outputPath)
 }
 
 func extractRangeCSVToParquet(sourcePath string, outputPath string, from time.Time, to time.Time) error {

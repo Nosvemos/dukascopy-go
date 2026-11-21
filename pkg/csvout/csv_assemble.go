@@ -1,12 +1,19 @@
 package csvout
 
 import (
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"sort"
 	"time"
 )
 
+// AssembleCSVFromParts concatenates partition files (each with a header) into
+// outputPath, keeping rows with from <= timestamp < to, dropping exact duplicate
+// rows at partition boundaries and failing on conflicting rows with the same
+// timestamp. A .parquet outputPath produces Parquet. The output is written
+// atomically.
 func (c *Config) AssembleCSVFromParts(outputPath string, partPaths []string, from time.Time, to time.Time) error {
 	if isParquetPath(outputPath) {
 		return c.assembleParquetFromCSVParts(outputPath, partPaths, from, to)
@@ -46,7 +53,7 @@ func (c *Config) AssembleCSVFromParts(outputPath string, partPaths []string, fro
 		partHeader, err := reader.Read()
 		if err != nil {
 			closeReader()
-			if err.Error() == "EOF" {
+			if errors.Is(err, io.EOF) {
 				continue
 			}
 			closeWriter()
@@ -78,7 +85,7 @@ func (c *Config) AssembleCSVFromParts(outputPath string, partPaths []string, fro
 		for {
 			record, readErr := reader.Read()
 			if readErr != nil {
-				if readErr.Error() == "EOF" {
+				if errors.Is(readErr, io.EOF) {
 					break
 				}
 				closeReader()
@@ -94,7 +101,7 @@ func (c *Config) AssembleCSVFromParts(outputPath string, partPaths []string, fro
 				return fmt.Errorf("partition file %s contains a malformed row", partPath)
 			}
 
-			timestamp, err := parseFlexibleTimestamp(record[timestampIndex])
+			timestamp, err := c.ParseTimestamp(record[timestampIndex])
 			if err != nil {
 				closeReader()
 				closeWriter()
@@ -135,24 +142,20 @@ func (c *Config) AssembleCSVFromParts(outputPath string, partPaths []string, fro
 		return err
 	}
 
-	return replaceFile(tempPath, outputPath)
+	return commitAtomic(tempPath, outputPath)
 }
 
+// AssembleCSVFromParts is (*Config).AssembleCSVFromParts on DefaultConfig.
 func AssembleCSVFromParts(outputPath string, partPaths []string, from time.Time, to time.Time) error {
 	return DefaultConfig().AssembleCSVFromParts(outputPath, partPaths, from, to)
 }
 
+// CleanDuplicates rewrites path (CSV, CSV.GZ or Parquet) atomically, keeping
+// the first row for each timestamp and sorting rows chronologically. It
+// returns the number of rows removed. The whole file is held in memory.
 func (c *Config) CleanDuplicates(path string) (int, error) {
 	if isParquetPath(path) {
 		return c.cleanParquetDuplicates(path)
-	}
-
-	// Warn about potential high memory usage for very large files
-	if info, statErr := os.Stat(path); statErr == nil {
-		sizeMB := info.Size() / (1024 * 1024)
-		if sizeMB > 500 {
-			fmt.Fprintf(os.Stderr, "warning: CleanDuplicates loads the entire file into memory; %s is %d MB which may cause high memory usage\n", path, sizeMB)
-		}
 	}
 
 	_, readerFactory, closeReader, err := c.openCSVReader(path)
@@ -179,13 +182,13 @@ func (c *Config) CleanDuplicates(path string) (int, error) {
 	}
 
 	var records []rowRecord
-	seenTimestamps := make(map[string]bool)
+	seenTimestamps := make(map[int64]struct{})
 	duplicatesCount := 0
 
-	for {
+	for row := 1; ; row++ {
 		record, readErr := reader.Read()
 		if readErr != nil {
-			if readErr.Error() == "EOF" {
+			if errors.Is(readErr, io.EOF) {
 				break
 			}
 			closeReader()
@@ -194,19 +197,23 @@ func (c *Config) CleanDuplicates(path string) (int, error) {
 		if len(record) == 0 {
 			continue
 		}
+		if timestampIndex >= len(record) {
+			closeReader()
+			return 0, fmt.Errorf("%s: malformed row %d: has %d fields, timestamp is column %d", path, row, len(record), timestampIndex+1)
+		}
 
-		t, err := parseFlexibleTimestamp(record[timestampIndex])
+		t, err := c.ParseTimestamp(record[timestampIndex])
 		if err != nil {
 			closeReader()
 			return 0, fmt.Errorf("failed to parse timestamp %q: %w", record[timestampIndex], err)
 		}
 
-		stampKey := t.Format(timestampLayout)
-		if seenTimestamps[stampKey] {
+		stampKey := t.UnixNano()
+		if _, seen := seenTimestamps[stampKey]; seen {
 			duplicatesCount++
 			continue
 		}
-		seenTimestamps[stampKey] = true
+		seenTimestamps[stampKey] = struct{}{}
 		records = append(records, rowRecord{timestamp: t, record: record})
 	}
 	closeReader()
@@ -248,13 +255,14 @@ func (c *Config) CleanDuplicates(path string) (int, error) {
 		return 0, err
 	}
 
-	if err := replaceFile(tempPath, path); err != nil {
+	if err := commitAtomic(tempPath, path); err != nil {
 		return 0, err
 	}
 
 	return duplicatesCount, nil
 }
 
+// CleanDuplicates is (*Config).CleanDuplicates on DefaultConfig.
 func CleanDuplicates(path string) (int, error) {
 	return DefaultConfig().CleanDuplicates(path)
 }

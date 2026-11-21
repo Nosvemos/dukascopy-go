@@ -6,12 +6,13 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"hash/maphash"
 	"io"
 	"os"
-	"strings"
 	"time"
 )
 
+// CSVStats holds the statistics reported by InspectCSV.
 type CSVStats struct {
 	Path                       string
 	Format                     string
@@ -40,6 +41,7 @@ type CSVStats struct {
 	InferredTimeframe          string
 }
 
+// InspectOptions tunes InspectCSVWithOptions.
 type InspectOptions struct {
 	Symbol                  string
 	MarketProfile           string
@@ -53,6 +55,7 @@ type gapObservation struct {
 	Interval time.Duration
 }
 
+// GapDetail describes one suspicious gap.
 type GapDetail struct {
 	PreviousTimestamp time.Time
 	CurrentTimestamp  time.Time
@@ -71,6 +74,7 @@ const (
 	MarketProfileEquity     = "equity-24x5"
 )
 
+// AuditCSV counts data rows and hashes a CSV, CSV.GZ or Parquet file.
 func AuditCSV(path string) (FileAudit, error) {
 	if isParquetPath(path) {
 		return auditParquet(path)
@@ -128,19 +132,30 @@ func AuditCSV(path string) (FileAudit, error) {
 	}, nil
 }
 
+// InspectCSV is InspectCSVWithOptions with default options.
 func InspectCSV(path string) (CSVStats, error) {
 	return InspectCSVWithOptions(path, InspectOptions{})
 }
 
+// InspectCSVWithOptions computes statistics for a CSV/CSV.GZ/Parquet file
+// using DefaultConfig.
 func InspectCSVWithOptions(path string, options InspectOptions) (CSVStats, error) {
+	return DefaultConfig().InspectCSVWithOptions(path, options)
+}
+
+// InspectCSVWithOptions computes row, duplicate, ordering and gap statistics
+// for a CSV/CSV.GZ/Parquet file, reading it with c's delimiter and parsing
+// timestamps with c.ParseTimestamp.
+func (c *Config) InspectCSVWithOptions(path string, options InspectOptions) (CSVStats, error) {
 	if isParquetPath(path) {
-		return inspectParquetWithOptions(path, options)
+		return c.inspectParquetWithOptions(path, options)
 	}
-	_, reader, closeReader, err := openCSVReader(path)
+	_, readerFactory, closeReader, err := c.openCSVReader(path)
 	if err != nil {
 		return CSVStats{}, err
 	}
 	defer closeReader()
+	reader := readerFactory()
 
 	header, err := reader.Read()
 	if err != nil {
@@ -158,8 +173,9 @@ func InspectCSVWithOptions(path string, options InspectOptions) (CSVStats, error
 	timestampIndex := indexOfColumn(header, "timestamp")
 	stats.HasTimestamp = timestampIndex >= 0
 
-	seenRows := make(map[string]int)
-	seenTimestamps := make(map[string]int)
+	seenRows := make(map[uint64]struct{})
+	seenTimestamps := make(map[int64]struct{})
+	hasher := newRowHasher()
 	var intervals []time.Duration
 	var gapObservations []gapObservation
 	var previousTimestamp time.Time
@@ -177,17 +193,18 @@ func InspectCSVWithOptions(path string, options InspectOptions) (CSVStats, error
 		}
 
 		stats.Rows++
-		rowKey := strings.Join(record, "\x1f")
-		if seenRows[rowKey] > 0 {
+		rowKey := hasher.sum(record)
+		if _, seen := seenRows[rowKey]; seen {
 			stats.DuplicateRows++
+		} else {
+			seenRows[rowKey] = struct{}{}
 		}
-		seenRows[rowKey]++
 
 		if !stats.HasTimestamp || timestampIndex >= len(record) {
 			continue
 		}
 
-		timestamp, err := parseFlexibleTimestamp(record[timestampIndex])
+		timestamp, err := c.ParseTimestamp(record[timestampIndex])
 		if err != nil {
 			return CSVStats{}, fmt.Errorf("parse CSV timestamp %q: %w", record[timestampIndex], err)
 		}
@@ -198,11 +215,12 @@ func InspectCSVWithOptions(path string, options InspectOptions) (CSVStats, error
 			stats.LastTimestamp = timestamp
 		}
 
-		stampKey := timestamp.Format(timestampLayout)
-		if seenTimestamps[stampKey] > 0 {
+		stampKey := timestamp.UnixNano()
+		if _, seen := seenTimestamps[stampKey]; seen {
 			stats.DuplicateStamps++
+		} else {
+			seenTimestamps[stampKey] = struct{}{}
 		}
-		seenTimestamps[stampKey]++
 
 		if !previousTimestamp.IsZero() {
 			delta := timestamp.Sub(previousTimestamp)
@@ -229,6 +247,34 @@ func InspectCSVWithOptions(path string, options InspectOptions) (CSVStats, error
 	applyGapStats(&stats, gapObservations, expectedInterval, stats.GapSymbol, stats.GapProfile, options)
 
 	return stats, nil
+}
+
+// rowHashSeed is fixed for the process so hashes are comparable across calls.
+var rowHashSeed = maphash.MakeSeed()
+
+// rowHasher hashes CSV records to 64-bit keys for duplicate detection without
+// retaining the row text. Fields are joined with the 0x1f unit separator, as
+// the former string key was, so equivalence is unchanged up to 64-bit hash
+// collisions.
+type rowHasher struct {
+	h maphash.Hash
+}
+
+func newRowHasher() *rowHasher {
+	r := &rowHasher{}
+	r.h.SetSeed(rowHashSeed)
+	return r
+}
+
+func (r *rowHasher) sum(record []string) uint64 {
+	r.h.Reset()
+	for i, field := range record {
+		if i > 0 {
+			r.h.WriteByte(0x1f)
+		}
+		r.h.WriteString(field)
+	}
+	return r.h.Sum64()
 }
 
 func inferTimeframe(intervals []time.Duration) string {

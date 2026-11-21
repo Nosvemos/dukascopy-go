@@ -3,7 +3,6 @@ package csvout
 import (
 	"fmt"
 	"strings"
-	"time"
 )
 
 func parseColumns(value string, allowed map[string]struct{}) ([]string, error) {
@@ -52,6 +51,7 @@ func indexOfColumn(columns []string, needle string) int {
 	return -1
 }
 
+// HeadersMatch reports whether two header rows are identical.
 func HeadersMatch(expected []string, actual []string) bool {
 	if len(expected) != len(actual) {
 		return false
@@ -62,29 +62,4 @@ func HeadersMatch(expected []string, actual []string) bool {
 		}
 	}
 	return true
-}
-
-func timeframeInterval(timeframe string) time.Duration {
-	switch strings.ToLower(strings.TrimSpace(timeframe)) {
-	case "m1", "minute":
-		return time.Minute
-	case "m3":
-		return 3 * time.Minute
-	case "m5":
-		return 5 * time.Minute
-	case "m15":
-		return 15 * time.Minute
-	case "m30":
-		return 30 * time.Minute
-	case "h1", "hour":
-		return time.Hour
-	case "h4":
-		return 4 * time.Hour
-	case "d1", "day":
-		return 24 * time.Hour
-	case "w1":
-		return 7 * 24 * time.Hour
-	default:
-		return 0
-	}
 }

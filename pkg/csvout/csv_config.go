@@ -31,29 +31,83 @@ var flexibleTimestampLayouts = []string{
 	"2006-01-02",                // date-only
 }
 
-// parseFlexibleTimestamp tries to parse a timestamp string using all known
-// layouts produced by --preset and --timestamp-format flags.  If all layout
-// attempts fail, it tries to interpret the value as a Unix millisecond integer.
-func parseFlexibleTimestamp(value string) (time.Time, error) {
+// unixMilliMinDigits is the minimum number of digits a bare integer must have
+// to be interpreted as Unix milliseconds. 13 digits covers every instant from
+// 2001-09-09 onwards; shorter integers are rejected rather than silently being
+// read as dates in 1970.
+const unixMilliMinDigits = 13
+
+// ParseTimestamp parses a timestamp cell written by this package (or by any of
+// the CLI presets) back into an instant, returned in UTC.
+//
+// The configured TimestampFormat is tried first, then a list of known preset
+// layouts. Layouts without a zone are interpreted in c.Location (UTC when nil),
+// so a file written with a non-UTC location and a zone-less layout round-trips
+// to the same instant. As a last resort a bare integer with at least 13 digits
+// is read as Unix milliseconds.
+func (c *Config) ParseTimestamp(value string) (time.Time, error) {
 	value = strings.TrimSpace(value)
 	if value == "" {
 		return time.Time{}, fmt.Errorf("empty timestamp value")
 	}
 
-	for _, layout := range flexibleTimestampLayouts {
-		if t, err := time.Parse(layout, value); err == nil {
+	loc := time.UTC
+	layout := ""
+	if c != nil {
+		if c.Location != nil {
+			loc = c.Location
+		}
+		layout = c.TimestampFormat
+	}
+
+	if layout != "" {
+		if t, err := time.ParseInLocation(layout, value, loc); err == nil {
+			return t.UTC(), nil
+		}
+	}
+	for _, fallback := range flexibleTimestampLayouts {
+		if fallback == layout {
+			continue
+		}
+		if t, err := time.ParseInLocation(fallback, value, loc); err == nil {
 			return t.UTC(), nil
 		}
 	}
 
-	// Fallback: try Unix millisecond integer
-	if ms, err := strconv.ParseInt(value, 10, 64); err == nil {
-		return time.UnixMilli(ms).UTC(), nil
+	if isUnixMilliCandidate(value) {
+		if ms, err := strconv.ParseInt(value, 10, 64); err == nil {
+			return time.UnixMilli(ms).UTC(), nil
+		}
 	}
 
 	return time.Time{}, fmt.Errorf("unrecognized timestamp format: %q", value)
 }
 
+func isUnixMilliCandidate(value string) bool {
+	if len(value) < unixMilliMinDigits {
+		return false
+	}
+	for _, r := range value {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+// ParseFlexibleTimestamp parses a timestamp cell using the package-level
+// default configuration (OutputLocation / OutputTimestampFormat). See
+// (*Config).ParseTimestamp for the rules.
+func ParseFlexibleTimestamp(value string) (time.Time, error) {
+	return DefaultConfig().ParseTimestamp(value)
+}
+
+// parseFlexibleTimestamp is kept for internal callers and tests.
+func parseFlexibleTimestamp(value string) (time.Time, error) {
+	return ParseFlexibleTimestamp(value)
+}
+
+// Profile names a predefined set of output columns.
 type Profile string
 
 const (
@@ -79,14 +133,26 @@ type csvRecordReader interface {
 	Read() ([]string, error)
 }
 
-var OutputLocation *time.Location = time.UTC
-var OutputTimestampFormat string = time.RFC3339Nano
-var CSVDelimiter rune = ','
-var HideCSVHeader bool = false
-var FillGaps string = "none"
+// Package-level defaults captured by DefaultConfig. Guard writes with
+// ConfigMutex.
+var (
+	// OutputLocation is the time zone timestamps are written in.
+	OutputLocation *time.Location = time.UTC
+	// OutputTimestampFormat is the Go layout used for timestamp cells.
+	OutputTimestampFormat string = time.RFC3339Nano
+	// CSVDelimiter is the CSV field separator.
+	CSVDelimiter rune = ','
+	// HideCSVHeader suppresses the header row on output.
+	HideCSVHeader bool = false
+	// FillGaps selects gap filling for bar output ("none" or "forward").
+	FillGaps string = "none"
+)
 
+// ConfigMutex guards the package-level defaults above.
 var ConfigMutex sync.RWMutex
 
+// Config holds output settings. Methods on Config never read the package-level
+// globals, so independent configurations can be used concurrently.
 type Config struct {
 	Location             *time.Location
 	TimestampFormat      string
@@ -99,6 +165,7 @@ type Config struct {
 	ParquetReaderFactory func(*os.File, *parquet.Schema) parquetRecordReader
 }
 
+// DefaultConfig returns a Config snapshot of the package-level defaults.
 func DefaultConfig() *Config {
 	ConfigMutex.RLock()
 	defer ConfigMutex.RUnlock()
@@ -183,6 +250,7 @@ var defaultCSVReaderFactory = func(r io.Reader) csvRecordReader {
 
 var csvReaderFactory = defaultCSVReaderFactory
 
+// ResumeState describes an existing output file for --resume.
 type ResumeState struct {
 	Exists     bool
 	Columns    []string
@@ -191,12 +259,14 @@ type ResumeState struct {
 	LastTime   time.Time
 }
 
+// FileAudit summarises a written file: data rows, size and SHA-256.
 type FileAudit struct {
 	Rows   int
 	Bytes  int64
 	SHA256 string
 }
 
+// BarColumnsForProfile returns the bar columns of a profile, or nil.
 func BarColumnsForProfile(profile Profile) []string {
 	switch profile {
 	case ProfileSimple:
@@ -210,6 +280,7 @@ func BarColumnsForProfile(profile Profile) []string {
 	}
 }
 
+// TickColumnsForProfile returns the tick columns of a profile, or nil.
 func TickColumnsForProfile(profile Profile) []string {
 	switch profile {
 	case ProfileSimple:
@@ -223,6 +294,7 @@ func TickColumnsForProfile(profile Profile) []string {
 	}
 }
 
+// ParseBarColumns parses a comma-separated list of bar column names.
 func ParseBarColumns(value string) ([]string, error) {
 	return parseColumns(value, map[string]struct{}{
 		"timestamp":  {},
@@ -248,6 +320,7 @@ func ParseBarColumns(value string) ([]string, error) {
 	})
 }
 
+// ParseTickColumns parses a comma-separated list of tick column names.
 func ParseTickColumns(value string) ([]string, error) {
 	return parseColumns(value, map[string]struct{}{
 		"timestamp":  {},
@@ -259,6 +332,7 @@ func ParseTickColumns(value string) ([]string, error) {
 	})
 }
 
+// BarColumnsNeedBidAsk reports whether any column needs separate bid and ask bars.
 func BarColumnsNeedBidAsk(columns []string) bool {
 	for _, column := range columns {
 		if strings.HasPrefix(column, "bid_") || strings.HasPrefix(column, "ask_") || strings.HasPrefix(column, "mid_") || column == "spread" {
@@ -268,6 +342,7 @@ func BarColumnsNeedBidAsk(columns []string) bool {
 	return false
 }
 
+// ColumnsContainTimestamp reports whether columns include "timestamp".
 func ColumnsContainTimestamp(columns []string) bool {
 	for _, column := range columns {
 		if strings.EqualFold(strings.TrimSpace(column), "timestamp") {

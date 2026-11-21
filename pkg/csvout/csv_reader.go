@@ -1,6 +1,7 @@
 package csvout
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -8,6 +9,8 @@ import (
 	"time"
 )
 
+// ExtractCSVRange writes the rows of sourcePath with from <= timestamp < to
+// to outputPath atomically. Either side may be CSV, CSV.GZ or Parquet.
 func (c *Config) ExtractCSVRange(sourcePath string, outputPath string, from time.Time, to time.Time) error {
 	if isParquetPath(sourcePath) {
 		return c.extractRangeFromParquet(sourcePath, outputPath, from, to)
@@ -53,7 +56,7 @@ func (c *Config) ExtractCSVRange(sourcePath string, outputPath string, from time
 	for {
 		record, readErr := csvReader.Read()
 		if readErr != nil {
-			if readErr.Error() == "EOF" {
+			if errors.Is(readErr, io.EOF) {
 				break
 			}
 			closeWriter()
@@ -67,7 +70,7 @@ func (c *Config) ExtractCSVRange(sourcePath string, outputPath string, from time
 			return fmt.Errorf("source CSV %s contains a malformed row", sourcePath)
 		}
 
-		timestamp, err := parseFlexibleTimestamp(record[timestampIndex])
+		timestamp, err := c.ParseTimestamp(record[timestampIndex])
 		if err != nil {
 			closeWriter()
 			return fmt.Errorf("parse source CSV timestamp %q: %w", record[timestampIndex], err)
@@ -91,13 +94,17 @@ func (c *Config) ExtractCSVRange(sourcePath string, outputPath string, from time
 		return err
 	}
 
-	return replaceFile(tempPath, outputPath)
+	return commitAtomic(tempPath, outputPath)
 }
 
+// ExtractCSVRange is (*Config).ExtractCSVRange on DefaultConfig.
 func ExtractCSVRange(sourcePath string, outputPath string, from time.Time, to time.Time) error {
 	return DefaultConfig().ExtractCSVRange(sourcePath, outputPath, from, to)
 }
 
+// StreamCSVRowsAfter copies rows of path whose timestamp is after after (all
+// rows when after is zero) to w as CSV. It returns the number of rows written
+// and the last timestamp written (after when none).
 func (c *Config) StreamCSVRowsAfter(path string, w io.Writer, after time.Time, includeHeader bool) (int, time.Time, error) {
 	if isParquetPath(path) {
 		return 0, time.Time{}, fmt.Errorf("streaming parquet rows to writer is not supported")
@@ -121,7 +128,12 @@ func (c *Config) StreamCSVRowsAfter(path string, w io.Writer, after time.Time, i
 	}
 
 	csvWriter := c.csvWriterFactory(w)
-	defer csvWriter.Flush()
+	flushed := false
+	defer func() {
+		if !flushed {
+			csvWriter.Flush()
+		}
+	}()
 
 	if includeHeader && !c.HideHeader {
 		if err := csvWriter.Write(header); err != nil {
@@ -134,7 +146,7 @@ func (c *Config) StreamCSVRowsAfter(path string, w io.Writer, after time.Time, i
 	for {
 		record, readErr := csvReader.Read()
 		if readErr != nil {
-			if readErr.Error() == "EOF" {
+			if errors.Is(readErr, io.EOF) {
 				break
 			}
 			return 0, time.Time{}, readErr
@@ -146,7 +158,7 @@ func (c *Config) StreamCSVRowsAfter(path string, w io.Writer, after time.Time, i
 			return 0, time.Time{}, fmt.Errorf("source CSV %s contains a malformed row", path)
 		}
 
-		timestamp, err := parseFlexibleTimestamp(record[timestampIndex])
+		timestamp, err := c.ParseTimestamp(record[timestampIndex])
 		if err != nil {
 			return 0, time.Time{}, fmt.Errorf("parse source CSV timestamp %q: %w", record[timestampIndex], err)
 		}
@@ -161,16 +173,23 @@ func (c *Config) StreamCSVRowsAfter(path string, w io.Writer, after time.Time, i
 		lastTimestamp = timestamp
 	}
 
+	// Flush before checking Error so a failure writing the last buffered rows
+	// is reported.
+	csvWriter.Flush()
+	flushed = true
 	if err := csvWriter.Error(); err != nil {
 		return 0, time.Time{}, err
 	}
 	return rows, lastTimestamp, nil
 }
 
+// StreamCSVRowsAfter is (*Config).StreamCSVRowsAfter on DefaultConfig.
 func StreamCSVRowsAfter(path string, w io.Writer, after time.Time, includeHeader bool) (int, time.Time, error) {
 	return DefaultConfig().StreamCSVRowsAfter(path, w, after, includeHeader)
 }
 
+// InspectExistingCSV reads outputPath and returns its header, last row and
+// last timestamp for resuming a download.
 func (c *Config) InspectExistingCSV(outputPath string) (ResumeState, error) {
 	_, readerFactory, closeReader, err := c.openCSVReader(outputPath)
 	if err != nil {
@@ -181,7 +200,7 @@ func (c *Config) InspectExistingCSV(outputPath string) (ResumeState, error) {
 	reader := readerFactory()
 	header, err := reader.Read()
 	if err != nil {
-		if err.Error() == "EOF" {
+		if errors.Is(err, io.EOF) {
 			return ResumeState{Exists: true}, nil
 		}
 		return ResumeState{}, err
@@ -196,7 +215,7 @@ func (c *Config) InspectExistingCSV(outputPath string) (ResumeState, error) {
 	for {
 		record, readErr := reader.Read()
 		if readErr != nil {
-			if readErr.Error() == "EOF" {
+			if errors.Is(readErr, io.EOF) {
 				break
 			}
 			return ResumeState{}, readErr
@@ -219,7 +238,7 @@ func (c *Config) InspectExistingCSV(outputPath string) (ResumeState, error) {
 		return ResumeState{}, fmt.Errorf("existing CSV %s has a malformed last row", outputPath)
 	}
 
-	lastTime, err := parseFlexibleTimestamp(lastRecord[timestampIndex])
+	lastTime, err := c.ParseTimestamp(lastRecord[timestampIndex])
 	if err != nil {
 		return ResumeState{}, fmt.Errorf("parse existing CSV timestamp %q: %w", lastRecord[timestampIndex], err)
 	}
@@ -230,10 +249,13 @@ func (c *Config) InspectExistingCSV(outputPath string) (ResumeState, error) {
 	return state, nil
 }
 
+// InspectExistingCSV is (*Config).InspectExistingCSV on DefaultConfig.
 func InspectExistingCSV(outputPath string) (ResumeState, error) {
 	return DefaultConfig().InspectExistingCSV(outputPath)
 }
 
+// GetResumeDuplicateTail returns up to maxRows trailing data rows of
+// outputPath, each joined with the 0x1f separator; nil when the file is missing.
 func GetResumeDuplicateTail(outputPath string, maxRows int) ([]string, error) {
 	if _, err := os.Stat(outputPath); os.IsNotExist(err) {
 		return nil, nil
@@ -252,7 +274,7 @@ func GetResumeDuplicateTail(outputPath string, maxRows int) ([]string, error) {
 	for {
 		rec, rErr := csvReader.Read()
 		if rErr != nil {
-			if rErr.Error() == "EOF" {
+			if errors.Is(rErr, io.EOF) {
 				break
 			}
 			return nil, rErr
