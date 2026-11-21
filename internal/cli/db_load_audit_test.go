@@ -139,18 +139,25 @@ func TestQuoteClickHouseTable(t *testing.T) {
 }
 
 func TestIngestClickHouse_LargeUploadIsNotCutByOverallTimeout(t *testing.T) {
-	// The server consumes the upload slowly so the whole request takes much
-	// longer than the configured timeout. Only connect/response-header
-	// timeouts may apply, so the upload must still succeed.
+	// The server stalls the upload at the start so the whole request takes much
+	// longer than the configured timeout, then drains the rest quickly. Only
+	// connect/response-header timeouts may apply, so the upload must still
+	// succeed. The stall must come first: the response-header timeout starts
+	// once the client has handed the whole body to the kernel, and with large
+	// socket buffers (Linux CI) a server that stays slow until the end would
+	// still be reading buffered data long after that point.
 	timeout := 300 * time.Millisecond
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		stallUntil := time.Now().Add(4 * timeout)
 		buf := make([]byte, 256*1024)
 		for {
 			_, err := r.Body.Read(buf)
 			if err != nil {
 				break
 			}
-			time.Sleep(15 * time.Millisecond)
+			if time.Now().Before(stallUntil) {
+				time.Sleep(15 * time.Millisecond)
+			}
 		}
 		w.WriteHeader(http.StatusOK)
 	}))
