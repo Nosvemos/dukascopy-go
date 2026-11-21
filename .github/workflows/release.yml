@@ -61,7 +61,7 @@ jobs:
         run: git checkout "${{ github.event.inputs.version_tag }}"
 
       - name: Setup Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
 
