@@ -41,10 +41,18 @@ docs/
 __pycache__/
 *.py[cod]
 *$py.class
-dukascopy-go
-dukascopy-go-sdk
+# Built binaries at the repository root only (unanchored names would also
+# ignore the cmd/dukascopy-go/ and cmd/dukascopy-go-sdk/ source directories)
+/dukascopy-go
+/dukascopy-go.exe
+/dukascopy-go-sdk
+/dukascopy-go-sdk.exe
 
 # Data files
 *.csv
 *.csv.gz
 *.parquet
+
+# Test fixtures may be committed (overrides the data-file patterns above)
+!testdata/**
+!**/testdata/**

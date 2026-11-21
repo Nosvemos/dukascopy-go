@@ -23,23 +23,30 @@ def _load_library():
     else:
         lib_name = 'libdukascopy.so'
 
-    # Check same directory as this file first
-    curr_dir = os.path.dirname(os.path.abspath(__file__))
-    lib_path = os.path.join(curr_dir, lib_name)
-
-    if not os.path.exists(lib_path):
-        # Also check current working directory
-        lib_path = os.path.join(os.getcwd(), lib_name)
-
-    if not os.path.exists(lib_path):
-        # Try finding in parent directory (useful during development/testing)
-        lib_path = os.path.join(os.path.dirname(curr_dir), lib_name)
-
-    if not os.path.exists(lib_path):
-        raise FileNotFoundError(
-            f"Could not find '{lib_name}'. Please compile it using: \n"
-            f"go build -buildmode=c-shared -o sdk/python/{lib_name} ./cmd/dukascopy-go-sdk"
-        )
+    # Only two locations are trusted: an explicit DUKASCOPY_LIB path, or the
+    # package directory itself. The current working directory and its
+    # parents are deliberately NOT searched: loading a shared library runs
+    # native code, so picking one up from wherever a script happens to be
+    # started would execute arbitrary code from untrusted directories.
+    pkg_dir = os.path.dirname(os.path.abspath(__file__))
+    env_path = os.environ.get('DUKASCOPY_LIB', '').strip()
+    if env_path:
+        lib_path = os.path.abspath(os.path.expanduser(env_path))
+        if not os.path.isfile(lib_path):
+            raise FileNotFoundError(
+                f"DUKASCOPY_LIB is set to '{env_path}', but no file exists at '{lib_path}'."
+            )
+    else:
+        lib_path = os.path.join(pkg_dir, lib_name)
+        if not os.path.isfile(lib_path):
+            raise FileNotFoundError(
+                f"Could not find the native library '{lib_name}' in the package directory "
+                f"'{pkg_dir}'.\n"
+                f"Build it from the repository root with:\n"
+                f"  go build -buildmode=c-shared -o sdk/python/dukascopy_go/{lib_name} ./cmd/dukascopy-go-sdk\n"
+                f"(or 'make sdk'), then reinstall the package; or point the DUKASCOPY_LIB "
+                f"environment variable at an existing '{lib_name}'."
+            )
 
     # Load the library
     try:
@@ -48,6 +55,15 @@ def _load_library():
         raise OSError(f"Failed to load shared library '{lib_path}': {e}")
 
 import threading
+
+
+def _take_c_string(ptr):
+    """Decode a C string returned by the Go library and always free it."""
+    try:
+        return ctypes.string_at(ptr).decode('utf-8', errors='replace')
+    finally:
+        # Free the Go C.CString memory even if decoding fails.
+        _lib.FreeString(ptr)
 
 # Initialize the library
 _lib = None
@@ -207,10 +223,7 @@ def download(
 
     # If the returned pointer is not NULL, an error occurred
     if err_ptr:
-        err_msg = ctypes.string_at(err_ptr).decode('utf-8')
-        # Free the Go C.CString memory to avoid leak
-        _lib.FreeString(err_ptr)
-        raise DukascopyError(err_msg)
+        raise DukascopyError(_take_c_string(err_ptr))
 
 def db_load(
     db_type: str,
@@ -286,10 +299,7 @@ def db_load(
 
     # If the returned pointer is not NULL, an error occurred
     if err_ptr:
-        err_msg = ctypes.string_at(err_ptr).decode('utf-8')
-        # Free the Go C.CString memory to avoid leak
-        _lib.FreeString(err_ptr)
-        raise DukascopyError(err_msg)
+        raise DukascopyError(_take_c_string(err_ptr))
 
 
 # ═══════════════════════════════════════════════════════════════════════

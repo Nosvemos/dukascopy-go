@@ -1,21 +1,24 @@
 [build-system]
-requires = ["setuptools>=42", "wheel"]
+requires = ["setuptools>=61", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "dukascopy-go"
 version = "1.0.0"
-description = "Blazing fast Dukascopy market data downloader SDK built on Go"
-readme = "../../README.md"
+description = "Dukascopy market data downloader SDK backed by a native Go library"
+readme = "README.md"
 requires-python = ">=3.9"
 authors = [
-  { name="Nosvemos" }
+  { name = "Nosvemos" }
 ]
 license = { text = "Proprietary Source-Available Non-Commercial License" }
 classifiers = [
   "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
   "License :: Other/Proprietary License",
-  "Operating System :: OS Independent",
+  "Operating System :: Microsoft :: Windows",
+  "Operating System :: POSIX :: Linux",
+  "Operating System :: MacOS",
   "Topic :: Office/Business :: Financial :: Investment",
 ]
 
@@ -25,3 +28,12 @@ pandas = ["pandas>=1.0.0", "pyarrow>=1.0.0"]
 [project.urls]
 "Homepage" = "https://github.com/Nosvemos/dukascopy-go"
 "Bug Tracker" = "https://github.com/Nosvemos/dukascopy-go/issues"
+
+[tool.setuptools]
+packages = ["dukascopy_go"]
+include-package-data = true
+
+[tool.setuptools.package-data]
+# The native library is built into the package directory before building a
+# wheel (see README.md); only the file for the build platform will exist.
+dukascopy_go = ["libdukascopy.so", "libdukascopy.dll", "libdukascopy.dylib"]

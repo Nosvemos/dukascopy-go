@@ -1,35 +1,23 @@
-import os
-from setuptools import setup, find_packages
+# All package metadata lives in pyproject.toml. This file only exists to mark
+# the wheel as platform-specific: it bundles a native shared library
+# (libdukascopy.*) loaded through ctypes, so it is tied to an OS/architecture
+# but not to a Python ABI (tag: py3-none-<platform>).
+from setuptools import setup
 
-# Load the long description from the root README (if available)
 try:
-    with open(os.path.join(os.path.dirname(__file__), '..', '..', 'README.md'), encoding='utf-8') as f:
-        long_description = f.read()
-except FileNotFoundError:
-    long_description = "Dukascopy market data downloader SDK"
+    from setuptools.command.bdist_wheel import bdist_wheel as _bdist_wheel
+except ImportError:  # setuptools < 70.1
+    from wheel.bdist_wheel import bdist_wheel as _bdist_wheel
 
-setup(
-    name="dukascopy-go",
-    version="1.0.0",
-    description="Blazing fast Dukascopy market data downloader SDK built on Go",
-    long_description=long_description,
-    long_description_content_type="text/markdown",
-    url="https://github.com/Nosvemos/dukascopy-go",
-    author="Nosvemos",
-    license="Proprietary Source-Available Non-Commercial License",
-    packages=find_packages(),
-    classifiers=[
-        "Programming Language :: Python :: 3",
-        "License :: Other/Proprietary License",
-        "Operating System :: OS Independent",
-        "Topic :: Office/Business :: Financial :: Investment",
-    ],
-    python_requires=">=3.9",
-    package_data={
-        "": ["libdukascopy.so", "libdukascopy.dll", "libdukascopy.dylib"],
-    },
-    include_package_data=True,
-    extras_require={
-        "pandas": ["pandas>=1.0.0", "pyarrow>=1.0.0"],
-    },
-)
+
+class bdist_wheel(_bdist_wheel):
+    def finalize_options(self):
+        super().finalize_options()
+        self.root_is_pure = False
+
+    def get_tag(self):
+        _, _, plat = super().get_tag()
+        return "py3", "none", plat
+
+
+setup(cmdclass={"bdist_wheel": bdist_wheel})

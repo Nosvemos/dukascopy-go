@@ -1,0 +1,19 @@
+# golangci-lint v2 configuration.
+# Not wired into CI as a blocking job yet (the tree is not clean against it);
+# run locally with `golangci-lint run ./...` (see the Makefile).
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - govet
+    - staticcheck
+    - errcheck
+    - ineffassign
+    - unused
+    - bodyclose
+    - misspell
+
+formatters:
+  enable:
+    - gofmt

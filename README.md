@@ -1,6 +1,6 @@
 <div align="center">
   <h1>dukascopy-go 🚀</h1>
-  <p><b>The fastest, zero-dependency engine for historical tick/bar downloads, real-time streaming, and quant feature engineering.</b></p>
+  <p><b>The fastest, single-binary engine for historical tick/bar downloads, real-time streaming, and quant feature engineering.</b></p>
 
   <img width="800" height="210" alt="download" src="https://github.com/user-attachments/assets/f240008c-5e87-4139-bddb-20b55ac15743" />
   
@@ -23,13 +23,13 @@
 | **Speed & Concurrency** | 🚀 Native Go + Multi-Worker Parallelism (~100× Faster) | 🐢 Slow single-threaded scripts |
 | **Quant Features & ML** | 🧠 On-the-fly Indicators (RSI, EMA, ATR, VWAP, Volatility) | ❌ Raw OHLCV only, requires pandas post-processing |
 | **Alternative Bar Sampling** | 📊 Tick, Volume, and Dollar/Nominal Bars | ❌ Time-based bars only |
-| **Data Lake & Cloud** | ☁️ Direct S3 / Cloudflare R2 / GCS / MinIO Streaming Upload | ❌ Local disk only |
+| **Data Lake & Cloud** | ☁️ Direct S3 / Cloudflare R2 / GCS / MinIO Streaming Upload (single PUT, up to 5 GiB) | ❌ Local disk only |
 | **Streaming & Trade Bots** | 🤖 Native WebSocket, Redis Streams/PubSub, NATS | ⚠️ Custom wrappers required |
 | **Price & Indicator Watch** | 🔔 `watch` CLI with custom triggers and Webhook POSTs | ❌ Not available |
 | **Microstructure & OFI** | 🔬 Order Flow Imbalance, Effective Spread, Amihud Illiquidity | ❌ Not available |
-| **Database Ingestion** | 🗄️ Zero-driver fast ingest into ClickHouse, QuestDB, TimescaleDB, InfluxDB | ⚠️ Slow python loops / external ETL |
+| **Database Ingestion** | 🗄️ Built-in fast ingest into ClickHouse, QuestDB, TimescaleDB, InfluxDB | ⚠️ Slow python loops / external ETL |
 | **Outlier Scrubbing** | 🛡️ Rolling MAD (Median Absolute Deviation) bad tick scrubber | ❌ Raw noisy ticks |
-| **Zero Dependencies** | ✨ Single static binary — no Python/Node runtime needed | 📦 Heavy dependency trees |
+| **Single Binary** | ✨ Single static binary — no Python/Node runtime needed | 📦 Heavy dependency trees |
 | **Resumability** | ✅ SHA-256 chunk manifests & automatic delta sync | ❌ Restarts from scratch |
 
 ---
@@ -44,12 +44,17 @@ Pre-built standalone binaries for **Windows, Linux, and macOS (Apple Silicon & I
 go install github.com/Nosvemos/dukascopy-go/cmd/dukascopy-go@latest
 ```
 
-### Install Python SDK:
+### Install Python SDK (build from source):
+
+No wheel is published on PyPI yet. Build the native library and install the package from a clone (needs Go and a C compiler for cgo):
 
 ```bash
-pip install dukascopy-go           # Core SDK
-pip install 'dukascopy-go[pandas]' # With Pandas & PyArrow integration
+go build -buildmode=c-shared -o sdk/python/dukascopy_go/libdukascopy.so ./cmd/dukascopy-go-sdk  # .dll on Windows, .dylib on macOS (or: make sdk)
+pip install ./sdk/python             # Core SDK
+pip install './sdk/python[pandas]'   # With Pandas & PyArrow integration
 ```
+
+The SDK loads the library only from its package directory or from the path in the `DUKASCOPY_LIB` environment variable (never from the current working directory). See [`sdk/python/README.md`](sdk/python/README.md).
 
 ---
 
@@ -184,6 +189,8 @@ dukascopy-go download --symbol xauusd --timeframe m1 --last 30d --output ./gold_
   - `volatility:parkinson:<window>` (High-Low Parkinson Volatility)
 - **Volume & Flow**: `vwap` (Volume Weighted Average Price), `obv` (On-Balance Volume)
 
+**Warm-up rows are NaN, never back-filled.** Until an indicator has enough history its value is NaN: SMA and Bollinger for the first `period-1` bars, EMA (seeded with the SMA of the first `period` closes) for the first `period-1`, RSI (Wilder) for the first `period`, ATR (Wilder) for the first `period-1`, and the MACD signal/histogram for the first `max(fast,slow)+signal-2` bars. No value is ever computed from later bars, so the columns are free of look-ahead bias. Bollinger bands use the population standard deviation. Requesting two features that produce the same column name (e.g. `macd:12:26:9` and `macd:5:35:9`, which both yield `macd_signal_9`) is rejected.
+
 ---
 
 ## 🤖 Production Streaming & Trade Bot Integrations
@@ -221,6 +228,8 @@ dukascopy-go live --symbol eurusd --timeframe tick --microstructure --format jso
 - `effective_spread`: $2 \times |P_{mid} - P_{prev\_mid}|$
 - `amihud_illiquidity`: $|\Delta P| / \text{Volume}$
 - `price_velocity`: Price points per second
+
+These are quote-based proxies computed from consecutive top-of-book ticks (Dukascopy ticks carry no trade prints): `volume` is quoted bid/ask liquidity, not traded volume, so `effective_spread` and `amihud_illiquidity` are not the textbook trade-based measures of the same name.
 
 ---
 
@@ -265,10 +274,13 @@ dukascopy-go download --symbol eurusd --timeframe m1 --last 30d \
   --output s3://my-quant-bucket/forex/eurusd_m1.parquet --parallelism 8
 
 # MinIO / Cloudflare R2 / Custom S3 Endpoint
+# r2:// REQUIRES an endpoint (AWS_ENDPOINT_URL or S3_ENDPOINT); without one the upload is refused.
 export S3_ENDPOINT="https://<account-id>.r2.cloudflarestorage.com"
 dukascopy-go download --symbol xauusd --timeframe tick --last 7d \
   --output r2://market-data/xauusd_ticks.parquet
 ```
+
+`gs://` / `gcs://` default to `https://storage.googleapis.com` (use GCS HMAC keys as the AWS key pair). Temporary credentials are supported via `AWS_SESSION_TOKEN`. Uploads without credentials are refused instead of being sent unsigned. Files are streamed from disk in a single PUT, so objects are limited to 5 GiB (multipart upload is not implemented). Object keys are taken literally from the URI (`#`, `?`, `+`, spaces and non-ASCII characters are allowed).
 
 ---
 
@@ -380,10 +392,10 @@ go build -o dukascopy-go ./cmd/dukascopy-go
 |---|---|:---:|
 | `internal/buildinfo` | Binary build metadata & versioning | **100.0%** |
 | `internal/checkpoint` | SHA-256 partition manifest & state recovery | **100.0%** |
-| `pkg/features` | Technical indicators, quant microstructure, VWAP & volatility | **97.2%** |
-| `pkg/cloud` | AWS S3, Cloudflare R2, GCS & MinIO streaming | **94.5%** |
+| `pkg/features` | Technical indicators, returns, VWAP & volatility | **96.4%** |
+| `pkg/cloud` | AWS S3, Cloudflare R2, GCS & MinIO streaming | **92.9%** |
 | `pkg/dukascopy` | LZMA/Bi5 decoder, HTTP client, outlier scrubbing & sampling | **90.9%** |
-| `pkg/streaming` | Real-time WebSocket, Redis Streams/PubSub & NATS | **90.3%** |
+| `pkg/streaming` | Redis Streams/PubSub & NATS publishers, tick microstructure metrics | **89.0%** |
 | `pkg/csvout` | High-speed CSV, Parquet, Arrow, JSONL writers & market calendars | **83.0%** |
 | `internal/cli` | Interactive TUI, commands, database loaders & watchers | **64.2%** *(+100% E2E)* |
 | `tests/e2e` | Full multi-symbol download, manifest repair & sync test suite | **100% Passing** |

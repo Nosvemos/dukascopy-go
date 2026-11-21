@@ -1,2 +1,14 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+
+# Source and config files always use LF in the working tree as well
+# (gofmt output, YAML, shell-friendly tooling).
+*.go    text eol=lf
+*.py    text eol=lf
+*.yml   text eol=lf
+*.yaml  text eol=lf
+*.md    text eol=lf
+*.mod   text eol=lf
+*.sum   text eol=lf
+*.toml  text eol=lf
+*.h     text eol=lf
