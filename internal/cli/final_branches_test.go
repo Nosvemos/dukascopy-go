@@ -37,7 +37,7 @@ func TestRunManifestRepairNoOpAndPruneMissingDir(t *testing.T) {
 	manifest := checkpoint.Manifest{
 		Version:    checkpoint.CurrentManifestVersion,
 		OutputPath: outputPath,
-		PartsDir:   filepath.Join(dir, "missing-parts"),
+		PartsDir:   filepath.Join(dir, "missing.parts"),
 		Symbol:     "xauusd",
 		Timeframe:  "m1",
 		Side:       "BID",

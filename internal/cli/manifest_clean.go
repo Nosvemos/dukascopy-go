@@ -5,7 +5,10 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/Nosvemos/dukascopy-go/internal/checkpoint"
 	"github.com/Nosvemos/dukascopy-go/pkg/csvout"
@@ -26,14 +29,42 @@ func runManifestCleanDuplicates(args []string, stdout io.Writer) error {
 	}
 
 	targetPath := strings.TrimSpace(*outputPath)
-	if targetPath == "" && strings.TrimSpace(*manifestPath) != "" {
-		manifest, err := checkpoint.Load(strings.TrimSpace(*manifestPath))
-		if err == nil {
+	explicitManifest := strings.TrimSpace(*manifestPath)
+
+	// Load the manifest (if any) before touching the output so a corrupt
+	// manifest aborts the command instead of leaving stale metadata behind.
+	var (
+		manifest      checkpoint.Manifest
+		manifestFile  string
+		manifestFound bool
+	)
+	if explicitManifest != "" {
+		loaded, err := checkpoint.Load(explicitManifest)
+		if err != nil {
+			return fmt.Errorf("load checkpoint manifest %s: %w", explicitManifest, err)
+		}
+		manifest, manifestFile, manifestFound = loaded, explicitManifest, true
+		if targetPath == "" {
 			targetPath = manifest.OutputPath
+		}
+	} else if targetPath != "" {
+		candidate := checkpoint.DefaultManifestPath(targetPath)
+		loaded, err := checkpoint.Load(candidate)
+		switch {
+		case err == nil:
+			manifest, manifestFile, manifestFound = loaded, candidate, true
+		case errors.Is(err, os.ErrNotExist):
+			// no manifest next to the output: nothing to keep in sync
+		default:
+			return fmt.Errorf("load checkpoint manifest %s: %w", candidate, err)
 		}
 	}
 	if targetPath == "" {
 		return errors.New("either --output or a valid --manifest is required to clean duplicates")
+	}
+	if manifestFound && filepath.Clean(manifest.OutputPath) != filepath.Clean(targetPath) {
+		fmt.Fprintf(stdout, "%sclean%s warning: manifest %s tracks %s, not %s; manifest left unchanged\n", colorize(colorYellow), colorize(colorReset), manifestFile, manifest.OutputPath, targetPath)
+		manifestFound = false
 	}
 
 	stats, err := csvout.InspectCSV(targetPath)
@@ -54,5 +85,22 @@ func runManifestCleanDuplicates(args []string, stdout io.Writer) error {
 	}
 
 	fmt.Fprintf(stdout, "%sclean%s successfully removed %d duplicate/anomaly rows in %s\n", colorize(colorGreen), colorize(colorReset), cleanedCount, targetPath)
+
+	if manifestFound {
+		audit, err := csvout.AuditCSV(targetPath)
+		if err != nil {
+			return fmt.Errorf("re-audit cleaned output: %w", err)
+		}
+		manifest.FinalOutput = &checkpoint.ManifestOutput{
+			Rows:      audit.Rows,
+			Bytes:     audit.Bytes,
+			SHA256:    audit.SHA256,
+			UpdatedAt: time.Now().UTC(),
+		}
+		if err := checkpoint.Save(manifestFile, manifest); err != nil {
+			return fmt.Errorf("update checkpoint manifest %s: %w", manifestFile, err)
+		}
+		fmt.Fprintf(stdout, "%sclean%s updated final output record in %s\n", colorize(colorGreen), colorize(colorReset), manifestFile)
+	}
 	return nil
 }

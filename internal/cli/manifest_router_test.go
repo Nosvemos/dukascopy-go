@@ -15,7 +15,11 @@ func TestManifestRouterCases(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 	dir := t.TempDir()
 	outputPath := filepath.Join(dir, "dataset.csv")
-	partPath := filepath.Join(dir, "part.csv")
+	partsDir := checkpoint.DefaultPartsDir(outputPath)
+	if err := os.MkdirAll(partsDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll returned error: %v", err)
+	}
+	partPath := filepath.Join(partsDir, "part.csv")
 	if err := os.WriteFile(outputPath, []byte("timestamp,open\n2024-01-01T00:00:00Z,1\n"), 0o644); err != nil {
 		t.Fatalf("WriteFile returned error: %v", err)
 	}
@@ -26,7 +30,7 @@ func TestManifestRouterCases(t *testing.T) {
 	manifest := checkpoint.Manifest{
 		Version:    checkpoint.CurrentManifestVersion,
 		OutputPath: outputPath,
-		PartsDir:   dir,
+		PartsDir:   partsDir,
 		Symbol:     "xauusd",
 		Timeframe:  "m1",
 		Side:       "BID",
@@ -68,6 +72,11 @@ func TestManifestRouterCases(t *testing.T) {
 	tempPath := outputPath + ".tmp-123"
 	if err := os.WriteFile(tempPath, []byte("tmp"), 0o644); err != nil {
 		t.Fatalf("WriteFile returned error: %v", err)
+	}
+	// prune leaves temp files younger than pruneTempMinAge alone.
+	old := time.Now().Add(-time.Hour)
+	if err := os.Chtimes(tempPath, old, old); err != nil {
+		t.Fatalf("Chtimes returned error: %v", err)
 	}
 	out.Reset()
 	if err := runManifest([]string{"prune", "--manifest", manifestPath}, &out); err != nil {

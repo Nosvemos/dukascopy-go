@@ -18,6 +18,33 @@ var (
 	liveSleep = sleepWithContext
 )
 
+const (
+	// liveMaxConsecutiveFailures is how many cycles in a row may fail (for
+	// example on transient HTTP errors) before the live loop gives up.
+	liveMaxConsecutiveFailures = 10
+	// liveMaxFailureBackoff caps the exponential backoff between failed cycles.
+	liveMaxFailureBackoff = 5 * time.Minute
+)
+
+// liveFailureBackoff returns pollInterval * 2^(failures-1), capped at
+// liveMaxFailureBackoff.
+func liveFailureBackoff(pollInterval time.Duration, failures int) time.Duration {
+	if pollInterval <= 0 {
+		pollInterval = time.Second
+	}
+	backoff := pollInterval
+	for i := 1; i < failures; i++ {
+		if backoff >= liveMaxFailureBackoff/2 {
+			return liveMaxFailureBackoff
+		}
+		backoff *= 2
+	}
+	if backoff > liveMaxFailureBackoff {
+		return liveMaxFailureBackoff
+	}
+	return backoff
+}
+
 func runLiveDownload(
 	ctx context.Context,
 	client *dukascopy.Client,
@@ -41,6 +68,7 @@ func runLiveDownload(
 	if resultKind == dukascopy.ResultKindTick {
 		label = "ticks"
 	}
+	consecutiveFailures := 0
 
 	for {
 		if err := ctx.Err(); err != nil {
@@ -126,11 +154,25 @@ func runLiveDownload(
 				appended, err = runSingleDownload(ctx, client, stdout, outputPath, false, resumeState, dedupeRecord, cycleRequest, resultKind, barColumns, tickColumns)
 			}
 			if err != nil {
-				if errors.Is(err, context.Canceled) {
+				if errors.Is(err, context.Canceled) || ctx.Err() != nil {
+					return finishLiveDownload(stdout, progress, outputPath, context.Canceled)
+				}
+				consecutiveFailures++
+				if consecutiveFailures >= liveMaxConsecutiveFailures {
+					return fmt.Errorf("live download giving up after %d consecutive failures: %w", consecutiveFailures, err)
+				}
+				backoff := liveFailureBackoff(pollInterval, consecutiveFailures)
+				fmt.Fprintf(stderr, "%slive%s cycle failed (%d/%d consecutive), retrying in %s: %v\n",
+					colorize(colorYellow), colorize(colorReset), consecutiveFailures, liveMaxConsecutiveFailures, backoff, err)
+				if progress != nil {
+					progress.SetStatus(fmt.Sprintf("live retry %d/%d in %s", consecutiveFailures, liveMaxConsecutiveFailures, backoff))
+				}
+				if err := liveSleep(ctx, backoff); err != nil {
 					return finishLiveDownload(stdout, progress, outputPath, err)
 				}
-				return err
+				continue
 			}
+			consecutiveFailures = 0
 			if appended > 0 && !outputToStdout {
 				fmt.Fprintf(
 					stdout,

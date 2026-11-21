@@ -7,11 +7,19 @@ import (
 	"encoding/csv"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/lib/pq"
 )
+
+// postgresSetupTimeout bounds the connection ping and the TimescaleDB setup
+// queries so an unreachable host fails fast instead of hanging.
+var postgresSetupTimeout = 15 * time.Second
 
 // ingestPostgres streams the local CSV file directly to PostgreSQL using COPY.
 // When TimescaleDB extension is detected and createHypertable is true, it creates
@@ -31,19 +39,24 @@ func ingestPostgres(
 		return fmt.Errorf("unsupported file type for postgres ingestion: %q (supported: .csv, .csv.gz)", inputPath)
 	}
 
-	db, err := sql.Open("postgres", dbURL)
+	db, err := sql.Open("postgres", withPostgresConnectTimeout(dbURL, postgresSetupTimeout))
 	if err != nil {
 		return fmt.Errorf("failed to open postgres connection: %w", err)
 	}
 	defer db.Close()
 
-	if err := db.PingContext(ctx); err != nil {
+	pingCtx, cancelPing := context.WithTimeout(ctx, postgresSetupTimeout)
+	err = db.PingContext(pingCtx)
+	cancelPing()
+	if err != nil {
 		return fmt.Errorf("failed to connect to postgres: %w", err)
 	}
 
 	// Detect TimescaleDB and optionally create hypertable
 	if createHypertable {
-		hasTimescale, detectErr := detectTimescaleDB(ctx, db)
+		setupCtx, cancelSetup := context.WithTimeout(ctx, postgresSetupTimeout)
+		defer cancelSetup()
+		hasTimescale, detectErr := detectTimescaleDB(setupCtx, db)
 		if detectErr != nil {
 			fmt.Fprintf(stderr, "%sdb-load%s warning: could not detect TimescaleDB extension: %v\n",
 				colorize(colorYellow), colorize(colorReset), detectErr)
@@ -57,7 +70,7 @@ func ingestPostgres(
 				chunk = inferChunkIntervalFromPath(inputPath)
 			}
 
-			if htErr := createHypertablePG(ctx, db, table, chunk); htErr != nil {
+			if htErr := createHypertablePG(setupCtx, db, table, chunk); htErr != nil {
 				fmt.Fprintf(stderr, "%sdb-load%s warning: hypertable creation skipped: %v\n",
 					colorize(colorYellow), colorize(colorReset), htErr)
 			} else {
@@ -101,15 +114,7 @@ func ingestPostgres(
 	}
 	defer txn.Rollback()
 
-	var stmt *sql.Stmt
-	parts := strings.Split(table, ".")
-	if len(parts) == 2 {
-		schema := strings.Trim(strings.TrimSpace(parts[0]), `"`)
-		tbl := strings.Trim(strings.TrimSpace(parts[1]), `"`)
-		stmt, err = txn.Prepare(pq.CopyInSchema(schema, tbl, header...))
-	} else {
-		stmt, err = txn.Prepare(pq.CopyIn(table, header...))
-	}
+	stmt, err := txn.PrepareContext(ctx, buildCopyInStatement(table, header))
 	if err != nil {
 		return fmt.Errorf("failed to prepare COPY statement: %w", err)
 	}
@@ -133,13 +138,13 @@ func ingestPostgres(
 			args[i] = v
 		}
 
-		if _, err := stmt.Exec(args...); err != nil {
+		if _, err := stmt.ExecContext(ctx, args...); err != nil {
 			return fmt.Errorf("failed to exec COPY at row %d: %w", rowCount+1, err)
 		}
 		rowCount++
 	}
 
-	if _, err := stmt.Exec(); err != nil {
+	if _, err := stmt.ExecContext(ctx); err != nil {
 		return fmt.Errorf("failed to flush COPY statement: %w", err)
 	}
 
@@ -191,10 +196,42 @@ func createHypertablePG(ctx context.Context, db *sql.DB, table string, chunkInte
 	return txn.Commit()
 }
 
+// withPostgresConnectTimeout adds connect_timeout to a DSN that has none.
+// lib/pq only applies the context to the TCP dial, so without it a server that
+// accepts the connection but never answers the startup handshake would hang
+// the ping forever.
+func withPostgresConnectTimeout(dsn string, timeout time.Duration) string {
+	if timeout <= 0 || strings.Contains(strings.ToLower(dsn), "connect_timeout") {
+		return dsn
+	}
+	seconds := int((timeout + time.Second - 1) / time.Second)
+	if seconds < 1 {
+		seconds = 1
+	}
+	trimmed := strings.TrimSpace(dsn)
+	lower := strings.ToLower(trimmed)
+	if strings.HasPrefix(lower, "postgres://") || strings.HasPrefix(lower, "postgresql://") {
+		u, err := url.Parse(trimmed)
+		if err != nil {
+			return dsn
+		}
+		q := u.Query()
+		q.Set("connect_timeout", strconv.Itoa(seconds))
+		u.RawQuery = q.Encode()
+		return u.String()
+	}
+	if trimmed == "" {
+		return fmt.Sprintf("connect_timeout=%d", seconds)
+	}
+	return fmt.Sprintf("%s connect_timeout=%d", trimmed, seconds)
+}
+
 // inferChunkIntervalFromPath derives a sensible chunk interval from the input filename.
 // It looks for common timeframe tokens (m1, h1, d1, tick, etc.) in the path.
 func inferChunkIntervalFromPath(path string) string {
-	lower := strings.ToLower(path)
+	// Match on the file name only: directory names such as "/home/tick-data/"
+	// must not influence the result.
+	lower := strings.ToLower(filepath.Base(path))
 
 	// Check for known timeframe patterns in the filename
 	switch {
@@ -212,4 +249,34 @@ func inferChunkIntervalFromPath(path string) string {
 	default:
 		return "1 day"
 	}
+}
+
+// buildCopyInStatement returns a "COPY ... FROM STDIN" statement for table
+// (optionally schema-qualified as schema.table) and columns, quoting every
+// identifier. It replaces the deprecated pq.CopyIn / pq.CopyInSchema helpers
+// and produces the same SQL they did.
+func buildCopyInStatement(table string, columns []string) string {
+	var b strings.Builder
+	b.WriteString("COPY ")
+	if parts := strings.Split(table, "."); len(parts) == 2 {
+		schema := strings.Trim(strings.TrimSpace(parts[0]), `"`)
+		tbl := strings.Trim(strings.TrimSpace(parts[1]), `"`)
+		b.WriteString(pq.QuoteIdentifier(schema))
+		b.WriteByte('.')
+		b.WriteString(pq.QuoteIdentifier(tbl))
+	} else {
+		b.WriteString(pq.QuoteIdentifier(table))
+	}
+	if len(columns) > 0 {
+		b.WriteString(" (")
+		for i, col := range columns {
+			if i > 0 {
+				b.WriteString(", ")
+			}
+			b.WriteString(pq.QuoteIdentifier(col))
+		}
+		b.WriteByte(')')
+	}
+	b.WriteString(" FROM STDIN")
+	return b.String()
 }

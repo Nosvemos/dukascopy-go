@@ -20,7 +20,7 @@ import (
 // ---------------------------------------------------------------------------
 
 func TestBuildClickHouseURL_Basic(t *testing.T) {
-	got := buildClickHouseURL("http://localhost:8123", "INSERT INTO t FORMAT CSVWithNames", "", "")
+	got := buildClickHouseURL("http://localhost:8123", "INSERT INTO t FORMAT CSVWithNames")
 	if !strings.Contains(got, "query=") {
 		t.Errorf("expected query param in URL, got: %s", got)
 	}
@@ -30,20 +30,10 @@ func TestBuildClickHouseURL_Basic(t *testing.T) {
 }
 
 func TestBuildClickHouseURL_WithCredentials(t *testing.T) {
-	got := buildClickHouseURL("http://localhost:8123", "INSERT INTO t FORMAT CSV", "admin", "secret")
-	if !strings.Contains(got, "user=admin") {
-		t.Errorf("expected user param, got: %s", got)
-	}
-	if !strings.Contains(got, "password=secret") {
-		t.Errorf("expected password param, got: %s", got)
-	}
-}
-
-func TestBuildClickHouseURL_DefaultUser(t *testing.T) {
-	// "default" user should NOT be included (it's the CH default)
-	got := buildClickHouseURL("http://localhost:8123", "q", "default", "")
-	if strings.Contains(got, "user=") {
-		t.Errorf("should not include user=default, got: %s", got)
+	// Credentials are sent as X-ClickHouse-* headers, never in the URL.
+	got := buildClickHouseURL("http://admin:secret@localhost:8123", "INSERT INTO t FORMAT CSV")
+	if strings.Contains(got, "user=") || strings.Contains(got, "password") || strings.Contains(got, "secret") {
+		t.Errorf("credentials must not appear in the URL, got: %s", got)
 	}
 }
 

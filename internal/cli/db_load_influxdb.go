@@ -4,10 +4,10 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
-	"encoding/csv"
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
 	"os"
@@ -56,13 +56,22 @@ func ingestInfluxDB(
 		reader = gz
 	}
 
-	csvReader := csv.NewReader(reader)
+	// The delimiter is detected from the header (files written with
+	// --csv-delimiter or the ninjatrader preset use ';').
+	csvReader := newDetectedCSVReader(reader)
 	csvReader.FieldsPerRecord = -1 // flexible
 
 	// Read header
 	header, err := csvReader.Read()
 	if err != nil {
 		return fmt.Errorf("failed to read CSV header: %w", err)
+	}
+
+	if batchSize <= 0 {
+		batchSize = defaultInfluxDBBatchRows
+	}
+	if timeout <= 0 {
+		timeout = defaultDBLoadTimeout
 	}
 
 	colIndex := buildColumnIndex(header)
@@ -119,17 +128,34 @@ func ingestInfluxDB(
 
 	var skippedRows int
 	var warnCount int
+	var readRows int
+
+	// fail wraps an error so that rows committed by earlier batches are
+	// reported instead of being silently dropped from the result.
+	fail := func(err error) error {
+		if totalRows > 0 {
+			return &partialLoadError{Target: "InfluxDB", CommittedRows: totalRows, Err: err}
+		}
+		return err
+	}
 
 	for {
+		if err := ctx.Err(); err != nil {
+			return fail(err)
+		}
 		row, readErr := csvReader.Read()
 		if readErr == io.EOF {
 			break
 		}
+		readRows++
 		if readErr != nil {
-			return fmt.Errorf("CSV read error at row %d: %w", totalRows+batchRows+skippedRows+2, readErr)
+			return fail(fmt.Errorf("CSV read error at row %d: %w", readRows, readErr))
 		}
 
 		line, lineErr := buildLineProtocol(row, colIndex, measurement, symbolTag)
+		if lineErr != nil && isNonFiniteFieldError(lineErr) {
+			return fail(fmt.Errorf("row %d: %w", readRows, lineErr))
+		}
 		if lineErr != nil || line == "" {
 			skippedRows++
 			if warnCount < 10 {
@@ -139,7 +165,7 @@ func ingestInfluxDB(
 					reason = lineErr.Error()
 				}
 				fmt.Fprintf(stderr, "%sdb-load%s warning: skipping malformed row %d: %s\n",
-					colorize(colorYellow), colorize(colorReset), totalRows+batchRows+skippedRows+1, reason)
+					colorize(colorYellow), colorize(colorReset), readRows, reason)
 			}
 			continue // skip malformed rows
 		}
@@ -149,7 +175,7 @@ func ingestInfluxDB(
 
 		if batchRows >= batchSize {
 			if err := flushBatch(); err != nil {
-				return err
+				return fail(err)
 			}
 			fmt.Fprintf(stderr, "  ... %d rows written\n", totalRows)
 		}
@@ -157,7 +183,7 @@ func ingestInfluxDB(
 
 	// Flush remaining rows
 	if err := flushBatch(); err != nil {
-		return err
+		return fail(err)
 	}
 
 	if skippedRows > 0 {
@@ -196,18 +222,14 @@ func buildLineProtocol(row []string, colIndex map[string]int, measurement string
 		return strings.TrimSpace(row[i]), true
 	}
 
-	// Parse timestamp (RFC3339 or Unix millis)
+	// Parse timestamp (RFC3339, any preset/--timestamp-format layout, or Unix millis)
 	var tsMS int64
 	if tsStr, ok := getField("timestamp"); ok && tsStr != "" {
-		if t, err := time.Parse(time.RFC3339Nano, tsStr); err == nil {
-			tsMS = t.UnixMilli()
-		} else if t, err := time.Parse(time.RFC3339, tsStr); err == nil {
-			tsMS = t.UnixMilli()
-		} else if ms, err := strconv.ParseInt(tsStr, 10, 64); err == nil {
-			tsMS = ms
-		} else {
-			return "", fmt.Errorf("unrecognized timestamp format: %q", tsStr)
+		t, err := parseLoadTimestamp(tsStr)
+		if err != nil {
+			return "", err
 		}
+		tsMS = t.UnixMilli()
 	} else {
 		return "", errors.New("missing timestamp column")
 	}
@@ -232,7 +254,10 @@ func buildLineProtocol(row []string, colIndex map[string]int, measurement string
 			"bid_open", "bid_high", "bid_low", "bid_close",
 			"ask_open", "ask_high", "ask_low", "ask_close"} {
 			if v, ok := getField(col); ok && v != "" {
-				if _, err := strconv.ParseFloat(v, 64); err == nil {
+				if f, err := strconv.ParseFloat(v, 64); err == nil {
+					if math.IsNaN(f) || math.IsInf(f, 0) {
+						return "", &nonFiniteFieldError{Column: col, Value: v}
+					}
 					fields = append(fields, col+"="+v)
 				}
 			}
@@ -241,7 +266,10 @@ func buildLineProtocol(row []string, colIndex map[string]int, measurement string
 		// Tick schema
 		for _, col := range []string{"bid", "ask", "bid_volume", "ask_volume"} {
 			if v, ok := getField(col); ok && v != "" {
-				if _, err := strconv.ParseFloat(v, 64); err == nil {
+				if f, err := strconv.ParseFloat(v, 64); err == nil {
+					if math.IsNaN(f) || math.IsInf(f, 0) {
+						return "", &nonFiniteFieldError{Column: col, Value: v}
+					}
 					fields = append(fields, col+"="+v)
 				}
 			}

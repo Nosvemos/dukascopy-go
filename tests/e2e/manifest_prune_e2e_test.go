@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestManifestPruneRemovesOrphansAndTemps(t *testing.T) {
@@ -54,6 +55,12 @@ func TestManifestPruneRemovesOrphansAndTemps(t *testing.T) {
 	for _, file := range []string{orphanPart, partTemp, manifestTemp, outputTemp} {
 		if err := os.WriteFile(file, []byte("junk\n"), 0o644); err != nil {
 			t.Fatalf("write temp file %s: %v", file, err)
+		}
+		// prune keeps ".tmp-" files younger than 10 minutes (they may belong
+		// to a running download); age them so they count as obsolete.
+		old := time.Now().Add(-time.Hour)
+		if err := os.Chtimes(file, old, old); err != nil {
+			t.Fatalf("age temp file %s: %v", file, err)
 		}
 	}
 

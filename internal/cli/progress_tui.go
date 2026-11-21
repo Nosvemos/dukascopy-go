@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -161,10 +160,6 @@ func newProgressTUIModel(noColor bool, theme string) progressTUIModel {
 
 func (p *progressPrinter) Print(event dukascopy.ProgressEvent) {
 	p.send(progressEventMsg{event: event})
-}
-
-func (p *progressPrinter) SetPartitionTotals(total int, completed int) {
-	p.send(progressPartitionMetricsMsg{total: total, completed: completed})
 }
 
 func (p *progressPrinter) SetPartitionMetrics(total int, completed int, rows int, bytes int64) {
@@ -492,30 +487,6 @@ func (m progressTUIModel) throughputSnapshot() (time.Duration, int, int, int64) 
 		return 0, 0, 0, 0
 	}
 	return elapsed, m.completedRows - m.throughputBaseRows, m.partitionCompleted - m.throughputBaseParts, m.completedBytes - m.throughputBaseBytes
-}
-
-func (m progressTUIModel) workerLines() []string {
-	if len(m.workers) == 0 {
-		return []string{m.subtleStyle().Render("idle")}
-	}
-
-	ids := make([]int, 0, len(m.workers))
-	for id := range m.workers {
-		ids = append(ids, id)
-	}
-	sort.Ints(ids)
-
-	lines := make([]string, 0, len(ids))
-	for _, id := range ids {
-		worker := m.workers[id]
-		line := fmt.Sprintf("#%d  %s  %s", id, shortenProgressDetail(worker.Detail, 28), formatShortDuration(time.Since(worker.StartedAt)))
-		lines = append(lines, m.valueStyle().Render(line))
-	}
-	return lines
-}
-
-func (m progressTUIModel) metric(label string, value string) string {
-	return fmt.Sprintf("%s %s", m.labelStyle().Render(label), m.valueStyle().Render(value))
 }
 
 func midnightUTC(value time.Time) time.Time {

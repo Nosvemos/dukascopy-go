@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	"github.com/Nosvemos/dukascopy-go/internal/checkpoint"
+	"github.com/Nosvemos/dukascopy-go/pkg/cloud"
 	"github.com/Nosvemos/dukascopy-go/pkg/csvout"
 	"github.com/Nosvemos/dukascopy-go/pkg/dukascopy"
 )
@@ -34,18 +36,72 @@ type SDKDownloadOptions struct {
 	Hive          bool
 }
 
-// RunSDKDownload coordinates thread-safe download using the low-memory chunked engine.
+// RunSDKDownload coordinates thread-safe download using the low-memory chunked
+// engine. It validates every option before any network access and resolves
+// the base URL, end-time clamping and cache retention the same way the CLI
+// download command does. PriceScale is ignored: the instrument catalog
+// supplies the price scale.
 func RunSDKDownload(ctx context.Context, opts SDKDownloadOptions) error {
 	sdkDownloadMutex.Lock()
 	defer sdkDownloadMutex.Unlock()
 
-	engineVal := dukascopy.Engine(strings.ToLower(strings.TrimSpace(opts.Engine)))
+	engineName := strings.ToLower(strings.TrimSpace(opts.Engine))
+	if engineName == "" {
+		engineName = string(dukascopy.EngineJetta)
+	}
+	engineVal := dukascopy.Engine(engineName)
 	if engineVal != dukascopy.EngineJetta && engineVal != dukascopy.EngineDatafeed {
 		return fmt.Errorf("unknown engine %q (supported: jetta, datafeed)", opts.Engine)
 	}
-
+	if strings.TrimSpace(opts.Symbol) == "" {
+		return errors.New("symbol is required")
+	}
+	if strings.TrimSpace(opts.OutputPath) == "" {
+		return errors.New("output path is required")
+	}
+	if strings.TrimSpace(opts.OutputPath) == "-" {
+		return errors.New("output path \"-\" (stdout) is not supported by the SDK")
+	}
+	if cloud.IsCloudPath(opts.OutputPath) {
+		return errors.New("cloud (s3://) outputs are not supported by the SDK; download locally and upload")
+	}
+	if opts.From.IsZero() || opts.To.IsZero() {
+		return errors.New("from and to are required")
+	}
+	if opts.To.Before(opts.From) {
+		return fmt.Errorf("to (%s) must be the same as or later than from (%s)", opts.To.UTC().Format(time.RFC3339), opts.From.UTC().Format(time.RFC3339))
+	}
+	now := time.Now().UTC()
+	if opts.From.After(now) {
+		return fmt.Errorf("from %s is in the future", opts.From.UTC().Format(time.RFC3339))
+	}
 	timeframeValue := strings.TrimSpace(opts.Timeframe)
-	normalizedTimeframe := dukascopy.NormalizeGranularity(dukascopy.Granularity(timeframeValue))
+	if timeframeValue == "" {
+		timeframeValue = string(dukascopy.GranularityM1)
+	}
+	normalizedTimeframe, err := validateTimeframe(timeframeValue)
+	if err != nil {
+		return err
+	}
+	sideValue := opts.Side
+	if strings.TrimSpace(sideValue) == "" {
+		sideValue = string(dukascopy.PriceSideBid)
+	}
+	side, err := validateSide(sideValue)
+	if err != nil {
+		return err
+	}
+	fillGaps, err := validateFillGaps(opts.FillGaps)
+	if err != nil {
+		return err
+	}
+	parallelism := opts.Parallelism
+	if parallelism < 1 {
+		parallelism = 1
+	}
+	if err := validateParallelism(parallelism); err != nil {
+		return err
+	}
 
 	profileVal := csvout.ProfileSimple
 	switch strings.ToLower(strings.TrimSpace(opts.Profile)) {
@@ -61,7 +117,6 @@ func RunSDKDownload(ctx context.Context, opts SDKDownloadOptions) error {
 	tickColumns := csvout.TickColumnsForProfile(profileVal)
 
 	if opts.CustomColumns != "" {
-		var err error
 		if normalizedTimeframe == dukascopy.GranularityTick {
 			tickColumns, err = csvout.ParseTickColumns(opts.CustomColumns)
 		} else {
@@ -72,28 +127,25 @@ func RunSDKDownload(ctx context.Context, opts SDKDownloadOptions) error {
 		}
 	}
 
-	var loc *time.Location
-	tz := strings.TrimSpace(opts.Timezone)
-	if strings.ToLower(tz) == "eet" {
-		var err error
-		loc, err = time.LoadLocation("Europe/Athens")
-		if err != nil {
-			loc = time.FixedZone("EET", 2*60*60)
-		}
-	} else if strings.ToLower(tz) == "est" {
-		var err error
-		loc, err = time.LoadLocation("America/New_York")
-		if err != nil {
-			loc = time.FixedZone("EST", -5*60*60)
-		}
-	} else if tz != "" && strings.ToUpper(tz) != "UTC" {
-		var err error
-		loc, err = time.LoadLocation(tz)
-		if err != nil {
-			return fmt.Errorf("invalid timezone %q: %w", tz, err)
-		}
-	} else {
-		loc = time.UTC
+	loc, err := loadOutputLocation(opts.Timezone)
+	if err != nil {
+		return err
+	}
+
+	resultKind := dukascopy.ResultKindBar
+	if normalizedTimeframe == dukascopy.GranularityTick {
+		resultKind = dukascopy.ResultKindTick
+	}
+
+	normalizedPartition, err := normalizePartition(strings.TrimSpace(opts.Partition), normalizedTimeframe)
+	if err != nil {
+		return err
+	}
+	if opts.Hive && normalizedPartition == partitionNone {
+		return errors.New("hive requires a partition mode")
+	}
+	if opts.Resume && normalizedPartition != partitionNone {
+		return errors.New("resume cannot be combined with a partition mode; partitioned downloads resume from their checkpoint manifest automatically")
 	}
 
 	// Apply configuration parameters to package-level globals safely under mutex
@@ -102,26 +154,16 @@ func RunSDKDownload(ctx context.Context, opts SDKDownloadOptions) error {
 	csvout.OutputTimestampFormat = time.RFC3339Nano
 	csvout.CSVDelimiter = ','
 	csvout.HideCSVHeader = false
-	csvout.FillGaps = strings.ToLower(strings.TrimSpace(opts.FillGaps))
+	csvout.FillGaps = fillGaps
 	csvout.ConfigMutex.Unlock()
+	outputConfig := csvout.DefaultConfig()
 
 	request := dukascopy.DownloadRequest{
 		Symbol:      opts.Symbol,
 		Granularity: normalizedTimeframe,
-		Side:        dukascopy.PriceSide(strings.ToUpper(opts.Side)),
+		Side:        side,
 		From:        opts.From.UTC(),
-		To:          inclusiveDownloadEnd(opts.To.UTC()),
-	}
-
-	resultKind := dukascopy.ResultKindBar
-	if normalizedTimeframe == dukascopy.GranularityTick {
-		resultKind = dukascopy.ResultKindTick
-	}
-
-	partitionValue := strings.TrimSpace(opts.Partition)
-	normalizedPartition, err := normalizePartition(partitionValue, normalizedTimeframe)
-	if err != nil {
-		return err
+		To:          inclusiveDownloadEnd(clampDownloadEnd(opts.To.UTC(), now)),
 	}
 
 	manifestPath := checkpoint.DefaultManifestPath(opts.OutputPath)
@@ -131,10 +173,12 @@ func RunSDKDownload(ctx context.Context, opts SDKDownloadOptions) error {
 	}
 
 	if !request.From.Before(request.To) {
+		// Resume found the existing file already up to date.
 		return nil
 	}
 
-	client, err := dukascopy.NewClient("https://jetta.dukascopy.com", 30*time.Second)
+	baseURL := readBaseURL()
+	client, err := dukascopy.NewClient(baseURL, defaultHTTPTimeout)
 	if err != nil {
 		return err
 	}
@@ -144,28 +188,24 @@ func RunSDKDownload(ctx context.Context, opts SDKDownloadOptions) error {
 		WithBackoff(500 * time.Millisecond).
 		WithRateLimit(0)
 
-	_, err = runChunkedDownload(
-		ctx,
-		client,
-		os.Stdout,
-		os.Stderr,
-		opts.OutputPath,
-		manifestPath,
-		request,
-		resultKind,
-		barColumns,
-		tickColumns,
-		normalizedPartition,
-		opts.Parallelism,
-		"./.dukascopy_cache",
-		false,
-		resumeState,
-		dedupeRecord,
-		opts.Hive,
-		dukascopy.BarTypeTime,
-		0,
-		dukascopy.OutlierConfig{},
-		nil,
-	)
+	_, err = runChunkedDownload(ctx, client, os.Stdout, os.Stderr, chunkedDownloadOptions{
+		OutputPath:         opts.OutputPath,
+		CheckpointManifest: manifestPath,
+		Request:            request,
+		ResultKind:         resultKind,
+		BarColumns:         barColumns,
+		TickColumns:        tickColumns,
+		PartitionMode:      normalizedPartition,
+		Parallelism:        parallelism,
+		CacheDir:           "./.dukascopy_cache",
+		// Like the CLI: partitioned downloads keep their parts (the checkpoint).
+		KeepCache:    normalizedPartition != partitionNone,
+		ResumeState:  resumeState,
+		DedupeRecord: dedupeRecord,
+		Hive:         opts.Hive,
+		BarType:      dukascopy.BarTypeTime,
+		Engine:       string(engineVal),
+		OutputConfig: outputConfig,
+	})
 	return err
 }

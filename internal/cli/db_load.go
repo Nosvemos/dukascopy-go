@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"regexp"
 	"strings"
 	"time"
@@ -54,79 +55,26 @@ func runDBLoad(args []string, stdout io.Writer, stderr io.Writer) error {
 		return err
 	}
 
-	// Validation
-	if strings.TrimSpace(*input) == "" {
-		return errors.New("--input is required")
-	}
-	if strings.TrimSpace(*dbType) == "" {
-		return errors.New("--db is required (clickhouse, influxdb, postgres, or questdb)")
-	}
-	if strings.TrimSpace(*dbURL) == "" {
-		return errors.New("--url is required")
-	}
-	if strings.TrimSpace(*table) == "" {
-		return errors.New("--table is required")
-	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
 
-	sanitizedTable, err := sanitizeMeasurementName(*table)
-	if err != nil {
-		return fmt.Errorf("invalid --table: %w", err)
-	}
-
-	dbTypeLower := strings.ToLower(strings.TrimSpace(*dbType))
-	if dbTypeLower != dbClickHouse && dbTypeLower != dbInfluxDB && dbTypeLower != dbPostgres && dbTypeLower != dbQuestDB {
-		return fmt.Errorf("unknown --db %q (supported: clickhouse, influxdb, postgres, questdb)", *dbType)
-	}
-
-	inputPath := strings.TrimSpace(*input)
-	info, err := os.Stat(inputPath)
-	if err != nil {
-		return fmt.Errorf("cannot access --input file %q: %w", inputPath, err)
-	}
-	if info.IsDir() {
-		return fmt.Errorf("--input must be a file, not a directory: %q", inputPath)
-	}
-
-	// Choose batch size
-	batchSize := *batch
-	if batchSize <= 0 {
-		switch dbTypeLower {
-		case dbClickHouse:
-			batchSize = defaultClickHouseBatchRows
-		case dbQuestDB:
-			batchSize = defaultQuestDBBatchRows
-		default:
-			batchSize = defaultInfluxDBBatchRows
-		}
-	}
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	switch dbTypeLower {
-	case dbClickHouse:
-		return ingestClickHouse(ctx, stdout, stderr, inputPath, *dbURL, sanitizedTable, *user, *password, *timeout)
-	case dbPostgres:
-		return ingestPostgres(ctx, stdout, stderr, inputPath, *dbURL, sanitizedTable, *createHypertable, *chunkInterval)
-	case dbInfluxDB:
-		authToken := strings.TrimSpace(*token)
-		if authToken == "" {
-			authToken = strings.TrimSpace(*password)
-		}
-		if authToken == "" {
-			return errors.New("--token (or --password) is required for InfluxDB")
-		}
-		if strings.TrimSpace(*org) == "" {
-			return errors.New("--org is required for InfluxDB")
-		}
-		if strings.TrimSpace(*bucket) == "" {
-			return errors.New("--bucket is required for InfluxDB")
-		}
-		return ingestInfluxDB(ctx, stdout, stderr, inputPath, *dbURL, sanitizedTable, *org, *bucket, authToken, *symbol, batchSize, *timeout)
-	case dbQuestDB:
-		return ingestQuestDB(ctx, stdout, stderr, inputPath, *dbURL, sanitizedTable, *ilpPort, *symbol, batchSize, *timeout)
-	}
-	return nil
+	return DBLoad(ctx, stdout, stderr, DBLoadOptions{
+		DBType:           *dbType,
+		DBURL:            *dbURL,
+		Table:            *table,
+		InputPath:        *input,
+		User:             *user,
+		Password:         *password,
+		Token:            *token,
+		Org:              *org,
+		Bucket:           *bucket,
+		SymbolTag:        *symbol,
+		BatchSize:        *batch,
+		Timeout:          *timeout,
+		ILPPort:          *ilpPort,
+		CreateHypertable: *createHypertable,
+		ChunkInterval:    *chunkInterval,
+	})
 }
 
 // buildColumnIndex returns a map from column name → position for fast lookup.
@@ -156,30 +104,141 @@ type DBLoadOptions struct {
 	ChunkInterval    string
 }
 
+// DBLoad validates opt, applies defaults and loads the input file into the
+// selected database. It is the single dispatch point used by the CLI as well.
 func DBLoad(ctx context.Context, stdout io.Writer, stderr io.Writer, opt DBLoadOptions) error {
-	sanitizedTable, err := sanitizeMeasurementName(opt.Table)
+	opt, err := normalizeDBLoadOptions(opt)
 	if err != nil {
-		return fmt.Errorf("invalid table name: %w", err)
+		return err
 	}
 
-	dbTypeLower := strings.ToLower(strings.TrimSpace(opt.DBType))
-	switch dbTypeLower {
-	case "clickhouse":
-		return ingestClickHouse(ctx, stdout, stderr, opt.InputPath, opt.DBURL, sanitizedTable, opt.User, opt.Password, opt.Timeout)
-	case "postgres":
-		return ingestPostgres(ctx, stdout, stderr, opt.InputPath, opt.DBURL, sanitizedTable, opt.CreateHypertable, opt.ChunkInterval)
-	case "influxdb":
-		authToken := strings.TrimSpace(opt.Token)
-		if authToken == "" {
-			authToken = strings.TrimSpace(opt.Password)
-		}
-		return ingestInfluxDB(ctx, stdout, stderr, opt.InputPath, opt.DBURL, sanitizedTable, opt.Org, opt.Bucket, authToken, opt.SymbolTag, opt.BatchSize, opt.Timeout)
-	case "questdb":
-		return ingestQuestDB(ctx, stdout, stderr, opt.InputPath, opt.DBURL, sanitizedTable, opt.ILPPort, opt.SymbolTag, opt.BatchSize, opt.Timeout)
+	switch opt.DBType {
+	case dbClickHouse:
+		return ingestClickHouse(ctx, stdout, stderr, opt.InputPath, opt.DBURL, opt.Table, opt.User, opt.Password, opt.Timeout)
+	case dbPostgres:
+		return ingestPostgres(ctx, stdout, stderr, opt.InputPath, opt.DBURL, opt.Table, opt.CreateHypertable, opt.ChunkInterval)
+	case dbInfluxDB:
+		return ingestInfluxDB(ctx, stdout, stderr, opt.InputPath, opt.DBURL, opt.Table, opt.Org, opt.Bucket, opt.Token, opt.SymbolTag, opt.BatchSize, opt.Timeout)
+	case dbQuestDB:
+		return ingestQuestDB(ctx, stdout, stderr, opt.InputPath, opt.DBURL, opt.Table, opt.ILPPort, opt.SymbolTag, opt.BatchSize, opt.Timeout)
 	default:
 		return fmt.Errorf("unknown --db %q (supported: clickhouse, influxdb, postgres, questdb)", opt.DBType)
 	}
 }
+
+// defaultDBLoadTimeout applies when DBLoadOptions.Timeout is not positive.
+const defaultDBLoadTimeout = 120 * time.Second
+
+// normalizeDBLoadOptions trims and validates the options and fills in defaults
+// (per-database batch size, timeout, InfluxDB token fallback). Both the CLI
+// and library callers go through it.
+func normalizeDBLoadOptions(opt DBLoadOptions) (DBLoadOptions, error) {
+	opt.InputPath = strings.TrimSpace(opt.InputPath)
+	opt.DBURL = strings.TrimSpace(opt.DBURL)
+	opt.Org = strings.TrimSpace(opt.Org)
+	opt.Bucket = strings.TrimSpace(opt.Bucket)
+
+	if opt.InputPath == "" {
+		return opt, errors.New("--input is required")
+	}
+	if strings.TrimSpace(opt.DBType) == "" {
+		return opt, errors.New("--db is required (clickhouse, influxdb, postgres, or questdb)")
+	}
+	if opt.DBURL == "" {
+		return opt, errors.New("--url is required")
+	}
+	if strings.TrimSpace(opt.Table) == "" {
+		return opt, errors.New("--table is required")
+	}
+
+	sanitizedTable, err := sanitizeMeasurementName(opt.Table)
+	if err != nil {
+		return opt, fmt.Errorf("invalid --table: %w", err)
+	}
+	opt.Table = sanitizedTable
+
+	dbType := strings.ToLower(strings.TrimSpace(opt.DBType))
+	switch dbType {
+	case dbClickHouse, dbInfluxDB, dbPostgres, dbQuestDB:
+	default:
+		return opt, fmt.Errorf("unknown --db %q (supported: clickhouse, influxdb, postgres, questdb)", opt.DBType)
+	}
+	opt.DBType = dbType
+
+	info, err := os.Stat(opt.InputPath)
+	if err != nil {
+		return opt, fmt.Errorf("cannot access --input file %q: %w", opt.InputPath, err)
+	}
+	if info.IsDir() {
+		return opt, fmt.Errorf("--input must be a file, not a directory: %q", opt.InputPath)
+	}
+
+	if opt.BatchSize <= 0 {
+		switch dbType {
+		case dbClickHouse:
+			opt.BatchSize = defaultClickHouseBatchRows
+		case dbQuestDB:
+			opt.BatchSize = defaultQuestDBBatchRows
+		default:
+			opt.BatchSize = defaultInfluxDBBatchRows
+		}
+	}
+	if opt.Timeout <= 0 {
+		opt.Timeout = defaultDBLoadTimeout
+	}
+	if opt.ILPPort < 0 || opt.ILPPort > 65535 {
+		return opt, fmt.Errorf("--ilp-port must be between 0 and 65535, got %d", opt.ILPPort)
+	}
+
+	if dbType == dbInfluxDB {
+		opt.Token = strings.TrimSpace(opt.Token)
+		if opt.Token == "" {
+			opt.Token = strings.TrimSpace(opt.Password)
+		}
+		if opt.Token == "" {
+			return opt, errors.New("--token (or --password) is required for InfluxDB")
+		}
+		if opt.Org == "" {
+			return opt, errors.New("--org is required for InfluxDB")
+		}
+		if opt.Bucket == "" {
+			return opt, errors.New("--bucket is required for InfluxDB")
+		}
+	}
+
+	return opt, nil
+}
+
+// nonFiniteFieldError is returned by the line-protocol encoders for NaN or
+// ±Inf values, which line protocol cannot represent. Unlike other malformed
+// rows these abort the load instead of being skipped.
+type nonFiniteFieldError struct {
+	Column string
+	Value  string
+}
+
+func (e *nonFiniteFieldError) Error() string {
+	return fmt.Sprintf("column %q has non-finite value %q, which line protocol cannot encode", e.Column, e.Value)
+}
+
+func isNonFiniteFieldError(err error) bool {
+	var target *nonFiniteFieldError
+	return errors.As(err, &target)
+}
+
+// partialLoadError reports a failure after some batches were already
+// committed, so the caller knows a plain rerun would duplicate those rows.
+type partialLoadError struct {
+	Target        string
+	CommittedRows int
+	Err           error
+}
+
+func (e *partialLoadError) Error() string {
+	return fmt.Sprintf("%s load failed after %d rows were already committed (rerunning the same file will duplicate them): %v", e.Target, e.CommittedRows, e.Err)
+}
+
+func (e *partialLoadError) Unwrap() error { return e.Err }
 
 // validMeasurementNameRe allows alphanumeric characters, underscores, hyphens,
 // dots, and forward slashes.  This covers standard table names and

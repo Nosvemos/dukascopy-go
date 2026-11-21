@@ -37,6 +37,7 @@ type partitionWorkResult struct {
 	Worker      int
 	RowsWritten int
 	Audit       csvout.FileAudit
+	Instrument  dukascopy.Instrument
 	Err         error
 }
 

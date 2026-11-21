@@ -49,86 +49,67 @@ func Run(args []string, stdout io.Writer, stderr io.Writer) int {
 	case "list-timeframes", "--list-timeframes":
 		printTimeframes(stdout)
 		return 0
-	case "instruments":
-		if err := runInstruments(args[1:], stdout); err != nil {
-			if errors.Is(err, flag.ErrHelp) {
-				return 0
-			}
-			fmt.Fprintf(stderr, "%serror:%s %v\n", colorize(colorRed), colorize(colorReset), err)
-			return 1
-		}
-		return 0
-	case "stats":
-		if err := runStats(args[1:], stdout); err != nil {
-			if errors.Is(err, flag.ErrHelp) {
-				return 0
-			}
-			fmt.Fprintf(stderr, "%serror:%s %v\n", colorize(colorRed), colorize(colorReset), err)
-			return 1
-		}
-		return 0
-	case "manifest":
-		if err := runManifest(args[1:], stdout); err != nil {
-			if errors.Is(err, flag.ErrHelp) {
-				return 0
-			}
-			fmt.Fprintf(stderr, "%serror:%s %v\n", colorize(colorRed), colorize(colorReset), err)
-			return 1
-		}
-		return 0
-	case "download":
-		if err := runDownload(args[1:], stdout, stderr); err != nil {
-			if errors.Is(err, flag.ErrHelp) {
-				return 0
-			}
-			fmt.Fprintf(stderr, "%serror:%s %v\n", colorize(colorRed), colorize(colorReset), err)
-			return 1
-		}
-		return 0
-	case "sync":
-		if err := runSync(args[1:], stdout, stderr); err != nil {
-			if errors.Is(err, flag.ErrHelp) {
-				return 0
-			}
-			fmt.Fprintf(stderr, "%serror:%s %v\n", colorize(colorRed), colorize(colorReset), err)
-			return 1
-		}
-		return 0
-	case "live":
-		if err := runLiveStream(args[1:], stdout, stderr); err != nil {
-			if errors.Is(err, flag.ErrHelp) {
-				return 0
-			}
-			fmt.Fprintf(stderr, "%serror:%s %v\n", colorize(colorRed), colorize(colorReset), err)
-			return 1
-		}
-		return 0
-	case "db-load":
-		if err := runDBLoad(args[1:], stdout, stderr); err != nil {
-			if errors.Is(err, flag.ErrHelp) {
-				return 0
-			}
-			fmt.Fprintf(stderr, "%serror:%s %v\n", colorize(colorRed), colorize(colorReset), err)
-			return 1
-		}
-		return 0
-	case "watch":
-		if err := runWatch(args[1:], stdout, stderr); err != nil {
-			if errors.Is(err, flag.ErrHelp) {
-				return 0
-			}
-			fmt.Fprintf(stderr, "%serror:%s %v\n", colorize(colorRed), colorize(colorReset), err)
-			return 1
-		}
-		return 0
 	case "help", "-h", "--help":
 		printUsage(stdout)
 		return 0
-	default:
+	}
+
+	command, ok := subcommands[args[0]]
+	if !ok {
 		fmt.Fprintf(stderr, "%serror:%s unknown command %q\n\n", colorize(colorRed), colorize(colorReset), args[0])
 		printUsage(stderr)
 		return 2
 	}
+	return exitCodeFor(command(args[1:], stdout, stderr), stderr)
+}
+
+// subcommandFunc runs one subcommand with its arguments.
+type subcommandFunc func(args []string, stdout io.Writer, stderr io.Writer) error
+
+// subcommands maps each command name to its implementation.
+var subcommands = map[string]subcommandFunc{
+	"instruments": func(args []string, stdout io.Writer, _ io.Writer) error { return runInstruments(args, stdout) },
+	"stats":       func(args []string, stdout io.Writer, _ io.Writer) error { return runStats(args, stdout) },
+	"manifest":    func(args []string, stdout io.Writer, _ io.Writer) error { return runManifest(args, stdout) },
+	"download":    runDownload,
+	"sync":        runSync,
+	"live":        runLiveStream,
+	"db-load":     runDBLoad,
+	"watch":       runWatch,
+}
+
+// exitCodeFor reports err and maps it to the process exit code: 0 for
+// success and --help, 2 for command-line (flag) errors, 1 otherwise.
+func exitCodeFor(err error, stderr io.Writer) int {
+	if err == nil || errors.Is(err, flag.ErrHelp) {
+		return 0
+	}
+	fmt.Fprintf(stderr, "%serror:%s %v\n", colorize(colorRed), colorize(colorReset), err)
+	if isFlagParseError(err) {
+		return 2
+	}
+	return 1
+}
+
+// flagParseErrorPrefixes are the messages the flag package produces when
+// command-line parsing fails.
+var flagParseErrorPrefixes = []string{
+	"flag provided but not defined",
+	"bad flag syntax",
+	"flag needs an argument",
+	"invalid boolean value",
+	"invalid boolean flag",
+	"invalid value",
+}
+
+func isFlagParseError(err error) bool {
+	message := err.Error()
+	for _, prefix := range flagParseErrorPrefixes {
+		if strings.HasPrefix(message, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 func runInstruments(args []string, stdout io.Writer) error {

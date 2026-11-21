@@ -628,6 +628,8 @@ func TestRunManifestRouterAndLoadBidAskFallback(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewClient: %v", err)
 	}
+	// Bar data is absent (HTTP 404 semantics) for the ask side: the only case that falls back to ticks.
+	treatSideErrorsAsNoData(t)
 	_, bidBars, askBars, err := loadBidAskBars(context.Background(), client, dukascopy.DownloadRequest{
 		Symbol:      "xauusd",
 		Granularity: dukascopy.GranularityM1,

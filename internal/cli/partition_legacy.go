@@ -82,13 +82,14 @@ func runPartitionedDownload(
 		return err
 	}
 
+	saver := newManifestSaver(manifestPath, &manifest)
 	pending := make([]partitionWorkItem, 0, len(partitions))
 	manifestDirty := false
 	if progress != nil {
 		progress.SetStatus("scanning checkpoint")
 	}
 	for index, part := range partitions {
-		partState := checkpoint.FindPart(&manifest, part.ID)
+		partState := saver.part(part.ID)
 		if partState == nil {
 			return fmt.Errorf("partition %s is missing from checkpoint manifest", part.ID)
 		}
@@ -127,18 +128,10 @@ func runPartitionedDownload(
 		})
 	}
 
-	if manifestDirty {
-		if err := checkpoint.Save(manifestPath, manifest); err != nil {
-			return err
-		}
-	}
-
 	if len(pending) > 0 {
 		manifest.Completed = false
 		manifest.FinalOutput = nil
-		if err := checkpoint.Save(manifestPath, manifest); err != nil {
-			return err
-		}
+		manifestDirty = true
 	}
 
 	if parallelism < 1 {
@@ -151,51 +144,35 @@ func runPartitionedDownload(
 		completedParts, completedRows, completedBytes := partitionProgressMetrics(manifest)
 		progress.SetPartitionMetrics(len(partitions), completedParts, completedRows, completedBytes)
 		progress.SetStatus("downloading")
-	} else {
-		for _, item := range pending {
-			partState := checkpoint.FindPart(&manifest, item.Partition.ID)
-			if partState == nil {
-				return fmt.Errorf("partition %s is missing from checkpoint manifest", item.Partition.ID)
-			}
-			if stderr != nil {
-				fmt.Fprintf(
-					stderr,
-					"%spartition%s [%d/%d] %s -> %s\n",
-					colorize(colorCyan),
-					colorize(colorReset),
-					item.Index+1,
-					len(partitions),
-					item.Partition.Start.Format(time.RFC3339),
-					item.Partition.End.Format(time.RFC3339),
-				)
-			}
-
-			partState.Status = "running"
-			partState.Error = ""
-			partState.Rows = 0
-			partState.Bytes = 0
-			partState.SHA256 = ""
-			partState.UpdatedAt = time.Now().UTC()
-			if err := checkpoint.Save(manifestPath, manifest); err != nil {
-				return err
-			}
-		}
 	}
-	if progress != nil {
-		for _, item := range pending {
-			partState := checkpoint.FindPart(&manifest, item.Partition.ID)
-			if partState == nil {
-				return fmt.Errorf("partition %s is missing from checkpoint manifest", item.Partition.ID)
-			}
-			partState.Status = "running"
-			partState.Error = ""
-			partState.Rows = 0
-			partState.Bytes = 0
-			partState.SHA256 = ""
-			partState.UpdatedAt = time.Now().UTC()
-			if err := checkpoint.Save(manifestPath, manifest); err != nil {
-				return err
-			}
+	// Mark every pending part running, then save once (not once per part).
+	for _, item := range pending {
+		partState := saver.part(item.Partition.ID)
+		if partState == nil {
+			return fmt.Errorf("partition %s is missing from checkpoint manifest", item.Partition.ID)
+		}
+		if progress == nil && stderr != nil {
+			fmt.Fprintf(
+				stderr,
+				"%spartition%s [%d/%d] %s -> %s\n",
+				colorize(colorCyan),
+				colorize(colorReset),
+				item.Index+1,
+				len(partitions),
+				item.Partition.Start.Format(time.RFC3339),
+				item.Partition.End.Format(time.RFC3339),
+			)
+		}
+		partState.Status = "running"
+		partState.Error = ""
+		partState.Rows = 0
+		partState.Bytes = 0
+		partState.SHA256 = ""
+		partState.UpdatedAt = time.Now().UTC()
+	}
+	if manifestDirty {
+		if err := saver.saveNow(); err != nil {
+			return err
 		}
 	}
 
@@ -282,9 +259,26 @@ func executePartitionDownloads(
 	tickColumns []string,
 	parallelism int,
 	progress *progressPrinter,
-) error {
+) (retErr error) {
 	if len(pending) == 0 {
 		return nil
+	}
+
+	// Results are applied in memory; the manifest is saved at most every few
+	// seconds / every N parts, and always before returning.
+	saver := newManifestSaver(manifestPath, manifest)
+	defer func() {
+		if err := saver.flush(); err != nil && retErr == nil {
+			retErr = err
+		}
+	}()
+	apply := func(result partitionWorkResult) error {
+		partState := saver.part(result.Item.Partition.ID)
+		if partState == nil {
+			return fmt.Errorf("partition %s is missing from checkpoint manifest", result.Item.Partition.ID)
+		}
+		updatePartState(partState, result)
+		return saver.changed()
 	}
 
 	if parallelism <= 1 || len(pending) == 1 {
@@ -296,7 +290,7 @@ func executePartitionDownloads(
 			if progress != nil {
 				progress.PartitionFinished(result)
 			}
-			if err := applyPartitionResult(manifestPath, manifest, result); err != nil {
+			if err := apply(result); err != nil {
 				return err
 			}
 			if result.Err != nil {
@@ -341,7 +335,7 @@ func executePartitionDownloads(
 		if progress != nil {
 			progress.PartitionFinished(result)
 		}
-		if err := applyPartitionResult(manifestPath, manifest, result); err != nil && firstErr == nil {
+		if err := apply(result); err != nil && firstErr == nil {
 			firstErr = err
 			cancel()
 			continue
@@ -409,12 +403,20 @@ func runPartitionJob(
 	}
 }
 
+// applyPartitionResult records one result in the manifest and saves it. It is
+// meant for single updates (e.g. manifest repair); bulk runs use
+// executePartitionDownloads, which throttles saves.
 func applyPartitionResult(manifestPath string, manifest *checkpoint.Manifest, result partitionWorkResult) error {
 	partState := checkpoint.FindPart(manifest, result.Item.Partition.ID)
 	if partState == nil {
 		return fmt.Errorf("partition %s is missing from checkpoint manifest", result.Item.Partition.ID)
 	}
+	updatePartState(partState, result)
+	return checkpoint.Save(manifestPath, *manifest)
+}
 
+// updatePartState applies a download result to a manifest part.
+func updatePartState(partState *checkpoint.ManifestPart, result partitionWorkResult) {
 	if result.Err != nil {
 		partState.Status = "failed"
 		partState.Rows = 0
@@ -422,10 +424,7 @@ func applyPartitionResult(manifestPath string, manifest *checkpoint.Manifest, re
 		partState.SHA256 = ""
 		partState.Error = result.Err.Error()
 		partState.UpdatedAt = time.Now().UTC()
-		if err := checkpoint.Save(manifestPath, *manifest); err != nil {
-			return err
-		}
-		return nil
+		return
 	}
 
 	partState.Status = "completed"
@@ -434,7 +433,6 @@ func applyPartitionResult(manifestPath string, manifest *checkpoint.Manifest, re
 	partState.SHA256 = result.Audit.SHA256
 	partState.Error = ""
 	partState.UpdatedAt = time.Now().UTC()
-	return checkpoint.Save(manifestPath, *manifest)
 }
 
 func downloadPartitionToFile(

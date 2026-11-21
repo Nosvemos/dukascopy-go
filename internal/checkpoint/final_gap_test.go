@@ -11,7 +11,12 @@ import (
 type stubTempFile struct {
 	name     string
 	writeErr error
+	syncErr  error
 	closeErr error
+}
+
+func (s *stubTempFile) Sync() error {
+	return s.syncErr
 }
 
 func (s *stubTempFile) Write(p []byte) (int, error) {
@@ -33,16 +38,14 @@ func withManifestHooks() func() {
 	originalMkdirAll := mkdirAllFn
 	originalMarshalIndent := marshalIndentFn
 	originalCreateTemp := createTempFn
-	originalStat := statFn
-	originalRemove := removeFn
+	originalChmod := chmodFn
 	originalRename := renameFn
 
 	return func() {
 		mkdirAllFn = originalMkdirAll
 		marshalIndentFn = originalMarshalIndent
 		createTempFn = originalCreateTemp
-		statFn = originalStat
-		removeFn = originalRemove
+		chmodFn = originalChmod
 		renameFn = originalRename
 	}
 }
@@ -87,22 +90,23 @@ func TestSaveGapBranches(t *testing.T) {
 	}
 
 	createTempFn = func(string, string) (tempWriteFile, error) {
-		return &stubTempFile{name: filepath.Join(dir, "remove.tmp")}, nil
-	}
-	statFn = func(string) (os.FileInfo, error) {
-		return os.Stat(dir)
-	}
-	removeFn = func(string) error {
-		return errors.New("remove")
+		return &stubTempFile{name: filepath.Join(dir, "sync.tmp"), syncErr: errors.New("sync")}, nil
 	}
 	if err := Save(path, manifest); err == nil {
-		t.Fatal("expected remove error")
+		t.Fatal("expected sync error")
 	}
 
-	removeFn = os.Remove
-	statFn = func(string) (os.FileInfo, error) {
-		return nil, os.ErrNotExist
+	createTempFn = func(string, string) (tempWriteFile, error) {
+		return &stubTempFile{name: filepath.Join(dir, "chmod.tmp")}, nil
 	}
+	chmodFn = func(string, os.FileMode) error {
+		return errors.New("chmod")
+	}
+	if err := Save(path, manifest); err == nil {
+		t.Fatal("expected chmod error")
+	}
+
+	chmodFn = func(string, os.FileMode) error { return nil }
 	renameFn = func(string, string) error {
 		return errors.New("rename")
 	}

@@ -612,7 +612,11 @@ func TestPartitionExecutionHelpers(t *testing.T) {
 func TestRunManifestRepairAndPrune(t *testing.T) {
 	dir := t.TempDir()
 	outputPath := filepath.Join(dir, "dataset.csv")
-	partPath := filepath.Join(dir, "part-1.csv")
+	partsDir := checkpoint.DefaultPartsDir(outputPath)
+	if err := os.MkdirAll(partsDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll returned error: %v", err)
+	}
+	partPath := filepath.Join(partsDir, "part-1.csv")
 	content := "timestamp,mid_close\n2024-01-01T00:00:00Z,1.1\n2024-01-01T00:01:00Z,1.2\n"
 	if err := os.WriteFile(partPath, []byte(content), 0o644); err != nil {
 		t.Fatalf("WriteFile returned error: %v", err)
@@ -626,7 +630,7 @@ func TestRunManifestRepairAndPrune(t *testing.T) {
 	manifest := checkpoint.Manifest{
 		Version:    checkpoint.CurrentManifestVersion,
 		OutputPath: outputPath,
-		PartsDir:   dir,
+		PartsDir:   partsDir,
 		Symbol:     "xauusd",
 		Timeframe:  "m1",
 		Side:       "BID",
@@ -657,13 +661,18 @@ func TestRunManifestRepairAndPrune(t *testing.T) {
 		t.Fatalf("unexpected repair output: %s", stdout.String())
 	}
 
-	orphanPath := filepath.Join(dir, "orphan.tmp-123.csv")
+	orphanPath := filepath.Join(partsDir, "orphan.tmp-123.csv")
 	if err := os.WriteFile(orphanPath, []byte("temp"), 0o644); err != nil {
 		t.Fatalf("WriteFile returned error: %v", err)
 	}
-	orphanParquet := filepath.Join(dir, "orphan.parquet")
+	orphanParquet := filepath.Join(partsDir, "orphan.parquet")
 	if err := os.WriteFile(orphanParquet, []byte("temp"), 0o644); err != nil {
 		t.Fatalf("WriteFile returned error: %v", err)
+	}
+	// prune skips temp files younger than pruneTempMinAge.
+	aged := time.Now().Add(-time.Hour)
+	if err := os.Chtimes(orphanPath, aged, aged); err != nil {
+		t.Fatalf("Chtimes returned error: %v", err)
 	}
 	stdout.Reset()
 	if err := runManifestPrune([]string{"--output", outputPath}, &stdout); err != nil {

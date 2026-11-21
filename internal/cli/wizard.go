@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/huh"
 )
@@ -86,7 +87,7 @@ func runWizard(stdout io.Writer, stderr io.Writer) int {
 			return 1
 		}
 
-		args := []string{"live", "--symbol", symbol, "--timeframe", timeframe, "--format", output}
+		args := []string{"live", "--symbol", strings.TrimSpace(symbol), "--timeframe", timeframe, "--format", output}
 		fmt.Fprintf(stderr, "\nRunning: dukascopy-go %s\n\n", strings.Join(args, " "))
 		return Run(args, stdout, stderr)
 	}
@@ -119,15 +120,27 @@ func runWizard(stdout io.Writer, stderr io.Writer) int {
 		return 1
 	}
 
-	args := []string{"download", "--symbol", symbol, "--timeframe", timeframe, "--output", output}
-	lookback = strings.TrimSpace(lookback)
-
-	if strings.HasSuffix(lookback, "d") || strings.HasSuffix(lookback, "y") || strings.HasSuffix(lookback, "mo") || strings.HasSuffix(lookback, "w") || strings.HasSuffix(lookback, "h") {
-		args = append(args, "--last", lookback)
-	} else {
-		args = append(args, "--from", lookback)
-	}
+	args := buildWizardDownloadArgs(symbol, timeframe, lookback, output, time.Now())
 
 	fmt.Fprintf(stderr, "\nRunning: dukascopy-go %s\n\n", strings.Join(args, " "))
 	return Run(args, stdout, stderr)
+}
+
+// buildWizardDownloadArgs turns the wizard answers into `download` arguments.
+// A duration answer maps to --last; anything else is treated as a start date
+// and paired with --to set to now (UTC, RFC3339), because the download
+// command requires an end when --last is not given.
+func buildWizardDownloadArgs(symbol string, timeframe string, lookback string, output string, now time.Time) []string {
+	args := []string{
+		"download",
+		"--symbol", strings.TrimSpace(symbol),
+		"--timeframe", strings.TrimSpace(timeframe),
+		"--output", strings.TrimSpace(output),
+	}
+	lookback = strings.TrimSpace(lookback)
+
+	if strings.HasSuffix(lookback, "d") || strings.HasSuffix(lookback, "y") || strings.HasSuffix(lookback, "mo") || strings.HasSuffix(lookback, "w") || strings.HasSuffix(lookback, "h") {
+		return append(args, "--last", lookback)
+	}
+	return append(args, "--from", lookback, "--to", now.UTC().Truncate(time.Second).Format(time.RFC3339))
 }

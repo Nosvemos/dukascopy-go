@@ -245,11 +245,6 @@ func defaultLiveStdoutCachePath(manifestPath string) string {
 
 func mergeLiveManifest(existing checkpoint.Manifest, expected checkpoint.Manifest) (checkpoint.Manifest, []checkpoint.ManifestPart, error) {
 	if len(expected.Parts) < len(existing.Parts) {
-		for index := range expected.Parts {
-			if !sameManifestPartIdentity(existing.Parts[index], expected.Parts[index]) {
-				return checkpoint.Manifest{}, nil, fmt.Errorf("live checkpoint manifest partitions moved backwards")
-			}
-		}
 		return checkpoint.Manifest{}, nil, fmt.Errorf("live checkpoint manifest partitions moved backwards")
 	}
 
@@ -275,9 +270,7 @@ func mergeLiveManifest(existing checkpoint.Manifest, expected checkpoint.Manifes
 		merged.CreatedAt = expected.CreatedAt
 	}
 	merged.Parts = append([]checkpoint.ManifestPart{}, existing.Parts[:prefixLen]...)
-	for _, part := range expected.Parts[prefixLen:] {
-		merged.Parts = append(merged.Parts, part)
-	}
+	merged.Parts = append(merged.Parts, expected.Parts[prefixLen:]...)
 	obsolete := append([]checkpoint.ManifestPart{}, existing.Parts[prefixLen:]...)
 
 	if prefixLen != len(existing.Parts) || len(existing.Parts) != len(expected.Parts) {
@@ -293,10 +286,11 @@ func sameManifestPartIdentity(left checkpoint.ManifestPart, right checkpoint.Man
 }
 
 func pruneObsoleteLiveParts(partsDir string, obsolete []checkpoint.ManifestPart) error {
+	dirManifest := &checkpoint.Manifest{PartsDir: partsDir}
 	for _, part := range obsolete {
-		partPath := filepath.Join(partsDir, part.File)
-		if filepath.Dir(partPath) != filepath.Clean(partsDir) {
-			return fmt.Errorf("refusing to prune live partition outside parts dir: %s", partPath)
+		partPath, err := checkpoint.PartPath(dirManifest, part)
+		if err != nil {
+			return fmt.Errorf("refusing to prune live partition: %w", err)
 		}
 		if err := os.Remove(partPath); err != nil && !os.IsNotExist(err) {
 			return err

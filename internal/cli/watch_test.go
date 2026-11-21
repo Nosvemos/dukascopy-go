@@ -19,48 +19,48 @@ func TestParseWatchCondition(t *testing.T) {
 	bars := []dukascopy.Bar{
 		{Time: time.Now(), Close: 2505.5},
 	}
-	triggered, val, msg := eval.Evaluate(bars)
+	triggered, val, msg := evalBars(eval, bars)
 	if !triggered {
 		t.Errorf("expected triggered true, got false (val: %f, msg: %s)", val, msg)
 	}
 
 	// Below target
 	bars[0].Close = 2490.0
-	triggered, _, _ = eval.Evaluate(bars)
+	triggered, _, _ = evalBars(eval, bars)
 	if triggered {
 		t.Errorf("expected triggered false, got true")
 	}
 
 	// Test <=, >=, ==, < operators
 	evalLE, _ := parseWatchCondition("close <= 2500")
-	trigLE, _, _ := evalLE.Evaluate(bars)
+	trigLE, _, _ := evalBars(evalLE, bars)
 	if !trigLE {
 		t.Errorf("expected true for close <= 2500 with 2490.0")
 	}
 
 	evalGE, _ := parseWatchCondition("high >= 2600")
 	bars[0].High = 2650.0
-	trigGE, _, _ := evalGE.Evaluate(bars)
+	trigGE, _, _ := evalBars(evalGE, bars)
 	if !trigGE {
 		t.Errorf("expected true for high >= 2600 with 2650.0")
 	}
 
 	evalEQ, _ := parseWatchCondition("open == 2480")
 	bars[0].Open = 2480.0
-	trigEQ, _, _ := evalEQ.Evaluate(bars)
+	trigEQ, _, _ := evalBars(evalEQ, bars)
 	if !trigEQ {
 		t.Errorf("expected true for open == 2480")
 	}
 
 	evalVol, _ := parseWatchCondition("volume > 1000")
 	bars[0].Volume = 5000.0
-	trigVol, _, _ := evalVol.Evaluate(bars)
+	trigVol, _, _ := evalBars(evalVol, bars)
 	if !trigVol {
 		t.Errorf("expected true for volume > 1000")
 	}
 
 	// Empty bars evaluation
-	trigEmpty, _, _ := evalLE.Evaluate(nil)
+	trigEmpty, _, _ := evalBars(evalLE, nil)
 	if trigEmpty {
 		t.Errorf("expected false on empty bars")
 	}
@@ -72,4 +72,11 @@ func TestParseWatchCondition(t *testing.T) {
 	if _, err := parseWatchCondition("price > not_a_number"); err == nil {
 		t.Errorf("expected error for non-number target")
 	}
+}
+
+// evalBars adapts the old (triggered, value, message) assertions to the
+// sample-based evaluator.
+func evalBars(e *conditionEvaluator, bars []dukascopy.Bar) (bool, float64, string) {
+	result := e.Evaluate(samplesFromBars(bars))
+	return result.triggered, result.value, result.message
 }

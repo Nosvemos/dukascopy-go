@@ -197,6 +197,7 @@ func TestLoadBidAskBarsTickCountReusesFallbackTicks(t *testing.T) {
 		From:        time.Date(2024, 1, 2, 0, 0, 0, 0, time.UTC),
 		To:          time.Date(2024, 1, 2, 0, 2, 0, 0, time.UTC),
 	}
+	treatSideErrorsAsNoData(t)
 	instrument, bidBars, askBars, fallbackTicks, usedFallback, err := loadBidAskBarsWithTicks(context.Background(), client, request)
 	if err != nil {
 		t.Fatalf("loadBidAskBarsWithTicks: %v", err)

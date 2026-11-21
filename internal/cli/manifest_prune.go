@@ -1,12 +1,14 @@
 package cli
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/Nosvemos/dukascopy-go/internal/checkpoint"
 )
@@ -21,6 +23,7 @@ func runManifestPrune(args []string, stdout io.Writer) error {
 
 	manifestPath := fs.String("manifest", "", "checkpoint manifest path")
 	outputPath := fs.String("output", "", "output CSV path used to derive <output>.manifest.json")
+	dryRun := fs.Bool("dry-run", false, "print the files that would be removed without deleting anything")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -31,7 +34,7 @@ func runManifestPrune(args []string, stdout io.Writer) error {
 	}
 
 	var printer *operationPrinter
-	if isInteractiveTerminal(stdout) {
+	if isInteractiveTerminal(stdout) && !*dryRun {
 		printer = newOperationPrinter(stdout)
 		printer.SetCommand("manifest prune", path)
 		printer.SetStatus("loading manifest")
@@ -52,7 +55,36 @@ func runManifestPrune(args []string, stdout io.Writer) error {
 		printer.SetPhase("scan parts and temp files")
 	}
 
+	if err := validatePrunePartsDir(manifest); err != nil {
+		if printer != nil {
+			printer.SetStatus("failed")
+		}
+		return err
+	}
+
 	removed := 0
+	now := pruneNow()
+	// remove deletes one file, or only reports it in --dry-run mode. Temp files
+	// modified recently may belong to a download running in another process and
+	// are left alone.
+	remove := func(filePath string, info os.FileInfo) error {
+		if isRecentTempFile(filepath.Base(filePath), info, now) {
+			return nil
+		}
+		if *dryRun {
+			fmt.Fprintf(stdout, "would remove %s\n", filePath)
+			removed++
+			return nil
+		}
+		if err := os.Remove(filePath); err != nil && !os.IsNotExist(err) {
+			if printer != nil {
+				printer.SetStatus("failed")
+			}
+			return err
+		}
+		removed++
+		return nil
+	}
 
 	partFiles := make(map[string]struct{}, len(manifest.Parts))
 	for _, part := range manifest.Parts {
@@ -74,13 +106,16 @@ func runManifestPrune(args []string, stdout io.Writer) error {
 				continue
 			}
 
-			if err := os.Remove(filepath.Join(manifest.PartsDir, name)); err != nil && !os.IsNotExist(err) {
-				if printer != nil {
-					printer.SetStatus("failed")
+			info, infoErr := entry.Info()
+			if infoErr != nil {
+				if os.IsNotExist(infoErr) {
+					continue
 				}
+				return infoErr
+			}
+			if err := remove(filepath.Join(manifest.PartsDir, name), info); err != nil {
 				return err
 			}
-			removed++
 		}
 	} else if !os.IsNotExist(err) {
 		return err
@@ -119,13 +154,16 @@ func runManifestPrune(args []string, stdout io.Writer) error {
 			}
 			name := entry.Name()
 			if shouldPruneTopLevelFile(name, manifestBase, outputBase) {
-				if err := os.Remove(filepath.Join(item.dir, name)); err != nil && !os.IsNotExist(err) {
-					if printer != nil {
-						printer.SetStatus("failed")
+				info, infoErr := entry.Info()
+				if infoErr != nil {
+					if os.IsNotExist(infoErr) {
+						continue
 					}
+					return infoErr
+				}
+				if err := remove(filepath.Join(item.dir, name), info); err != nil {
 					return err
 				}
-				removed++
 			}
 		}
 	}
@@ -136,8 +174,43 @@ func runManifestPrune(args []string, stdout io.Writer) error {
 		printer = nil
 	}
 
+	if *dryRun {
+		fmt.Fprintf(stdout, "%sprune%s dry run: %d obsolete file(s) would be removed\n", colorize(colorGreen), colorize(colorReset), removed)
+		return nil
+	}
 	fmt.Fprintf(stdout, "%sprune%s removed %d obsolete file(s)\n", colorize(colorGreen), colorize(colorReset), removed)
 	return nil
+}
+
+// pruneTempMinAge is how old a ".tmp-" file must be before prune deletes it;
+// younger temp files may belong to a download running in another process.
+const pruneTempMinAge = 10 * time.Minute
+
+var pruneNow = time.Now
+
+func isRecentTempFile(name string, info os.FileInfo, now time.Time) bool {
+	if !strings.Contains(name, ".tmp-") || info == nil {
+		return false
+	}
+	return now.Sub(info.ModTime()) < pruneTempMinAge
+}
+
+// validatePrunePartsDir refuses to prune a directory that is not clearly the
+// manifest's dedicated parts directory, since every unlisted .csv/.parquet in
+// it gets deleted.
+func validatePrunePartsDir(manifest checkpoint.Manifest) error {
+	partsDir := strings.TrimSpace(manifest.PartsDir)
+	if partsDir == "" {
+		return errors.New("refusing to prune: manifest has no parts_dir")
+	}
+	cleaned := filepath.Clean(partsDir)
+	if strings.TrimSpace(manifest.OutputPath) != "" && cleaned == filepath.Clean(checkpoint.DefaultPartsDir(manifest.OutputPath)) {
+		return nil
+	}
+	if strings.HasSuffix(strings.ToLower(filepath.Base(cleaned)), ".parts") {
+		return nil
+	}
+	return fmt.Errorf("refusing to prune %q: it is not the dedicated parts directory (expected %q or a directory name ending in .parts)", partsDir, checkpoint.DefaultPartsDir(manifest.OutputPath))
 }
 
 func shouldPrunePartFile(name string) bool {

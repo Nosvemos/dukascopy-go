@@ -6,14 +6,20 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
 const CurrentManifestVersion = 1
 
+// manifestFileMode is the permission applied to saved manifests. os.CreateTemp
+// creates files with 0o600, so Save widens it explicitly before the rename.
+const manifestFileMode os.FileMode = 0o644
+
 type tempWriteFile interface {
 	io.Writer
 	io.Closer
+	Sync() error
 	Name() string
 }
 
@@ -21,8 +27,7 @@ var (
 	mkdirAllFn      = os.MkdirAll
 	marshalIndentFn = json.MarshalIndent
 	createTempFn    = func(dir string, pattern string) (tempWriteFile, error) { return os.CreateTemp(dir, pattern) }
-	statFn          = os.Stat
-	removeFn        = os.Remove
+	chmodFn         = os.Chmod
 	renameFn        = os.Rename
 )
 
@@ -103,9 +108,59 @@ func Load(path string) (Manifest, error) {
 	if manifest.Version != CurrentManifestVersion {
 		return Manifest{}, fmt.Errorf("unsupported checkpoint manifest version %d", manifest.Version)
 	}
+	for _, part := range manifest.Parts {
+		// Parts without a file name are tolerated here (they are rejected by
+		// PartPath when a caller actually needs the file); anything else must
+		// be a plain file name inside the parts directory.
+		if part.File == "" {
+			continue
+		}
+		if err := validatePartFileName(part.File); err != nil {
+			return Manifest{}, fmt.Errorf("checkpoint manifest part %q: %w", part.ID, err)
+		}
+	}
 	return manifest, nil
 }
 
+// PartPath returns the on-disk path of a manifest part. It refuses file names
+// that are absolute, contain path separators or otherwise do not resolve to a
+// direct child of the manifest's parts directory, so a crafted manifest cannot
+// make callers read or write outside that directory.
+func PartPath(manifest *Manifest, part ManifestPart) (string, error) {
+	if manifest == nil {
+		return "", fmt.Errorf("checkpoint manifest is nil")
+	}
+	if err := validatePartFileName(part.File); err != nil {
+		return "", fmt.Errorf("checkpoint manifest part %q: %w", part.ID, err)
+	}
+	partsDir := filepath.Clean(manifest.PartsDir)
+	partPath := filepath.Join(partsDir, part.File)
+	if filepath.Dir(partPath) != partsDir {
+		return "", fmt.Errorf("checkpoint manifest part %q: file %q is outside the parts directory %q", part.ID, part.File, manifest.PartsDir)
+	}
+	return partPath, nil
+}
+
+func validatePartFileName(name string) error {
+	switch {
+	case name == "":
+		return fmt.Errorf("part file name is empty")
+	case name == "." || name == "..":
+		return fmt.Errorf("invalid part file name %q", name)
+	case filepath.IsAbs(name) || filepath.VolumeName(name) != "":
+		return fmt.Errorf("part file name %q must not be absolute", name)
+	case strings.ContainsAny(name, `/\`) || filepath.Base(name) != name:
+		return fmt.Errorf("part file name %q must not contain path separators", name)
+	case strings.ContainsRune(name, 0):
+		return fmt.Errorf("part file name %q contains a NUL byte", name)
+	}
+	return nil
+}
+
+// Save writes the manifest atomically: the data is written to a temp file in
+// the same directory, flushed to stable storage, and renamed over the target.
+// The previous manifest is never removed first, so a crash at any point leaves
+// either the old or the new manifest in place.
 func Save(path string, manifest Manifest) error {
 	if err := mkdirAllFn(filepath.Dir(path), 0o755); err != nil {
 		return err
@@ -124,23 +179,33 @@ func Save(path string, manifest Manifest) error {
 		return err
 	}
 	tempPath := tempFile.Name()
-	defer os.Remove(tempPath)
+	renamed := false
+	defer func() {
+		if !renamed {
+			_ = os.Remove(tempPath)
+		}
+	}()
 
 	if _, err := tempFile.Write(data); err != nil {
+		tempFile.Close()
+		return err
+	}
+	if err := tempFile.Sync(); err != nil {
 		tempFile.Close()
 		return err
 	}
 	if err := tempFile.Close(); err != nil {
 		return err
 	}
-
-	if _, err := statFn(path); err == nil {
-		if err := removeFn(path); err != nil {
-			return err
-		}
+	if err := chmodFn(tempPath, manifestFileMode); err != nil {
+		return err
 	}
 
-	return renameFn(tempPath, path)
+	if err := renameFn(tempPath, path); err != nil {
+		return err
+	}
+	renamed = true
+	return nil
 }
 
 func ValidateCompatibility(existing Manifest, expected Manifest) error {

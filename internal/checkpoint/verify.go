@@ -1,8 +1,10 @@
 package checkpoint
 
 import (
+	"errors"
 	"fmt"
-	"path/filepath"
+	"io/fs"
+	"os"
 
 	"github.com/Nosvemos/dukascopy-go/pkg/csvout"
 )
@@ -40,7 +42,17 @@ func VerifyManifest(manifestPath string) (VerificationReport, error) {
 	}
 
 	for _, part := range manifest.Parts {
-		partPath := filepath.Join(manifest.PartsDir, part.File)
+		partPath, pathErr := PartPath(&manifest, part)
+		if pathErr != nil {
+			report.Parts = append(report.Parts, FileVerification{
+				Label:   part.ID,
+				Path:    part.File,
+				Valid:   false,
+				Problem: pathErr.Error(),
+			})
+			report.Valid = false
+			continue
+		}
 		result := verifyPart(part, partPath)
 		report.Parts = append(report.Parts, result)
 		if !result.Valid {
@@ -68,7 +80,7 @@ func verifyPart(part ManifestPart, path string) FileVerification {
 
 	audit, err := csvout.AuditCSV(path)
 	if err != nil {
-		result.Exists = false
+		result.Exists = fileExists(path, err)
 		result.Valid = false
 		result.Problem = err.Error()
 		return result
@@ -111,7 +123,7 @@ func verifyOutput(output ManifestOutput, path string) FileVerification {
 
 	audit, err := csvout.AuditCSV(path)
 	if err != nil {
-		result.Exists = false
+		result.Exists = fileExists(path, err)
 		result.Valid = false
 		result.Problem = err.Error()
 		return result
@@ -138,4 +150,17 @@ func verifyOutput(output ManifestOutput, path string) FileVerification {
 
 	result.Valid = true
 	return result
+}
+
+// fileExists reports whether a file that failed to audit is actually present.
+// Only a "does not exist" failure marks it missing; a parse or permission error
+// on a file that is there keeps Exists=true so callers can tell the cases apart.
+func fileExists(path string, auditErr error) bool {
+	if errors.Is(auditErr, fs.ErrNotExist) {
+		return false
+	}
+	if _, statErr := os.Stat(path); errors.Is(statErr, fs.ErrNotExist) {
+		return false
+	}
+	return true
 }

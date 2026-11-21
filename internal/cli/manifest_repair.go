@@ -5,7 +5,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -85,7 +84,13 @@ func runManifestRepair(args []string, stdout io.Writer) error {
 				return fmt.Errorf("manifest part %s was not found", partResult.Label)
 			}
 
-			partPath := filepath.Join(manifest.PartsDir, partMeta.File)
+			partPath, err := checkpoint.PartPath(&manifest, *partMeta)
+			if err != nil {
+				if printer != nil {
+					printer.SetStatus("failed")
+				}
+				return err
+			}
 			if err := csvout.ExtractCSVRange(manifest.OutputPath, partPath, partMeta.Start, partMeta.End); err != nil {
 				if printer != nil {
 					printer.SetStatus("failed")

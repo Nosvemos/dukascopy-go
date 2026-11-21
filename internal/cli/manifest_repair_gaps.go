@@ -2,11 +2,9 @@ package cli
 
 import (
 	"context"
-	"encoding/csv"
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"sort"
 	"time"
 
@@ -64,6 +62,9 @@ func redownloadManifestGaps(manifestPath string, manifest *checkpoint.Manifest, 
 
 	for _, index := range partIndexes {
 		part := manifest.Parts[index]
+		if _, err := checkpoint.PartPath(manifest, part); err != nil {
+			return 0, err
+		}
 		fmt.Fprintf(stdout, "%srepair%s re-download gap part %s\n", colorize(colorYellow), colorize(colorReset), part.ID)
 		result := runPartitionJob(
 			context.Background(),
@@ -109,13 +110,19 @@ func detectManifestGapPartIndexes(manifest checkpoint.Manifest, expectedInterval
 	previousPartIndex := -1
 
 	for index, part := range manifest.Parts {
-		partPath := filepath.Join(manifest.PartsDir, part.File)
+		partPath, err := checkpoint.PartPath(&manifest, part)
+		if err != nil {
+			return nil, err
+		}
 		file, err := os.Open(partPath)
 		if err != nil {
 			return nil, err
 		}
 
-		reader := csv.NewReader(file)
+		// Parts written by older versions may use the user's delimiter and
+		// timestamp format; detect the delimiter and parse flexibly.
+		reader := newDetectedCSVReader(file)
+		reader.FieldsPerRecord = -1
 		header, err := reader.Read()
 		if err != nil {
 			file.Close()
@@ -141,7 +148,7 @@ func detectManifestGapPartIndexes(manifest checkpoint.Manifest, expectedInterval
 				return nil, fmt.Errorf("partition file %s contains a malformed row", partPath)
 			}
 
-			timestamp, err := time.Parse(time.RFC3339Nano, record[timestampIndex])
+			timestamp, err := parseLoadTimestamp(record[timestampIndex])
 			if err != nil {
 				file.Close()
 				return nil, fmt.Errorf("parse partition timestamp %q: %w", record[timestampIndex], err)
@@ -151,10 +158,16 @@ func detectManifestGapPartIndexes(manifest checkpoint.Manifest, expectedInterval
 			if !previousTimestamp.IsZero() {
 				delta := timestamp.Sub(previousTimestamp)
 				if delta > expectedInterval && !csvout.IsExpectedGapForProfile(previousTimestamp, timestamp, expectedInterval, manifest.Symbol, csvout.MarketProfileAuto) {
-					if previousPartIndex >= 0 {
-						indexes[previousPartIndex] = struct{}{}
+					// Mark every partition the gap spans, including empty
+					// partitions in between: those are the ones actually
+					// missing data.
+					start := previousPartIndex
+					if start < 0 {
+						start = index
 					}
-					indexes[index] = struct{}{}
+					for gapIndex := start; gapIndex <= index; gapIndex++ {
+						indexes[gapIndex] = struct{}{}
+					}
 				}
 			}
 
@@ -200,7 +213,11 @@ func manifestDownloadParameters(manifest checkpoint.Manifest) (dukascopy.Downloa
 func rebuildManifestFinalOutput(manifestPath string, manifest *checkpoint.Manifest) error {
 	partPaths := make([]string, 0, len(manifest.Parts))
 	for _, part := range manifest.Parts {
-		partPaths = append(partPaths, filepath.Join(manifest.PartsDir, part.File))
+		partPath, err := checkpoint.PartPath(manifest, part)
+		if err != nil {
+			return err
+		}
+		partPaths = append(partPaths, partPath)
 	}
 
 	from, to, err := manifestRange(*manifest)

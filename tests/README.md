@@ -38,4 +38,4 @@ go test ./... -coverprofile=coverage.out
 go tool cover -html=coverage.out
 ```
 
-Target: **≥ 95% statement coverage** across all packages.
+Target: **≥ 90% statement coverage** per package (the same figure as the root README badge). Not every package meets it yet (`pkg/csvout` and `internal/cli` are below; see the coverage table in the root README).

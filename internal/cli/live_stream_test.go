@@ -71,7 +71,7 @@ func TestWSHub_BroadcastSlowClientDropped(t *testing.T) {
 	hub := newWSHub()
 
 	// unbuffered channel — will always drop
-	ch := make(chan []byte, 0)
+	ch := make(chan []byte)
 	hub.register(ch)
 
 	// Should not block even with a slow (unbuffered) client
@@ -166,7 +166,7 @@ func TestWsWriteTextFrame_Medium(t *testing.T) {
 
 func TestWsHandler_NotWebSocket(t *testing.T) {
 	hub := newWSHub()
-	ts := httptest.NewServer(wsHandler(hub))
+	ts := httptest.NewServer(wsHandler(hub, wsOptions{}))
 	defer ts.Close()
 
 	resp, err := http.Get(ts.URL)
@@ -181,12 +181,13 @@ func TestWsHandler_NotWebSocket(t *testing.T) {
 
 func TestWsHandler_MissingKey(t *testing.T) {
 	hub := newWSHub()
-	ts := httptest.NewServer(wsHandler(hub))
+	ts := httptest.NewServer(wsHandler(hub, wsOptions{}))
 	defer ts.Close()
 
 	req, _ := http.NewRequest(http.MethodGet, ts.URL, nil)
 	req.Header.Set("Upgrade", "websocket")
 	req.Header.Set("Connection", "upgrade")
+	req.Header.Set("Sec-WebSocket-Version", "13")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
@@ -335,6 +336,22 @@ func TestRunLiveStream_WithMockAPI(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 
+	// The stream runs until interrupted; stop it through the sleep hook so
+	// the goroutine does not outlive the test (it would race with later tests
+	// that replace liveStreamSleep/liveStreamNow).
+	stop := make(chan struct{})
+	previousSleep := liveStreamSleep
+	liveStreamSleep = func(sleepCtx context.Context, wait time.Duration) error {
+		select {
+		case <-stop:
+			return context.Canceled
+		case <-sleepCtx.Done():
+			return sleepCtx.Err()
+		case <-time.After(wait):
+			return nil
+		}
+	}
+
 	// Run in goroutine with context cancellation simulation
 	done := make(chan error, 1)
 	go func() {
@@ -348,15 +365,27 @@ func TestRunLiveStream_WithMockAPI(t *testing.T) {
 	}()
 
 	// Wait for context or stream to finish
+	var err error
+	finished := false
 	select {
-	case err := <-done:
-		if err != nil && !strings.Contains(err.Error(), "context") &&
-			!strings.Contains(err.Error(), "no instruments found") &&
-			!strings.Contains(err.Error(), "decode") {
-			t.Errorf("unexpected error: %v", err)
-		}
+	case err = <-done:
+		finished = true
 	case <-ctx.Done():
 		// Timeout expected — stream keeps running until Ctrl+C
+	}
+	close(stop)
+	if !finished {
+		select {
+		case err = <-done:
+		case <-time.After(10 * time.Second):
+			t.Fatal("live stream did not stop")
+		}
+	}
+	liveStreamSleep = previousSleep
+	if err != nil && !strings.Contains(err.Error(), "context") &&
+		!strings.Contains(err.Error(), "no instruments found") &&
+		!strings.Contains(err.Error(), "decode") {
+		t.Errorf("unexpected error: %v", err)
 	}
 }
 
@@ -394,7 +423,7 @@ func TestWSHealthEndpoint(t *testing.T) {
 
 func TestWSHandlerDisconnectCleansUp(t *testing.T) {
 	hub := newWSHub()
-	server := httptest.NewServer(wsHandler(hub))
+	server := httptest.NewServer(wsHandler(hub, wsOptions{}))
 	defer server.Close()
 
 	// Dial connection using raw TCP to simulate WebSocket handshake
@@ -408,6 +437,7 @@ func TestWSHandlerDisconnectCleansUp(t *testing.T) {
 		"Host: localhost\r\n" +
 		"Upgrade: websocket\r\n" +
 		"Connection: Upgrade\r\n" +
+		"Sec-WebSocket-Version: 13\r\n" +
 		"Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n"
 
 	if _, err := conn.Write([]byte(req)); err != nil {

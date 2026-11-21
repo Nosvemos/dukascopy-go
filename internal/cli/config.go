@@ -138,6 +138,20 @@ func flagWasSet(fs *flag.FlagSet, name string) bool {
 	return set
 }
 
+// columnProfileFlags are the flags that choose the output column profile.
+var columnProfileFlags = []string{"simple", "full", "fused", "custom-columns", "preset"}
+
+// columnProfileSetOnCommandLine reports whether any column-profile flag was
+// given explicitly.
+func columnProfileSetOnCommandLine(fs *flag.FlagSet) bool {
+	for _, name := range columnProfileFlags {
+		if flagWasSet(fs, name) {
+			return true
+		}
+	}
+	return false
+}
+
 func applyInstrumentConfigDefaults(fs *flag.FlagSet, limit *int, baseURL *string) {
 	if activeConfig == nil {
 		return
@@ -183,14 +197,25 @@ func applyDownloadConfigDefaults(
 	if !flagWasSet(fs, "side") && strings.TrimSpace(config.Side) != "" {
 		*side = strings.TrimSpace(config.Side)
 	}
-	if !flagWasSet(fs, "simple") && config.Simple != nil {
-		*simpleOutput = *config.Simple
-	}
-	if !flagWasSet(fs, "full") && config.Full != nil {
-		*fullOutput = *config.Full
-	}
-	if !flagWasSet(fs, "custom-columns") && strings.TrimSpace(config.CustomColumns) != "" {
-		*customColumns = strings.TrimSpace(config.CustomColumns)
+	// The column profile (simple / full / fused / custom_columns, and --preset,
+	// which implies simple) is one setting. Precedence, highest first:
+	//   1. any of --simple, --full, --fused, --custom-columns or --preset on
+	//      the command line: every profile key of the config file is ignored;
+	//   2. otherwise the config file's simple / full / custom_columns keys;
+	//   3. otherwise the built-in default (simple bar columns, full tick
+	//      columns).
+	// Every other download setting is resolved per key: command-line flag,
+	// then config file, then built-in default.
+	if !columnProfileSetOnCommandLine(fs) {
+		if config.Simple != nil {
+			*simpleOutput = *config.Simple
+		}
+		if config.Full != nil {
+			*fullOutput = *config.Full
+		}
+		if strings.TrimSpace(config.CustomColumns) != "" {
+			*customColumns = strings.TrimSpace(config.CustomColumns)
+		}
 	}
 	if !flagWasSet(fs, "live") && config.Live != nil {
 		*live = *config.Live

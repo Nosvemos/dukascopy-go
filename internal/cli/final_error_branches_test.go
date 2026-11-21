@@ -27,7 +27,11 @@ func TestManifestFailureAndPruneBranches(t *testing.T) {
 	}
 
 	outputPath := filepath.Join(outputDir, "dataset.csv")
-	partPath := filepath.Join(dir, "part.csv")
+	partsDir := checkpoint.DefaultPartsDir(outputPath)
+	if err := os.MkdirAll(partsDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll returned error: %v", err)
+	}
+	partPath := filepath.Join(partsDir, "part.csv")
 	if err := os.WriteFile(outputPath, []byte("timestamp,mid_close\n2024-01-01T00:00:00Z,1.1\n"), 0o644); err != nil {
 		t.Fatalf("WriteFile returned error: %v", err)
 	}
@@ -43,7 +47,7 @@ func TestManifestFailureAndPruneBranches(t *testing.T) {
 	manifest := checkpoint.Manifest{
 		Version:    checkpoint.CurrentManifestVersion,
 		OutputPath: outputPath,
-		PartsDir:   dir,
+		PartsDir:   partsDir,
 		Symbol:     "xauusd",
 		Timeframe:  "m1",
 		Side:       "BID",
@@ -84,6 +88,11 @@ func TestManifestFailureAndPruneBranches(t *testing.T) {
 	for _, path := range []string{manifestTemp, outputTemp, outputResume} {
 		if err := os.WriteFile(path, []byte("tmp"), 0o644); err != nil {
 			t.Fatalf("WriteFile returned error: %v", err)
+		}
+		// prune skips temp files younger than pruneTempMinAge.
+		aged := time.Now().Add(-time.Hour)
+		if err := os.Chtimes(path, aged, aged); err != nil {
+			t.Fatalf("Chtimes returned error: %v", err)
 		}
 	}
 

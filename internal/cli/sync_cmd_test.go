@@ -90,7 +90,7 @@ func TestSyncWithParquetError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error because syncing parquet is not supported")
 	}
-	if !strings.Contains(err.Error(), "syncing parquet files is not supported") {
+	if !strings.Contains(err.Error(), "sync supports CSV files only") {
 		t.Errorf("unexpected error: %v", err)
 	}
 }
