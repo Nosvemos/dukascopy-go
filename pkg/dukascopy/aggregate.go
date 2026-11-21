@@ -6,6 +6,11 @@ import (
 	"time"
 )
 
+// AggregateTicksToBars builds time bars of the given granularity from the
+// ticks inside [from, to), using side ("bid"/"ask", any casing) prices.
+// Bars are labeled with their UTC bucket start. When from or to falls inside
+// a bucket, that bucket is kept and holds only the in-range ticks, so the
+// first bar's Time may be earlier than from.
 func AggregateTicksToBars(ticks []Tick, granularity Granularity, side PriceSide, from time.Time, to time.Time) ([]Bar, error) {
 	normalizedSide, err := normalizeSide(side)
 	if err != nil {
@@ -25,6 +30,9 @@ func AggregateTicksToBars(ticks []Tick, granularity Granularity, side PriceSide,
 	keys := make([]time.Time, 0)
 
 	for _, tick := range ticks {
+		if tick.Time.Before(from) || !tick.Time.Before(to) {
+			continue
+		}
 		bucketTime, _ := bucketStart(tick.Time.UTC(), granularity)
 		state, exists := buckets[bucketTime]
 		if !exists {
@@ -61,12 +69,11 @@ func AggregateTicksToBars(ticks []Tick, granularity Granularity, side PriceSide,
 		return keys[i].Before(keys[j])
 	})
 
+	// Every bucket holds at least one input inside [from, to), so it overlaps
+	// the range and is kept even when its start precedes from.
 	bars := make([]Bar, 0, len(keys))
 	for _, key := range keys {
-		bar := buckets[key].bar
-		if !bar.Time.Before(from) && bar.Time.Before(to) {
-			bars = append(bars, bar)
-		}
+		bars = append(bars, buckets[key].bar)
 	}
 
 	return bars, nil
@@ -91,6 +98,10 @@ func CountTicksByInterval(ticks []Tick, granularity Granularity) (map[time.Time]
 	return counts, nil
 }
 
+// AggregateBars combines finer bars (inside [from, to)) into bars of the
+// given granularity. For m1, h1 and d1 it only filters. As with
+// AggregateTicksToBars, a bucket partly inside the range is kept, labeled
+// with its bucket start, and holds only the in-range source bars.
 func AggregateBars(sourceBars []Bar, granularity Granularity, from time.Time, to time.Time) ([]Bar, error) {
 	normalized := normalizeGranularity(granularity)
 	if normalized == GranularityM1 || normalized == GranularityH1 || normalized == GranularityD1 {
@@ -109,6 +120,9 @@ func AggregateBars(sourceBars []Bar, granularity Granularity, from time.Time, to
 	keys := make([]time.Time, 0)
 
 	for _, source := range sourceBars {
+		if source.Time.Before(from) || !source.Time.Before(to) {
+			continue
+		}
 		bucketTime, _ := bucketStart(source.Time.UTC(), granularity)
 		state, exists := buckets[bucketTime]
 		if !exists {
@@ -148,10 +162,7 @@ func AggregateBars(sourceBars []Bar, granularity Granularity, from time.Time, to
 
 	bars := make([]Bar, 0, len(keys))
 	for _, key := range keys {
-		bar := buckets[key].bar
-		if !bar.Time.Before(from) && bar.Time.Before(to) {
-			bars = append(bars, bar)
-		}
+		bars = append(bars, buckets[key].bar)
 	}
 
 	return bars, nil

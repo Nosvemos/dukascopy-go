@@ -69,6 +69,7 @@ func CleanTickOutliers(ticks []Tick, window int, threshold float64) []Tick {
 
 	cleaned := make([]Tick, 0, n)
 	halfWin := window / 2
+	scratch := newMedianScratch(2*halfWin + 1)
 
 	for i := 0; i < n; i++ {
 		start := i - halfWin
@@ -80,14 +81,12 @@ func CleanTickOutliers(ticks []Tick, window int, threshold float64) []Tick {
 			end = n
 		}
 
-		slice := ticks[start:end]
-		prices := make([]float64, len(slice))
-		for k, t := range slice {
-			prices[k] = (t.Bid + t.Ask) / 2.0
+		prices := scratch.values[:0]
+		for _, t := range ticks[start:end] {
+			prices = append(prices, (t.Bid+t.Ask)/2.0)
 		}
 
-		med := median(prices)
-		mad := medianAbsoluteDeviation(prices, med)
+		med, mad := scratch.medianAndMAD(prices)
 
 		currentMid := (ticks[i].Bid + ticks[i].Ask) / 2.0
 		diff := math.Abs(currentMid - med)
@@ -118,6 +117,7 @@ func CleanBarOutliers(bars []Bar, window int, threshold float64) []Bar {
 
 	cleaned := make([]Bar, 0, n)
 	halfWin := window / 2
+	scratch := newMedianScratch(2*halfWin + 1)
 
 	for i := 0; i < n; i++ {
 		start := i - halfWin
@@ -129,14 +129,12 @@ func CleanBarOutliers(bars []Bar, window int, threshold float64) []Bar {
 			end = n
 		}
 
-		slice := bars[start:end]
-		closes := make([]float64, len(slice))
-		for k, b := range slice {
-			closes[k] = b.Close
+		closes := scratch.values[:0]
+		for _, b := range bars[start:end] {
+			closes = append(closes, b.Close)
 		}
 
-		med := median(closes)
-		mad := medianAbsoluteDeviation(closes, med)
+		med, mad := scratch.medianAndMAD(closes)
 
 		b := bars[i]
 		cutoff := threshold * mad
@@ -164,28 +162,44 @@ func CleanBarOutliers(bars []Bar, window int, threshold float64) []Bar {
 	return cleaned
 }
 
-func median(values []float64) float64 {
-	if len(values) == 0 {
-		return 0
-	}
-	sorted := make([]float64, len(values))
-	copy(sorted, values)
-	sort.Float64s(sorted)
+// medianScratch holds reusable buffers for rolling median/MAD computation so
+// the outlier cleaners do not allocate per element.
+type medianScratch struct {
+	values []float64
+	sorted []float64
+}
 
+func newMedianScratch(size int) *medianScratch {
+	return &medianScratch{
+		values: make([]float64, 0, size),
+		sorted: make([]float64, 0, size),
+	}
+}
+
+// medianAndMAD returns median(values) and
+// medianAbsoluteDeviation(values, median(values)), computing exactly the same
+// float64 results without allocating. values is not modified.
+func (s *medianScratch) medianAndMAD(values []float64) (float64, float64) {
+	if len(values) == 0 {
+		return 0, 0
+	}
+	s.sorted = append(s.sorted[:0], values...)
+	sort.Float64s(s.sorted)
+	med := sortedMedian(s.sorted)
+
+	// The absolute deviations form the same multiset whether computed from
+	// values or from its sorted copy, so their median is identical.
+	for i, v := range s.sorted {
+		s.sorted[i] = math.Abs(v - med)
+	}
+	sort.Float64s(s.sorted)
+	return med, sortedMedian(s.sorted)
+}
+
+func sortedMedian(sorted []float64) float64 {
 	mid := len(sorted) / 2
 	if len(sorted)%2 == 0 {
 		return (sorted[mid-1] + sorted[mid]) / 2.0
 	}
 	return sorted[mid]
-}
-
-func medianAbsoluteDeviation(values []float64, med float64) float64 {
-	if len(values) == 0 {
-		return 0
-	}
-	diffs := make([]float64, len(values))
-	for i, v := range values {
-		diffs[i] = math.Abs(v - med)
-	}
-	return median(diffs)
 }

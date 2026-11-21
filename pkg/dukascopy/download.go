@@ -4,22 +4,6 @@ import (
 	"context"
 )
 
-func countTotalBars(chunks [][]Bar) int {
-	total := 0
-	for _, chunk := range chunks {
-		total += len(chunk)
-	}
-	return total
-}
-
-func countTotalTicks(chunks [][]Tick) int {
-	total := 0
-	for _, chunk := range chunks {
-		total += len(chunk)
-	}
-	return total
-}
-
 func (c *Client) resolveInstrumentForSymbol(ctx context.Context, symbol string) (Instrument, error) {
 	c.cacheMu.RLock()
 	if inst, ok := c.resolvedSymbols[symbol]; ok {
@@ -48,6 +32,9 @@ func (c *Client) resolveInstrumentForSymbol(ctx context.Context, symbol string) 
 	return instrument, nil
 }
 
+// Download resolves request.Symbol and downloads ticks or bars over
+// [request.From, request.To). Chunks for which Dukascopy has no data (HTTP
+// 404) are skipped; any other failure fails the whole download.
 func (c *Client) Download(ctx context.Context, request DownloadRequest) (DownloadResult, error) {
 	instrument, err := c.resolveInstrumentForSymbol(ctx, request.Symbol)
 	if err != nil {
@@ -75,6 +62,8 @@ func (c *Client) Download(ctx context.Context, request DownloadRequest) (Downloa
 	}
 }
 
+// DownloadBarsForSide downloads bars for the given side, ignoring
+// request.Side. request.Granularity must be a bar timeframe.
 func (c *Client) DownloadBarsForSide(ctx context.Context, request DownloadRequest, side PriceSide) (Instrument, []Bar, error) {
 	instrument, err := c.resolveInstrumentForSymbol(ctx, request.Symbol)
 	if err != nil {

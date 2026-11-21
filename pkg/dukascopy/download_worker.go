@@ -2,6 +2,7 @@ package dukascopy
 
 import (
 	"context"
+	"fmt"
 	"sync"
 )
 
@@ -16,6 +17,11 @@ type downloadTask[T any] struct {
 // downloadParallel is the generic worker pool engine for all download types (bars and ticks).
 // It fans out chunkCount tasks across up to 8 workers, collects results in index order,
 // cancels on first error, emits progress, and concatenates the final result.
+//
+// A chunk whose fetch reports ErrNoData (HTTP 404) is treated as empty. The
+// function never returns partial data with a nil error: it fails with the
+// first chunk error, with ctx.Err() when the parent context is done, or
+// when fewer chunks than expected completed.
 func downloadParallel[T any](
 	c *Client,
 	ctx context.Context,
@@ -29,6 +35,8 @@ func downloadParallel[T any](
 	}
 
 	tasks := make(chan int, chunkCount)
+	// Buffered to chunkCount so every worker can always deliver its result
+	// without blocking, even after cancellation.
 	results := make(chan downloadTask[T], chunkCount)
 
 	workersCount := 8
@@ -48,15 +56,15 @@ func downloadParallel[T any](
 		go func() {
 			defer wg.Done()
 			for idx := range tasks {
+				if err := childCtx.Err(); err != nil {
+					results <- downloadTask[T]{index: idx, err: err}
+					continue
+				}
 				data, n, err := fetch(childCtx, idx)
 				if err != nil && isNoDataError(err) {
-					err = nil
+					data, n, err = nil, 0, nil
 				}
-				select {
-				case <-childCtx.Done():
-					return
-				case results <- downloadTask[T]{index: idx, data: data, bytes: n, err: err}:
-				}
+				results <- downloadTask[T]{index: idx, data: data, bytes: n, err: err}
 			}
 		}()
 	}
@@ -72,6 +80,7 @@ func downloadParallel[T any](
 	}()
 
 	var totalBytes int64
+	var totalRows int
 	var completedCount int
 	var firstErr error
 
@@ -84,6 +93,7 @@ func downloadParallel[T any](
 		if firstErr == nil {
 			chunksData[res.index] = res.data
 			totalBytes += res.bytes
+			totalRows += len(res.data)
 		}
 		completedCount++
 
@@ -97,13 +107,19 @@ func downloadParallel[T any](
 			Current: completedCount,
 			Total:   chunkCount,
 			Detail:  detail,
-			Rows:    countTotal(chunksData),
+			Rows:    totalRows,
 			Bytes:   totalBytes,
 		})
 	}
 
 	if firstErr != nil {
 		return nil, firstErr
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if completedCount != chunkCount {
+		return nil, fmt.Errorf("dukascopy: %s download completed %d of %d chunks", scope, completedCount, chunkCount)
 	}
 
 	c.emitProgress(ProgressEvent{
@@ -112,12 +128,11 @@ func downloadParallel[T any](
 		Current: chunkCount,
 		Total:   chunkCount,
 		Detail:  "completed",
-		Rows:    countTotal(chunksData),
+		Rows:    totalRows,
 		Bytes:   totalBytes,
 	})
 
-	totalSize := countTotal(chunksData)
-	all := make([]T, 0, totalSize)
+	all := make([]T, 0, totalRows)
 	for _, chunk := range chunksData {
 		all = append(all, chunk...)
 	}

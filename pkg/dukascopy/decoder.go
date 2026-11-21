@@ -37,6 +37,10 @@ type tickPayload struct {
 	BidVolumes []float64 `json:"bidVolumes"`
 }
 
+// ResolveInstrument picks the instrument that best matches raw, comparing
+// it with codes, names and descriptions (case and separators such as "/",
+// "-", "." are ignored). It returns an error if raw is empty or nothing
+// matches.
 func ResolveInstrument(instruments []Instrument, raw string) (Instrument, error) {
 	needle := compactSymbol(raw)
 	if needle == "" {
@@ -70,6 +74,9 @@ func ResolveInstrument(instruments []Instrument, raw string) (Instrument, error)
 	return candidates[0].instrument, nil
 }
 
+// FilterInstruments returns the instruments matching raw, best match first
+// (ties by name). An empty raw returns all instruments sorted by name. A
+// limit <= 0, or larger than the number of matches, returns all matches.
 func FilterInstruments(instruments []Instrument, raw string, limit int) []Instrument {
 	if strings.TrimSpace(raw) == "" {
 		filtered := make([]Instrument, len(instruments))
@@ -108,7 +115,7 @@ func FilterInstruments(instruments []Instrument, raw string, limit int) []Instru
 		return candidates[i].score > candidates[j].score
 	})
 
-	if limit > len(candidates) {
+	if limit <= 0 || limit > len(candidates) {
 		limit = len(candidates)
 	}
 
@@ -148,6 +155,9 @@ func normalizeGranularity(value Granularity) Granularity {
 	}
 }
 
+// NormalizeGranularity maps aliases ("minute", "hr", "week", "monthly", ...)
+// and any casing to the canonical Granularity constants. Unknown values are
+// returned lower-cased.
 func NormalizeGranularity(value Granularity) Granularity {
 	return normalizeGranularity(value)
 }

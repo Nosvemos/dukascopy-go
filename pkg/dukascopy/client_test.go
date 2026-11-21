@@ -117,6 +117,15 @@ func TestIsCryptoSymbol(t *testing.T) {
 		{input: "GBP-USD", want: false},
 		{input: "XAUUSD", want: false},
 		{input: "", want: false},
+		{input: "USDTRY", want: false},
+		{input: "USD/TRY", want: false},
+		{input: "usdthb", want: false},
+		{input: "USDTWD", want: false},
+		{input: "USDTUSD", want: true},
+		{input: "USDT/EUR", want: true},
+		{input: "BTCUSD", want: true},
+		{input: "DOGE-USD", want: true},
+		{input: "USDJPY", want: false},
 	}
 	for _, tc := range testCases {
 		if got := IsCryptoSymbol(tc.input); got != tc.want {
@@ -137,7 +146,9 @@ func TestIsMarketClosed(t *testing.T) {
 		{time: time.Date(2026, 5, 22, 21, 59, 0, 0, time.UTC), want: false},
 		{time: time.Date(2026, 5, 22, 22, 0, 0, 0, time.UTC), want: true},
 		{time: time.Date(2026, 5, 23, 12, 0, 0, 0, time.UTC), want: true},
-		{time: time.Date(2026, 5, 24, 21, 59, 0, 0, time.UTC), want: true},
+		{time: time.Date(2026, 5, 24, 20, 59, 0, 0, time.UTC), want: true},
+		// Sunday 21:00 UTC is open during US daylight saving time.
+		{time: time.Date(2026, 5, 24, 21, 0, 0, 0, time.UTC), want: false},
 		{time: time.Date(2026, 5, 24, 22, 0, 0, 0, time.UTC), want: false},
 		{time: time.Date(2026, 5, 25, 10, 0, 0, 0, time.UTC), want: false},
 	}
@@ -148,24 +159,46 @@ func TestIsMarketClosed(t *testing.T) {
 		}
 	}
 
-	// Test Equity symbol market hours (AAPLUSUSD)
-	// Open hours on Monday: 09:30 - 16:00 EST.
-	// Since May 25, 2026 is a Monday:
-	// 09:30 EST on May 25, 2026 is 13:30 UTC.
-	// 16:00 EST on May 25, 2026 is 20:00 UTC.
-	equityTests := []struct {
+	// Stock and index CFDs are not pruned to exchange sessions: on weekdays
+	// every hour is fetched (hours without data come back as 404). Only the
+	// FX weekend applies.
+	for _, symbol := range []string{"AAPLUSUSD", "AAPL.US/USD", "DEUIDXEUR", "USA500.IDX/USD", "JPNIDXJPY"} {
+		weekdayHours := []time.Time{
+			time.Date(2026, 5, 25, 1, 0, 0, 0, time.UTC),  // Mon, Asia session
+			time.Date(2026, 5, 25, 7, 0, 0, 0, time.UTC),  // Mon, Europe open
+			time.Date(2026, 5, 25, 13, 0, 0, 0, time.UTC), // Mon 09:00 New York (hour holding the 09:30 open)
+			time.Date(2026, 5, 25, 20, 0, 0, 0, time.UTC), // Mon 16:00 New York
+		}
+		for _, hour := range weekdayHours {
+			if IsMarketClosed(symbol, hour) {
+				t.Errorf("IsMarketClosed(%s, %s) = true, want false", symbol, hour.Format(time.RFC3339))
+			}
+		}
+		if !IsMarketClosed(symbol, time.Date(2026, 5, 24, 15, 0, 0, 0, time.UTC)) {
+			t.Errorf("IsMarketClosed(%s, Sunday 15:00 UTC) = false, want true", symbol)
+		}
+	}
+}
+
+func TestIsMarketClosedFXWeekendBoundaries(t *testing.T) {
+	// Winter (no US DST): market opens Sunday 22:00 UTC. Summer: 21:00 UTC.
+	// Only hours closed in both regimes are pruned.
+	cases := []struct {
 		time time.Time
 		want bool
 	}{
-		{time: time.Date(2026, 5, 25, 13, 29, 0, 0, time.UTC), want: true},  // Mon 09:29 EST - closed
-		{time: time.Date(2026, 5, 25, 13, 31, 0, 0, time.UTC), want: false}, // Mon 09:31 EST - open
-		{time: time.Date(2026, 5, 25, 19, 59, 0, 0, time.UTC), want: false}, // Mon 15:59 EST - open
-		{time: time.Date(2026, 5, 25, 20, 01, 0, 0, time.UTC), want: true},  // Mon 16:01 EST - closed
-		{time: time.Date(2026, 5, 24, 15, 0, 0, 0, time.UTC), want: true},   // Sun 11:00 EST - closed
+		{time.Date(2026, 1, 9, 21, 0, 0, 0, time.UTC), false}, // Fri 21:00
+		{time.Date(2026, 1, 9, 22, 0, 0, 0, time.UTC), true},  // Fri 22:00
+		{time.Date(2026, 1, 10, 0, 0, 0, 0, time.UTC), true},  // Sat
+		{time.Date(2026, 1, 10, 23, 0, 0, 0, time.UTC), true}, // Sat
+		{time.Date(2026, 1, 11, 20, 0, 0, 0, time.UTC), true}, // Sun 20:00
+		{time.Date(2026, 1, 11, 21, 0, 0, 0, time.UTC), false},
+		{time.Date(2026, 7, 12, 21, 0, 0, 0, time.UTC), false}, // Sun 21:00 in DST: open
+		{time.Date(2026, 7, 12, 21, 30, 0, 0, time.FixedZone("x", 3600)), true},
 	}
-	for _, tc := range equityTests {
-		if got := IsMarketClosed("AAPLUSUSD", tc.time); got != tc.want {
-			t.Errorf("IsMarketClosed(AAPLUSUSD, %s) = %v, want %v", tc.time.Format(time.RFC3339), got, tc.want)
+	for _, tc := range cases {
+		if got := IsMarketClosed("EURUSD", tc.time); got != tc.want {
+			t.Errorf("IsMarketClosed(EURUSD, %s) = %v, want %v", tc.time.UTC().Format(time.RFC3339), got, tc.want)
 		}
 	}
 }

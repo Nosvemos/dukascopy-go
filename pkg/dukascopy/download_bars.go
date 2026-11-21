@@ -42,14 +42,10 @@ func (c *Client) downloadBars(ctx context.Context, instrument Instrument, side P
 func (c *Client) downloadMinuteBars(ctx context.Context, instrument Instrument, side PriceSide, from time.Time, to time.Time) ([]Bar, error) {
 	days := make([]time.Time, 0)
 	for current := midnightUTC(from); current.Before(to); current = current.AddDate(0, 0, 1) {
-		if !IsCryptoSymbol(instrument.Code) {
-			weekday := current.UTC().Weekday()
-			if weekday == time.Saturday {
-				continue
-			}
-			if weekday == time.Sunday && looksLikeEquitySymbol(instrument.Code) {
-				continue
-			}
+		// Saturday is closed for every non-crypto instrument (see
+		// IsMarketClosed); Sunday is kept because FX reopens on Sunday evening.
+		if !IsCryptoSymbol(instrument.Code) && current.UTC().Weekday() == time.Saturday {
+			continue
 		}
 		days = append(days, current)
 	}

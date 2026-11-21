@@ -2,6 +2,7 @@ package dukascopy
 
 import (
 	"fmt"
+	"math"
 	"strings"
 	"time"
 )
@@ -34,10 +35,15 @@ func ParseBarType(value string) (BarType, error) {
 
 // AggregateTicksToTickBars aggregates a stream of ticks into Tick Count bars.
 // A new bar is created every ticksPerBar ticks.
+//
+// side is normalized ("ask", " Ask " select ask prices); an unrecognized side
+// selects bid prices. It returns nil when ticks is empty or ticksPerBar < 1;
+// use SampleTicksToCustomBars to get an error for invalid sizes or sides.
 func AggregateTicksToTickBars(ticks []Tick, ticksPerBar int, side PriceSide) []Bar {
 	if len(ticks) == 0 || ticksPerBar <= 0 {
 		return nil
 	}
+	side = samplingSide(side)
 
 	capacity := len(ticks)/ticksPerBar + 1
 	bars := make([]Bar, 0, capacity)
@@ -91,10 +97,14 @@ func AggregateTicksToTickBars(ticks []Tick, ticksPerBar int, side PriceSide) []B
 
 // AggregateTicksToVolumeBars aggregates a stream of ticks into Volume bars.
 // A new bar is formed when cumulative volume reaches or exceeds volumePerBar.
+//
+// side is normalized as in AggregateTicksToTickBars. It returns nil when
+// ticks is empty or volumePerBar <= 0.
 func AggregateTicksToVolumeBars(ticks []Tick, volumePerBar float64, side PriceSide) []Bar {
 	if len(ticks) == 0 || volumePerBar <= 0 {
 		return nil
 	}
+	side = samplingSide(side)
 
 	bars := make([]Bar, 0, len(ticks)/100+1)
 	var currentBar *Bar
@@ -146,10 +156,14 @@ func AggregateTicksToVolumeBars(ticks []Tick, volumePerBar float64, side PriceSi
 
 // AggregateTicksToDollarBars aggregates a stream of ticks into Dollar/Notional value bars.
 // A new bar is formed when cumulative notional trade value (Price * Volume) reaches dollarPerBar.
+//
+// side is normalized as in AggregateTicksToTickBars. It returns nil when
+// ticks is empty or dollarPerBar <= 0.
 func AggregateTicksToDollarBars(ticks []Tick, dollarPerBar float64, side PriceSide) []Bar {
 	if len(ticks) == 0 || dollarPerBar <= 0 {
 		return nil
 	}
+	side = samplingSide(side)
 
 	bars := make([]Bar, 0, len(ticks)/100+1)
 	var currentBar *Bar
@@ -201,13 +215,25 @@ func AggregateTicksToDollarBars(ticks []Tick, dollarPerBar float64, side PriceSi
 }
 
 // SampleTicksToCustomBars samples ticks into the specified BarType (tick, volume, dollar).
+//
+// side is normalized (any casing, surrounding whitespace) and must be bid or
+// ask. barSize must be > 0; for BarTypeTick it is a tick count, must be at
+// least 1, and is truncated to an integer (2.7 means 2 ticks per bar).
 func SampleTicksToCustomBars(ticks []Tick, barType BarType, barSize float64, side PriceSide) ([]Bar, error) {
-	if barSize <= 0 {
+	if !(barSize > 0) {
 		return nil, fmt.Errorf("bar size must be greater than 0, got %f", barSize)
 	}
+	normalizedSide, err := normalizeSide(side)
+	if err != nil {
+		return nil, err
+	}
+	side = normalizedSide
 
 	switch barType {
 	case BarTypeTick:
+		if barSize < 1 || barSize > float64(math.MaxInt32) {
+			return nil, fmt.Errorf("tick bar size must be a tick count between 1 and %d, got %g", math.MaxInt32, barSize)
+		}
 		return AggregateTicksToTickBars(ticks, int(barSize), side), nil
 	case BarTypeVolume:
 		return AggregateTicksToVolumeBars(ticks, barSize, side), nil
@@ -216,6 +242,15 @@ func SampleTicksToCustomBars(ticks []Tick, barType BarType, barSize float64, sid
 	default:
 		return nil, fmt.Errorf("unsupported sampling bar type: %s", barType)
 	}
+}
+
+// samplingSide normalizes side for the non-error-returning aggregators,
+// falling back to bid (their historical behavior) for unknown values.
+func samplingSide(side PriceSide) PriceSide {
+	if normalized, err := normalizeSide(side); err == nil {
+		return normalized
+	}
+	return PriceSideBid
 }
 
 // EnsureBarOrder sorts and ensures strictly chronological order of sampled bars.

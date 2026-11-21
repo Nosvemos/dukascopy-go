@@ -3,12 +3,22 @@ package dukascopy
 import (
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"io"
 	"math"
 	"time"
 
 	"github.com/ulikunitz/xz/lzma"
 )
+
+// bi5ReadError wraps a read failure. A truncated LZMA stream or a trailing
+// partial record (io.ErrUnexpectedEOF) is an error, not end of data.
+func bi5ReadError(kind string, decoded int, err error) error {
+	if errors.Is(err, io.ErrUnexpectedEOF) {
+		return fmt.Errorf("dukascopy: truncated bi5 %s stream after %d records: %w", kind, decoded, err)
+	}
+	return fmt.Errorf("dukascopy: read bi5 %s stream after %d records: %w", kind, decoded, err)
+}
 
 // DecodeTicksBi5 decompresses an LZMA-compressed byte stream from Dukascopy
 // and parses standard 20-byte tick records:
@@ -29,11 +39,11 @@ func DecodeTicksBi5(r io.Reader, baseTime time.Time, priceScale int) ([]Tick, er
 
 	for {
 		_, err := io.ReadFull(lzmaReader, buf[:])
-		if err == io.EOF || errors.Is(err, io.ErrUnexpectedEOF) {
+		if err == io.EOF {
 			break
 		}
 		if err != nil {
-			return nil, err
+			return nil, bi5ReadError("tick", len(ticks), err)
 		}
 
 		msOffset := binary.BigEndian.Uint32(buf[0:4])
@@ -81,11 +91,11 @@ func DecodeBarsBi5(r io.Reader, baseTime time.Time, priceScale int) ([]Bar, erro
 
 	for {
 		_, err := io.ReadFull(lzmaReader, buf[:])
-		if err == io.EOF || errors.Is(err, io.ErrUnexpectedEOF) {
+		if err == io.EOF {
 			break
 		}
 		if err != nil {
-			return nil, err
+			return nil, bi5ReadError("candle", len(bars), err)
 		}
 
 		secOffset := binary.BigEndian.Uint32(buf[0:4])

@@ -111,11 +111,11 @@ func TestCoverageBoostSamplingAndOutliers(t *testing.T) {
 	}
 
 	// Count total functions
-	totalB := countTotalBars([][]Bar{{{Time: now}}, {{Time: now}}})
+	totalB := countTotal([][]Bar{{{Time: now}}, {{Time: now}}})
 	if totalB != 2 {
 		t.Errorf("expected total 2 bars, got %d", totalB)
 	}
-	totalT := countTotalTicks([][]Tick{{{Time: now}}, {{Time: now}}})
+	totalT := countTotal([][]Tick{{{Time: now}}, {{Time: now}}})
 	if totalT != 2 {
 		t.Errorf("expected total 2 ticks, got %d", totalT)
 	}
